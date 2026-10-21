@@ -1,0 +1,311 @@
+import { useCallback, type ReactNode } from 'react';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { useQueryClient, useIsFetching } from '@tanstack/react-query';
+import { useTabParam } from '../hooks/useTabParam.js';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import Alert from '@mui/material/Alert';
+import Skeleton from '@mui/material/Skeleton';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
+import TuneRounded from '@mui/icons-material/TuneRounded';
+import DoneAllRounded from '@mui/icons-material/DoneAllRounded';
+import SendRounded from '@mui/icons-material/SendRounded';
+import InboxOutlined from '@mui/icons-material/InboxOutlined';
+import { useSettings, isExternalChannelConnected } from '../hooks/useSettings.js';
+import { useNotifications, useNotificationFeed, useMarkAllRead } from '../hooks/useNotifications.js';
+import { useAgents } from '../hooks/useAgents.js';
+import { useToast } from '../hooks/useToast.js';
+import { useNow } from '../hooks/useNow.js';
+import { useIsMobile } from '../hooks/useIsMobile.js';
+import { ATLAS_PALETTE } from '../theme/tokens.js';
+import { NotificationLogTab } from './notifications/NotificationLogTab.js';
+import { InAppFeedTab } from './notifications/InAppFeedTab.js';
+import { relativeShort } from './notifications/timeFormat.js';
+import { useSetPageTitle } from '../components/shell/index.js';
+import { RefreshButton } from '../components/index.js';
+import { PageHeader } from '../components/PageHeader.js';
+
+const MONO = '"JetBrains Mono", monospace';
+
+/** Phone header action: icon only, named for screen readers (RefreshButton pattern). */
+function HeaderIconButton({
+    label,
+    icon,
+    onClick,
+    disabled = false,
+}: {
+    label: string;
+    icon: ReactNode;
+    onClick: () => void;
+    disabled?: boolean;
+}) {
+    return (
+        <Tooltip title={label}>
+            {/* The span lets the tooltip work while the button is disabled. */}
+            <span>
+                <IconButton
+                    aria-label={label}
+                    onClick={onClick}
+                    disabled={disabled}
+                    sx={{
+                        color: ATLAS_PALETTE.slate60,
+                        '&:hover': { color: ATLAS_PALETTE.slate, bgcolor: ATLAS_PALETTE.slate08 },
+                    }}
+                >
+                    {icon}
+                </IconButton>
+            </span>
+        </Tooltip>
+    );
+}
+const TAB_KEYS = ['external', 'in-app'] as const;
+type TabKey = (typeof TAB_KEYS)[number];
+
+export function Notifications() {
+    useSetPageTitle('Notifications');
+    const navigate = useNavigate();
+    const [tab, setTab] = useTabParam<TabKey>(TAB_KEYS, 'external');
+    const isMobile = useIsMobile();
+
+    const { data: settings } = useSettings();
+    const markAllRead = useMarkAllRead();
+    const toast = useToast();
+
+    // For the "last delivery" stamp at the top — peek at the most-recent sent row.
+    const { data: recentSent = [] } = useNotifications({ external_status: 'sent', limit: 1 });
+    // Lifted from per-tab containers — both tabs read the same rows, 200 per page.
+    const feed = useNotificationFeed(tab === 'external');
+    const allRows = feed.rows;
+    // InAppFeedTab needs the agent dictionary to resolve avatars; lift it too.
+    const { data: agents = [] } = useAgents();
+    const lastDeliveryAt = recentSent[0]?.created_at ?? null;
+
+    const queryClient = useQueryClient();
+    const notifFetching = useIsFetching({
+        predicate: (q) => {
+            const k = q.queryKey;
+            if (!Array.isArray(k)) return false;
+            return k[0] === 'notifications' || k[0] === 'agents' || k[0] === 'settings';
+        },
+    });
+    const handleRefresh = useCallback(() => {
+        void queryClient.invalidateQueries({ queryKey: ['notifications'] });
+        void queryClient.invalidateQueries({ queryKey: ['agents'] });
+        void queryClient.invalidateQueries({ queryKey: ['settings'] });
+    }, [queryClient]);
+    // useNow ticks every 60s so the relative label ages forward even when no new
+    // delivery arrives (otherwise "5h ago" would stay "5h ago" until the next send).
+    useNow();
+    const lastDeliveryLabel = lastDeliveryAt ? `${relativeShort(lastDeliveryAt)} ago` : 'never';
+
+    function handleMarkAllRead() {
+        markAllRead.mutate(undefined, {
+            onSuccess: (r) =>
+                toast.show({
+                    message: `Marked ${r.changed} notification${r.changed === 1 ? '' : 's'} read`,
+                }),
+            onError: (err) => toast.show({ message: 'Could not mark notifications read', detail: err.message }),
+        });
+    }
+
+    const openSettings = () => navigate('/settings?tab=notifications');
+    const externalConnected = isExternalChannelConnected(settings);
+    const endpointLabel = settings?.external_notification_endpoint_label ?? null;
+
+    return (
+        <Box sx={{ px: { xs: 3, md: 8 }, py: 4 }}>
+            {/* Header */}
+            <PageHeader
+                icon="notifications"
+                title="Notifications"
+                subtitle={
+                    <>
+                        External notifications are the outbound channel
+                        {externalConnected ? (
+                            <>
+                                {endpointLabel ? (
+                                    <>
+                                        {' · connected to '}
+                                        <Box
+                                            component="span"
+                                            sx={{ fontFamily: MONO, color: ATLAS_PALETTE.slate }}
+                                        >
+                                            {endpointLabel}
+                                        </Box>
+                                    </>
+                                ) : (
+                                    // Credentials saved but never tested: not "not connected".
+                                    ` · ${settings?.external_notification_provider === 'teams' ? 'Teams' : 'Telegram'} set up, not tested yet`
+                                )}
+                                {' · last delivery '}
+                                <Box
+                                    component="span"
+                                    sx={{ color: ATLAS_PALETTE.slate, fontWeight: 600 }}
+                                >
+                                    {lastDeliveryLabel}
+                                </Box>
+                            </>
+                        ) : (
+                            <>
+                                {' · '}
+                                <Box
+                                    component="span"
+                                    sx={{ color: ATLAS_PALETTE.error, fontWeight: 700 }}
+                                >
+                                    not connected
+                                </Box>
+                                {' — visit '}
+                                <Box
+                                    component={RouterLink}
+                                    to="/settings?tab=notifications"
+                                    sx={{
+                                        color: ATLAS_PALETTE.brandBlue,
+                                        cursor: 'pointer',
+                                        fontWeight: 600,
+                                        textDecoration: 'none',
+                                        '&:hover': { textDecoration: 'underline' },
+                                    }}
+                                >
+                                    Settings → Notifications
+                                </Box>
+                                {' to wire your channel.'}
+                            </>
+                        )}
+                    </>
+                }
+                actions={
+                    <Box
+                        sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            flexWrap: 'nowrap',
+                            gap: isMobile ? 1 : 2,
+                        }}
+                    >
+                        <RefreshButton
+                            onRefresh={handleRefresh}
+                            isFetching={notifFetching > 0}
+                            tooltipLabel="Refresh notifications"
+                            size={isMobile ? 'medium' : 'small'}
+                        />
+                        {isMobile ? (
+                            <>
+                                <HeaderIconButton
+                                    label="Notification settings"
+                                    icon={<TuneRounded sx={{ fontSize: 20 }} />}
+                                    onClick={openSettings}
+                                />
+                                <HeaderIconButton
+                                    label="Mark all read"
+                                    icon={<DoneAllRounded sx={{ fontSize: 20 }} />}
+                                    onClick={handleMarkAllRead}
+                                    disabled={markAllRead.isPending}
+                                />
+                            </>
+                        ) : (
+                            <>
+                                <Button
+                                    variant="outlined"
+                                    startIcon={<TuneRounded sx={{ fontSize: 16 }} />}
+                                    onClick={openSettings}
+                                    sx={{
+                                        textTransform: 'none',
+                                        fontWeight: 500,
+                                        whiteSpace: 'nowrap',
+                                    }}
+                                >
+                                    Notification Settings
+                                </Button>
+                                <Button
+                                    variant="outlined"
+                                    startIcon={<DoneAllRounded sx={{ fontSize: 16 }} />}
+                                    onClick={handleMarkAllRead}
+                                    disabled={markAllRead.isPending}
+                                    sx={{
+                                        textTransform: 'none',
+                                        fontWeight: 500,
+                                        whiteSpace: 'nowrap',
+                                    }}
+                                >
+                                    Mark All Read
+                                </Button>
+                            </>
+                        )}
+                    </Box>
+                }
+            />
+
+            {/* Tab bar */}
+            <Box sx={{ borderBottom: `1px solid ${ATLAS_PALETTE.slate10}`, mb: 4 }}>
+                <Tabs
+                    value={tab}
+                    onChange={(_, v: TabKey) => setTab(v)}
+                    variant="scrollable"
+                    scrollButtons={false}
+                    sx={{
+                        minHeight: 44,
+                        '& .MuiTabs-indicator': {
+                            backgroundColor: ATLAS_PALETTE.slate,
+                            height: 2,
+                        },
+                        '& .MuiTab-root': {
+                            minHeight: 44,
+                            fontSize: 13,
+                            textTransform: 'none',
+                            fontWeight: 500,
+                            color: ATLAS_PALETTE.slate60,
+                            gap: 1.5,
+                            '&.Mui-selected': { color: ATLAS_PALETTE.slate, fontWeight: 600 },
+                        },
+                        '& .MuiTab-iconWrapper': { mb: '0 !important', mr: 1 },
+                    }}
+                >
+                    <Tab
+                        value="external"
+                        iconPosition="start"
+                        icon={<SendRounded sx={{ fontSize: 16 }} />}
+                        label="Notification Log"
+                    />
+                    <Tab
+                        value="in-app"
+                        iconPosition="start"
+                        icon={<InboxOutlined sx={{ fontSize: 16 }} />}
+                        label="In-App Feed"
+                    />
+                </Tabs>
+            </Box>
+
+            {feed.error ? (
+                <Alert severity="error">
+                    Could not load notifications: {feed.error.message}
+                </Alert>
+            ) : feed.isLoading ? (
+                <Box aria-busy="true" aria-label="Loading notifications" sx={{ display: 'grid', gap: 2 }}>
+                    {[0, 1, 2].map((i) => (
+                        <Skeleton key={i} variant="rounded" height={72} />
+                    ))}
+                </Box>
+            ) : (
+                <>
+                    {tab === 'external' && <NotificationLogTab settings={settings} allRows={allRows} />}
+                    {tab === 'in-app' && <InAppFeedTab allRows={allRows} agents={agents} />}
+                </>
+            )}
+            {feed.hasNextPage && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+                    <Button
+                        variant="outlined"
+                        onClick={() => void feed.fetchNextPage()}
+                        disabled={feed.isFetchingNextPage}
+                        sx={{ textTransform: 'none', fontWeight: 500 }}
+                    >
+                        {feed.isFetchingNextPage ? 'Loading…' : 'Load more'}
+                    </Button>
+                </Box>
+            )}
+        </Box>
+    );
+}

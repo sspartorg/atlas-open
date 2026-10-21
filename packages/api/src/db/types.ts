@@ -1,0 +1,1112 @@
+import type { ColumnType, Generated } from 'kysely';
+import type {
+    AgentCli,
+    IExternalCiCheck,
+    IWorkflowGraph,
+    SchedulePreset,
+    WorkflowRunStatus,
+    WorkflowParkKind,
+} from '@atlas/shared';
+
+// Helper aliases
+type TS = ColumnType<string, string | undefined, string>;
+type TSn = ColumnType<string | null, string | null | undefined, string | null | undefined>;
+type Int = ColumnType<number, number | undefined, number>;
+type IntN = ColumnType<number | null, number | null | undefined, number | null | undefined>;
+type Str = ColumnType<string, string | undefined, string>;
+type StrN = ColumnType<string | null, string | null | undefined, string | null | undefined>;
+type Bool0or1 = ColumnType<number, number | undefined, number>;
+type CreatedAt = Generated<string>;
+type UpdatedAt = ColumnType<string, string | undefined, string | undefined>;
+
+export type ItemType = 'task' | 'sub_task';
+export type ItemRelation = 'relates_to' | 'depends_on' | 'tested_by';
+/** `run_gate_results.verdict`. `needs_review` is the visual gate's
+ *  "captured, but there is no baseline to diff against" answer. */
+export type GateVerdict = 'pass' | 'fail' | 'skipped' | 'unavailable' | 'needs_review';
+
+export interface SettingsTable {
+    id: number;
+    owner_name: Str;
+    workspace_path: Str;
+    constitution_md: Str;
+    external_notification_provider: ColumnType<
+        'telegram' | 'teams',
+        'telegram' | 'teams' | undefined,
+        'telegram' | 'teams'
+    >;
+    external_notification_token: StrN;
+    onboarding_complete: Int;
+    external_notification_chat_id: StrN;
+    external_notification_webhook_url: StrN;
+    accent_color: Str;
+    external_notification_event_toggles: Str;
+    quiet_hours_from: StrN;
+    quiet_hours_to: StrN;
+    quiet_hours_timezone: StrN;
+    quiet_hours_enabled: Int;
+    external_notification_last_test_ok: IntN;
+    external_notification_endpoint_label: StrN;
+    vapid_public_key: StrN;
+    vapid_private_key: StrN;
+    guardrails_published_at: TSn;
+    terminal_idle_notify_seconds: ColumnType<number, number | undefined, number>;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+export interface AgentsTable {
+    id: string;
+    // Migration 004 — row belongs to the team config repo.
+    team_managed: ColumnType<boolean, boolean | undefined, boolean>;
+    name: Str;
+    category: 'software-dev' | 'marketing' | 'content' | 'design';
+    cli: AgentCli;
+    model: Str;
+    // Task 6 — reasoning-effort knob forwarded to the CLI as `--effort`.
+    // ColumnType lets callers omit it on insert (DB default 'medium').
+    effort: ColumnType<
+        'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max',
+        'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined,
+        'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+    >;
+    framework: Str;
+    prompt_md: Str;
+    prompt_version: Int;
+    status: 'active' | 'inactive';
+    accent_color: Str;
+    sort_order: Int;
+    description: Str;
+    designation: Str;
+    // A08 — FK into the SDLC role catalog. Nullable: autonomous agents
+    // (kind_slug != 'custom') stay NULL.
+    role_id: StrN;
+    glyph: Str;
+    memory_cadence: Int;
+    // Theme 09 — autonomous-agent fleet. `kind_slug` is a soft tag
+    // (no CHECK constraint) so custom agents can carry their own.
+    kind_slug: Str;
+    // JSONB — `pg` auto-parses to JS values on select and accepts JS
+    // values on insert/update. Routes validate per-kind_slug via Zod
+    // at the boundary; the table type is unstructured.
+    settings_json: ColumnType<
+        Record<string, unknown>,
+        Record<string, unknown> | undefined,
+        Record<string, unknown>
+    >;
+    // Marketplace back-link. NULL on user-only agents and on agents that
+    // were detached. Editing the local agent never clears these; the user
+    // explicitly Detaches to opt out of upgrade-available indicators.
+    marketplace_source_id: StrN;
+    marketplace_pulled_version: IntN;
+    marketplace_upgradable_hash: StrN;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+// Marketplace catalog tables. Seed reads the on-disk catalog
+// (packages/api/src/marketplace/catalog/) and upserts these idempotently.
+// content_hash is sha256 of the canonical JSON of the catalog entry so
+// the seed can bump `version` only when content actually changes.
+export interface MarketplaceAgentsTable {
+    id: string;
+    name: Str;
+    category: 'software-dev' | 'marketing' | 'content' | 'design';
+    cli: AgentCli;
+    model: Str;
+    effort: ColumnType<
+        'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max',
+        'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined,
+        'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+    >;
+    framework: Str;
+    prompt_md: Str;
+    description: Str;
+    designation: Str;
+    accent_color: Str;
+    sort_order: Int;
+    glyph: Str;
+    role_id: StrN;
+    status: 'active' | 'inactive';
+    kind_slug: Str;
+    settings_json: ColumnType<
+        Record<string, unknown>,
+        Record<string, unknown> | undefined,
+        Record<string, unknown>
+    >;
+    memory_cadence: Int;
+    memory_template_md: Str;
+    summary: Str;
+    version: Int;
+    content_hash: Str;
+    published_at: TS;
+    updated_at: UpdatedAt;
+}
+
+export interface MarketplaceAgentChecklistsTable {
+    id: Generated<number>;
+    marketplace_agent_id: string;
+    label: string;
+    sort_order: Int;
+    required: ColumnType<boolean, boolean | undefined, boolean>;
+}
+
+// A08 — Canonical SDLC role catalog. One row per `SdlcRole`. Seeded in
+// migration 025; editable at runtime via `PATCH /api/roles/:id` (Owner
+// can re-curate default prompts without affecting existing agents).
+// T1 — bundled reviewer column dropped; reviewer agents are standalone.
+export interface RolesTable {
+    id: string;
+    label: Str;
+    description: Str;
+    default_prompt_md: Str;
+    default_status: 'active' | 'inactive';
+    sort_order: Int;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+export interface AgentChecklistsTable {
+    id: Generated<number>;
+    agent_id: string;
+    label: string;
+    sort_order: Int;
+    required: ColumnType<boolean, boolean | undefined, boolean>;
+}
+
+export interface AgentMemoryTable {
+    agent_id: string;
+    body_md: Str;
+    version: Int;
+    source: 'ai-generated' | 'manual-edit';
+    last_run_id: StrN;
+    runs_since_regen: Int;
+    updated_at: UpdatedAt;
+}
+
+export type MemoryRegenerationTrigger = 'manual' | 'cadence' | 'high_signal' | 'mcp_update';
+
+export interface MemoryRegenerationsTable {
+    id: Generated<number>;
+    agent_id: string;
+    run_id: StrN;
+    trigger: MemoryRegenerationTrigger;
+    prev_version: Int;
+    new_version: Int;
+    prev_body_hash: string;
+    new_body_hash: string;
+    chars_added: Int;
+    chars_removed: Int;
+    // A06 — soft boundary-rule filter. Detected violations are persisted
+    // as a list of slugs (`item_id`, `agent_id`, `project_id`, `run_id`).
+    // Empty array on clean writes; the Memory tab badges non-empty rows.
+    boundary_flags: ColumnType<string[], string[] | undefined, string[]>;
+    created_at: CreatedAt;
+}
+
+export interface AgentPromptVersionsTable {
+    id: Generated<number>;
+    agent_id: string;
+    version: number;
+    body_md: string;
+    edited_by: Str;
+    reverted_from: IntN;
+    created_at: CreatedAt;
+}
+
+export interface CredentialsTable {
+    id: string;
+    label: string;
+    host: 'github';
+    kind: ColumnType<'pat' | 'github_app', 'pat' | 'github_app' | undefined, 'pat' | 'github_app'>;
+    username: Str;
+    // Nullable since migration 023: `github_app` rows start without a minted
+    // installation token; the credentials service fills them lazily.
+    token_encrypted: StrN;
+    token_fingerprint: StrN;
+    scope: Str;
+    last_used_at: TSn;
+    expires_at: TSn;
+    // github_app-only fields (migration 023). Nullable for PAT rows.
+    app_id: IntN;
+    app_private_key_encrypted: StrN;
+    app_installation_owner: StrN;
+    app_installation_id: IntN;
+    // Migration 024 — App slug used to compose the bot's git identity
+    // (`<slug>[bot]` name + `<id>+<slug>[bot]@users.noreply.github.com`
+    // email). Populated from `app-config.json` on create, and best-effort
+    // backfilled from `GET /app` on next refresh.
+    app_slug: StrN;
+    // Migration 025 — human-attribution fields. Used only for github_app
+    // credentials to (a) append `Co-Authored-By: <human_name> <human_email>`
+    // to every commit via a `prepare-commit-msg` hook and (b) assign the
+    // human as the PR assignee via `gh pr create --assignee <login>`.
+    // All three are nullable — leaving them blank gives bot-only
+    // attribution (behaviour before migration 025).
+    human_name: StrN;
+    human_email: StrN;
+    human_gh_login: StrN;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+// Migration 043 (ADR 0017) — a project's repos beyond its primary one.
+export interface ProjectReposTable {
+    id: string;
+    project_id: string;
+    name: string;
+    git_url: string;
+    git_path: string;
+    credential_id: StrN;
+    default_branch: Str;
+    clone_status: ColumnType<
+        'pending' | 'cloning' | 'ready' | 'error',
+        'pending' | 'cloning' | 'ready' | 'error' | undefined,
+        'pending' | 'cloning' | 'ready' | 'error'
+    >;
+    setup_sh_body: Str;
+    setup_ps1_body: Str;
+    position: Int;
+    created_at: CreatedAt;
+}
+
+export interface ProjectsTable {
+    id: string;
+    // Migration 004 — row belongs to the team config repo.
+    team_managed: ColumnType<boolean, boolean | undefined, boolean>;
+    name: string;
+    issue_key_prefix: string;
+    description: Str;
+    status: Str;
+    guardrails_md: Str;
+    // Migration 022 — preselected by /tasks/new only (never applied server-side).
+    default_workflow_id: StrN;
+    // Migration 002 — the one project agent tests default to (`test-project.ts`).
+    is_test_sandbox: ColumnType<boolean, boolean | undefined, boolean | undefined>;
+    // Migration 009 — Jira status names per Atlas status; null = unmapped.
+    jira_status_map: ColumnType<Record<string, string[]> | null, string | null | undefined, string | null>;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+export interface ProjectIssueCountersTable {
+    project_id: string;
+    last_seq: Int;
+}
+
+export interface ProjectSchedulesTable {
+    // Migration 045 — the key: auto-fetch is per repo, not per project.
+    repo_id: string;
+    project_id: string;
+    enabled: Bool0or1;
+    preset: Str;
+    cron_expression: string;
+    time_of_day: Str;
+    weekday: IntN;
+    skip_if_dirty: Bool0or1;
+    pause_while_agents_active: Bool0or1;
+    conflict_policy: 'skip' | 'stash' | 'abort';
+    last_run_at: TSn;
+    last_run_status: 'success' | 'skipped' | 'failure' | 'conflict' | null;
+    last_run_detail: StrN;
+    next_run_at: TSn;
+    auth_failure_count: Int;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+export interface ProjectGuardrailsTable {
+    id: string;
+    project_id: string;
+    title: string;
+    body_md: string;
+    icon: Str;
+    enabled: Bool0or1;
+    sort_order: Int;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+export interface ProjectEnvVarsTable {
+    id: string;
+    project_id: string;
+    key: string;
+    value_encrypted: string;
+    updated_at: UpdatedAt;
+}
+
+// 2026-06-10 — Global tier of the two-scope secrets model. One row per
+// org-wide key. Project-scoped overrides live in `project_env_vars`;
+// the setup runner merges both maps with project winning on collision.
+export interface EnvironmentSecretsTable {
+    id: string;
+    key: string;
+    value_encrypted: string;
+    updated_at: UpdatedAt;
+}
+
+export interface CliModelsTable {
+    id: string;
+    cli: AgentCli;
+    model_name: string;
+    note: StrN;
+    sort_order: Int;
+    created_at: CreatedAt;
+}
+
+export interface ToolCatalogTable {
+    tool_name: string;
+    group_name: string;
+    description: string;
+    sort_order: Int;
+}
+
+export interface GuardrailRulesTable {
+    id: string;
+    category:
+        | 'file_system'
+        | 'secrets_credentials'
+        | 'git_branches'
+        | 'side_effects_network'
+        | 'escalation_scope';
+    rule_text: string;
+    detail: StrN;
+    severity: 'block' | 'ask_owner' | 'warn';
+    sort_order: Int;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+// Phase 1.5b — Scripts are first-class entities, not properties of a
+// rule. Two tables, same shape: guardrail_scripts (org-wide) and
+// project_guardrail_scripts (per-project).
+export interface GuardrailScriptsTable {
+    id: string;
+    name: string;
+    description: string;
+    body_sh: string;
+    body_ps1: string;
+    sort_order: Int;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+export interface ProjectGuardrailScriptsTable {
+    id: string;
+    project_id: string;
+    name: string;
+    description: string;
+    body_sh: string;
+    body_ps1: string;
+    sort_order: Int;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+// Phase 2 — `/commands` framework. Five artifact templates
+// (`spec`, `plan`, `tasks`, `sub-task`, `qa-plan`) that the templates-
+// assembler writes to `<worktree>/.atlas/templates/<filename>` per
+// run. Same id-primary-key shape as `guardrail_scripts`. Owner-editable
+// via direct DB writes for now; a Settings tab follows.
+export interface AgentTemplatesTable {
+    id: string;
+    filename: string;
+    body_md: string;
+    description: string;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+export interface ItemsTable {
+    id: string;
+    project_id: string;
+    type: ItemType;
+    parent_id: StrN;
+    parent_type: ColumnType<ItemType | null, ItemType | null | undefined, ItemType | null | undefined>;
+
+    title: string;
+    description: StrN;
+    status: Str;
+    assignee_agent_id: StrN;
+    reporter_agent_id: StrN;
+
+    priority: ColumnType<'low' | 'normal' | 'high' | 'urgent' | null, 'low' | 'normal' | 'high' | 'urgent' | null | undefined, 'low' | 'normal' | 'high' | 'urgent' | null | undefined>;
+
+    spec_md: StrN;
+    pr_url: StrN;
+    points: IntN;
+
+    acceptance_criteria: StrN;
+
+    started_at: TSn;
+
+    // Per-item git worktree fields; both null until something provisions
+    // a checkout for the item.
+    worktree_branch: StrN;
+    worktree_path: StrN;
+
+    // Task 1 — labels JSONB. Select returns string[]; insert/update
+    // accept string[] | undefined (DB defaults to []).
+    labels: ColumnType<string[], string[] | undefined, string[] | undefined>;
+    // Migration 043 (ADR 0017) — the project repos a Task works on; [] = primary.
+    repo_ids: ColumnType<string[], string | undefined, string | undefined>;
+
+    // ADR 0014 — the workflow this item is queued for.
+    workflow_id: StrN;
+    // Migration 040 — a sub-task's hand-set run order within its Task.
+    sort_order: IntN;
+
+    // Migration 015.— the item an agent test run acts on. Visible everywhere
+    // since migration 002 (the web tags it "Test"); still scopes the cleanup
+    // when its test is deleted and keeps test PRs out of fleet delivery stats.
+    is_test: ColumnType<boolean, boolean | undefined, boolean | undefined>;
+
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+    search_tsv: ColumnType<string, never, never>;
+}
+
+export interface ItemLinksTable {
+    id: Generated<number>;
+    from_id: string;
+    to_id: string;
+    relation_type: ItemRelation;
+    created_at: CreatedAt;
+}
+
+// Migration 042 — Jira bridge. node-postgres returns timestamptz as Date and
+// bigint as string; the service normalizes both.
+type TSD = ColumnType<Date | null, string | null | undefined, string | null | undefined>;
+
+// Migration 010 — the bridge's query+workflow+repos combos, one row per
+// combo, ordered globally by `id` (the lowest wins an ambiguous issue).
+export interface JiraSourcesTable {
+    id: Generated<number>;
+    project_id: string;
+    jql: string;
+    workflow_id: StrN;
+    // Migration 020 — the agent imported Tasks are assigned to.
+    agent_id: StrN;
+    repo_ids: ColumnType<string[], string | undefined, string>;
+    created_at: Generated<string>;
+}
+
+export interface JiraConfigTable {
+    id: Generated<number>;
+    enabled: ColumnType<boolean, boolean | undefined, boolean>;
+    site_url: StrN;
+    email: StrN;
+    api_token_encrypted: StrN;
+    poll_interval_minutes: Int;
+    extra_fields: ColumnType<string[], string | undefined, string>;
+    last_sync_at: TSD;
+    last_sync_ok: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
+    last_sync_message: StrN;
+    updated_at: UpdatedAt;
+}
+
+export interface TeamConfigTable {
+    id: Generated<number>;
+    role: ColumnType<'off' | 'publisher' | 'subscriber', 'off' | 'publisher' | 'subscriber' | undefined, 'off' | 'publisher' | 'subscriber'>;
+    repo_url: StrN;
+    credential_id: StrN;
+    branch: Str;
+    interval_minutes: Int;
+    last_sync_at: TSD;
+    last_sync_ok: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
+    last_sync_message: StrN;
+    last_commit: StrN;
+    updated_at: UpdatedAt;
+}
+
+export interface JiraIssuesTable {
+    jira_key: string;
+    item_id: StrN;
+    jira_id: string;
+    url: string;
+    raw: ColumnType<unknown, string, string>;
+    jira_updated_at: TSD;
+    seen_comment_ids: ColumnType<string[], string | undefined, string>;
+    posted_comment_ids: ColumnType<string[], string | undefined, string>;
+    imported_comment_ids: ColumnType<number[], string | undefined, string>;
+    pushed_comment_id: ColumnType<string, number | undefined, number>;
+    pushed_status: StrN;
+    done_synced_at: TSD;
+    // Migration 008 — what the bridge last wrote into the Task.
+    synced_title: StrN;
+    synced_description: StrN;
+    created_at: CreatedAt;
+}
+
+// Migration 009 — a file downloaded from a linked Jira issue.
+export interface JiraAttachmentsTable {
+    id: string;
+    jira_key: string;
+    item_id: StrN;
+    filename: string;
+    mime_type: ColumnType<string, string | undefined, string>;
+    size: ColumnType<string, number | undefined, number>;
+    path: StrN;
+    skipped_reason: StrN;
+    created_at: CreatedAt;
+}
+
+export interface ItemExternalLinksTable {
+    id: Generated<number>;
+    item_id: string;
+    link_kind: 'pull_request' | 'jira_issue';
+    url: string;
+    title: StrN;
+    external_ref: StrN;
+    created_at: CreatedAt;
+    created_by_run_id: StrN;
+    // Migration 033 — last observed GitHub PR state (pull_request links only).
+    pr_state: ColumnType<
+        'open' | 'merged' | 'closed' | null,
+        'open' | 'merged' | 'closed' | null | undefined,
+        'open' | 'merged' | 'closed' | null | undefined
+    >;
+    pr_state_checked_at: TSn;
+    // Migration 023 — CI on the PR's head commit, and the auto-fix bookkeeping.
+    ci_state: ColumnType<
+        'pending' | 'success' | 'failure' | null,
+        'pending' | 'success' | 'failure' | null | undefined,
+        'pending' | 'success' | 'failure' | null | undefined
+    >;
+    ci_head_sha: StrN;
+    ci_summary: ColumnType<IExternalCiCheck[] | null, string | null | undefined, string | null | undefined>;
+    ci_checked_at: TSn;
+    ci_handled_sha: StrN;
+    ci_fix_attempts: ColumnType<number, number | undefined, number>;
+}
+
+/** Shape written by `services/run-trace-parser.ts`. Declared here so the column is typed, not `unknown`. */
+export interface RunTraceSummaryJson {
+    source: 'claude' | 'copilot' | 'unknown';
+    turns: number;
+    tool_calls: number;
+    tools: Record<string, number>;
+    tool_sequence: string[];
+    thinking_blocks: number | null;
+    subagent_turns: number | null;
+    files_touched: string[] | null;
+    errors: number | null;
+    ttft_ms: number | null;
+    truncated: boolean;
+}
+
+export interface AgentRunsTable {
+    id: string;
+    agent_id: string;
+    item_id: StrN;
+    // Theme 09b — third run lifecycle: project-scope. item_id and
+    // project_id are mutually exclusive in practice but the column
+    // is independent so future kinds can mix if needed.
+    project_id: StrN;
+    status: 'queued' | 'in_progress' | 'completed' | 'error' | 'cancelled' | 'setup_failed';
+    prompt_snapshot: StrN;
+    output_text: StrN;
+    // Captured stdout+stderr from the per-project setup script when it
+    // fails (non-zero exit, timeout, unknown ${variable.X}). NULL on
+    // runs that never invoked the setup step or where it succeeded.
+    setup_output_text: StrN;
+    started_at: TSn;
+    completed_at: TSn;
+    // Self-referential FK (parent_run_id → agent_runs.id ON DELETE CASCADE)
+    // lives in migration 016. Links retries to their triggering run.
+    parent_run_id: StrN;
+    // Task 12 — unified outcome columns. Every agent (regardless of
+    // performer/reviewer role) emits a fenced `atlas-outcome` block at
+    // the end of its CLI output; `completeRun()` parses it via
+    // `parseRunOutcome()` and writes these four fields. NULL on all four
+    // means the agent produced unparseable output — runner treats that
+    // as `'asked_question'` and parks the item with the Owner.
+    outcome_kind: ColumnType<
+        'done' | 'rejected' | 'asked_question' | null,
+        'done' | 'rejected' | 'asked_question' | null | undefined,
+        'done' | 'rejected' | 'asked_question' | null | undefined
+    >;
+    outcome_summary: StrN;
+    outcome_reason: StrN;
+    outcome_checklist: ColumnType<
+        Array<{ id: number; passed: boolean; evidence?: string }> | null,
+        string | null | undefined,
+        string | null | undefined
+    >;
+    input_tokens: ColumnType<number | null, number | null | undefined, number | null | undefined>;
+    output_tokens: ColumnType<number | null, number | null | undefined, number | null | undefined>;
+    cache_creation_tokens: ColumnType<number | null, number | null | undefined, number | null | undefined>;
+    cache_read_tokens: ColumnType<number | null, number | null | undefined, number | null | undefined>;
+    total_cost_usd: ColumnType<number | null, number | null | undefined, number | null | undefined>;
+    // Plan B (Owner request 2026-06-01) — Copilot CLI native unit. The
+    // value here is `usage.premiumRequests` from Copilot's `result`
+    // event (count of model API calls). USD is converted at parse time
+    // into `total_cost_usd`; this column preserves the raw count so the
+    // UI can render it as a subscript under the dollar amount. Null on
+    // Claude runs.
+    credits: ColumnType<number | null, number | null | undefined, number | null | undefined>;
+    // ADR 0014 — workflow step linkage, plus the agent config the step ran
+    // with. Snapshotted at spawn so later agent edits don't rewrite history
+    // that model comparison reads.
+    workflow_run_id: StrN;
+    node_id: StrN;
+    cli: ColumnType<AgentCli | null, AgentCli | null | undefined, AgentCli | null | undefined>;
+    model: StrN;
+    effort: StrN;
+    prompt_version: IntN;
+    created_at: CreatedAt;
+    // Migration 017 — what the run actually did, parsed once from
+    // `output_text` at completion (`run-trace-parser.ts`). Null on every run
+    // that finished before this shipped, and on one whose transcript was
+    // unreadable; consumers must render that as "—", never as zero.
+    trace_summary: ColumnType<RunTraceSummaryJson | null, string | null | undefined, string | null | undefined>;
+}
+
+export interface CommentsTable {
+    id: Generated<number>;
+    author: 'owner' | 'agent';
+    agent_id: StrN;
+    item_id: string;
+    body: string;
+    edited_at: TSn;
+    // P11 — soft-delete tombstone. NULL = visible; non-null = hidden from
+    // listComments / activity feed / reply-context but kept on disk for
+    // audit.
+    deleted_at: TSn;
+    created_at: CreatedAt;
+}
+
+export interface NotificationsTable {
+    id: Generated<number>;
+    event_type: string;
+    message: string;
+    item_id: StrN;
+    sent_external: Bool0or1;
+    kind: 'needs_you' | 'update' | 'system';
+    agent_id: StrN;
+    external_status: 'none' | 'pending' | 'sent' | 'failed';
+    failure_reason: StrN;
+    read_at: TSn;
+    project_id: StrN;
+    push_status: ColumnType<
+        'none' | 'pending' | 'sent' | 'failed',
+        'none' | 'pending' | 'sent' | 'failed' | undefined,
+        'none' | 'pending' | 'sent' | 'failed'
+    >;
+    push_failure_reason: StrN;
+    link_url: StrN;
+    external_deferred_at: TSn;
+    reminder_id: ColumnType<number | null, number | null | undefined, number | null>;
+    // Migration 013.
+    external_event_key: StrN;
+    external_claimed_at: TSn;
+    external_reclaimed: ColumnType<boolean, boolean | undefined, boolean>;
+    in_app: ColumnType<boolean, boolean | undefined, boolean>;
+    // Migration 015.
+    push_deferred_at: TSn;
+    created_at: CreatedAt;
+}
+
+export interface PushSubscriptionsTable {
+    endpoint: string;
+    p256dh: string;
+    auth: string;
+    user_agent: StrN;
+    created_at: CreatedAt;
+    last_seen_at: ColumnType<string, string | undefined, string | undefined>;
+}
+
+export interface IssueEventsTable {
+    id: Generated<number>;
+    item_id: string;
+    event_type:
+        | 'created'
+        | 'status_changed'
+        | 'assigned'
+        | 'field_updated'
+        | 'unblocked'
+        | 'comment_added'
+        | 'link_created'
+        | 'link_deleted'
+        | 'rounds_reset'
+        | 'deleted'
+        | 'dispatch_blocked'
+        | 'history_pruned';
+    actor_agent_id: StrN;
+    field: StrN;
+    from_value: StrN;
+    to_value: StrN;
+    detail: StrN;
+    created_at: CreatedAt;
+}
+
+export interface RemindersTable {
+    id: Generated<number>;
+    label: Str;
+    body: Str;
+    schedule_kind: ColumnType<
+        'once' | 'daily' | 'weekly' | 'cron',
+        'once' | 'daily' | 'weekly' | 'cron',
+        'once' | 'daily' | 'weekly' | 'cron'
+    >;
+    schedule_value: Str;
+    channel: ColumnType<
+        'external' | 'notification' | 'both',
+        'external' | 'notification' | 'both' | undefined,
+        'external' | 'notification' | 'both'
+    >;
+    next_fire_at: TS;
+    last_fired_at: TSn;
+    created_by_agent_id: StrN;
+    status: ColumnType<
+        'active' | 'paused' | 'cancelled' | 'completed',
+        'active' | 'paused' | 'cancelled' | 'completed' | undefined,
+        'active' | 'paused' | 'cancelled' | 'completed'
+    >;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+// P12 — Scratch Pad. Free-form markdown tiles for the Owner; no FK back to
+// items / projects. id is TEXT (client-minted ULID) so optimistic creates
+// don't collide on reload.
+export interface ScratchPadTable {
+    id: string;
+    title: Str;
+    body_md: Str;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+// ADR 0014 — see migration 035_workflows.ts. JSONB columns select as parsed
+// objects; inserts / updates pass JSON.stringify'd strings (same convention
+// as agent_runs.outcome_checklist).
+export interface WorkflowsTable {
+    id: string;
+    // Migration 004 — row belongs to the team config repo.
+    team_managed: ColumnType<boolean, boolean | undefined, boolean>;
+    project_id: StrN;
+    name: string;
+    description: StrN;
+    status: ColumnType<'active' | 'inactive', 'active' | 'inactive' | undefined, 'active' | 'inactive'>;
+    graph: ColumnType<IWorkflowGraph, string | undefined, string>;
+    input_kind: ColumnType<string, string | undefined, string>;
+    trigger: ColumnType<string, string | undefined, string>;
+    use_worktree: ColumnType<boolean, boolean | undefined, boolean>;
+    push_code: ColumnType<boolean, boolean | undefined, boolean>;
+    raises_pr: ColumnType<boolean, boolean | undefined, boolean>;
+    // ADR 0015 — migration 038_workflow_subtasks.ts.
+    push_to_default: ColumnType<boolean, boolean | undefined, boolean>;
+    max_loops: Int;
+    max_parallel_runs: Int;
+    schedule_preset: ColumnType<SchedulePreset | null, SchedulePreset | null | undefined, SchedulePreset | null | undefined>;
+    schedule_time_of_day: StrN;
+    schedule_weekday: IntN;
+    cron_expr: StrN;
+    next_run_at: TSn;
+    last_run_at: TSn;
+    marketplace_source_id: StrN;
+    marketplace_pulled_version: IntN;
+    marketplace_pulled_at: TSn;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+export interface WorkflowRunsTable {
+    id: string;
+    workflow_id: string;
+    item_id: StrN;
+    project_id: StrN;
+    status: ColumnType<WorkflowRunStatus, WorkflowRunStatus | undefined, WorkflowRunStatus>;
+    graph_snapshot: ColumnType<IWorkflowGraph, string, string>;
+    // ADR 0015 — a sub-task's run points at the Task run that started it.
+    parent_workflow_run_id: StrN;
+    parent_node_id: StrN;
+    current_node_id: StrN;
+    parked_node_id: StrN;
+    park_reason: StrN;
+    loop_count: Int;
+    // Migration 040 — End sending the run back for a late sub-task.
+    gate_rounds: Int;
+    branch: StrN;
+    worktree_path: StrN;
+    setup_done: ColumnType<boolean, boolean | undefined, boolean>;
+    pr_url: StrN;
+    /** Every PR the run opened, in order; `pr_url` is its first entry. */
+    pr_urls: Generated<string[]>;
+    /** Migration 019 — a project-scope run's repos (a Task's run reads its Task's). */
+    repo_ids: ColumnType<string[], string | undefined, string>;
+    started_at: CreatedAt;
+    updated_at: UpdatedAt;
+    finished_at: TSn;
+}
+
+// Migration 024 — every park and resume of a workflow run. `park_reason` holds
+// only the current wait and is nulled on resume; this keeps the history.
+export interface WorkflowRunEventsTable {
+    id: string;
+    workflow_run_id: string;
+    item_id: StrN;
+    kind: 'parked' | 'resumed';
+    node_id: StrN;
+    reason: StrN;
+    /** Migration 014 — why it parked; set on every park, null on a resume. */
+    park_kind: WorkflowParkKind | null;
+    created_at: CreatedAt;
+}
+
+// Migration 041 — workflows published to the Marketplace. `bundle` is the
+// export zip (bytea selects as a Buffer).
+export interface PublishedWorkflowsTable {
+    id: string;
+    name: string;
+    description: StrN;
+    source_workflow_id: StrN;
+    bundle: Buffer;
+    version: Int;
+    published_at: CreatedAt;
+    updated_at: UpdatedAt;
+}
+
+// Migration 011 — one row per deterministic gate execution. ADR 0020 made
+// Atlas run the gate itself; this is where the verdict lands so it can be
+// queried instead of read out of `workflow_runs.park_reason` prose.
+//
+// `node_id` is null for the pre-push verification gate (it belongs to the run,
+// not to a node); `repo_id` is null for a workspace-wide script.
+export interface RunGateResultsTable {
+    id: string;
+    workflow_run_id: string;
+    node_id: StrN;
+    repo_id: StrN;
+    script_id: string;
+    verdict: GateVerdict;
+    exit_code: IntN;
+    output_tail: StrN;
+    /**
+     * ADR 0024 — the command Atlas actually ran. Null on rows written before
+     * migration 020, when a gate executed a script body instead. Also the
+     * memo: the newest row for (workflow_run_id, node_id, repo_id) carrying a
+     * command is what a fixer loop-back re-runs without a second dispatch.
+     */
+    command: StrN;
+    /** ADR 0028 — where the step's full output was written, under `.atlas/checks/`. */
+    log_path: StrN;
+    created_at: CreatedAt;
+}
+
+
+/** ADR 0023 — a saved test for one agent: the item to act on, and what should happen. */
+export interface AgentTestsTable {
+    id: string;
+    /** Migration 019 — null when this fixture targets a workflow instead. */
+    agent_id: StrN;
+    /**
+     * Migration 021 — nullable. A fixture belongs to the agent and binds to a
+     * project when it runs; a shipped one has no project to belong to at
+     * install time, which is what kept every agent page reading "No tests yet".
+     */
+    project_id: StrN;
+    repo_id: StrN;
+    name: string;
+    /** Migration 021 — the `tests.json` entry this was adopted from; null when the Owner wrote it. */
+    source_test_id: StrN;
+    /** Migration 021 — the bundle's body at adoption. Differs from a re-hash ⇒ the Owner edited it. */
+    source_hash: StrN;
+    item_template: unknown;
+    expectations: unknown;
+    // Migration 019 — exactly one of `agent_id` / `workflow_id` is set, by
+    // CHECK. Running a fixture through one agent qualifies it; running the
+    // same fixture through a workflow is the end-to-end eval.
+    workflow_id: StrN;
+    /** A tag, not an entity. Grouping is GROUP BY. */
+    suite: StrN;
+    created_at: CreatedAt;
+    updated_at: CreatedAt;
+}
+
+export type AgentTestVerdict = 'running' | 'passed' | 'failed' | 'errored';
+
+/** One execution of an `agent_tests` row, and what it decided. */
+/** Migration 018 — a judge's answer about one sample. */
+export type JudgeVerdict = 'pass' | 'fail' | 'abstained';
+
+export interface AgentTestRunsTable {
+    id: string;
+    agent_test_id: string;
+    agent_run_id: StrN;
+    item_id: StrN;
+    verdict: AgentTestVerdict;
+    failures: unknown;
+    cost_usd: number | null;
+    duration_s: IntN;
+    created_at: CreatedAt;
+    evaluated_at: StrN;
+    // Migration 018 — one press of Run is a batch of `n` samples, because an
+    // agent is stochastic and one sample is a coin flip. Every row that
+    // predates sampling was backfilled to a batch of one.
+    batch_id: ColumnType<string, string, string>;
+    sample_index: ColumnType<number, number | undefined, number | undefined>;
+    /** Free-text tag from the run request; powers before/after comparison. */
+    label: StrN;
+    judge_verdict: ColumnType<JudgeVerdict | null, JudgeVerdict | null | undefined, JudgeVerdict | null | undefined>;
+    judge_reason: StrN;
+    /** Kept apart from `cost_usd` so a judge can never fail a ceiling about the AGENT. */
+    judge_cost_usd: number | null;
+    /** Migration 019 — the workflow run a workflow eval is judged on. */
+    workflow_run_id: StrN;
+    /** Migration 003 — the throwaway checkout while the run is live; null once collected. */
+    worktree_path: ColumnType<string | null, string | null | undefined, string | null | undefined>;
+    /** Migration 003 — what the run changed (`AgentTestEvidence`), collected when it finished. */
+    evidence: ColumnType<unknown, string | null | undefined, string | null | undefined>;
+}
+
+export interface DB {
+    settings: SettingsTable;
+    workflows: WorkflowsTable;
+    workflow_runs: WorkflowRunsTable;
+    workflow_run_events: WorkflowRunEventsTable;
+    published_workflows: PublishedWorkflowsTable;
+    run_gate_results: RunGateResultsTable;
+    agent_tests: AgentTestsTable;
+    agent_test_runs: AgentTestRunsTable;
+    agents: AgentsTable;
+    roles: RolesTable;
+    reminders: RemindersTable;
+    scratch_pad: ScratchPadTable;
+    agent_checklists: AgentChecklistsTable;
+    agent_memory: AgentMemoryTable;
+    agent_prompt_versions: AgentPromptVersionsTable;
+    credentials: CredentialsTable;
+    projects: ProjectsTable;
+    project_repos: ProjectReposTable;
+    project_issue_counters: ProjectIssueCountersTable;
+    project_schedules: ProjectSchedulesTable;
+    project_guardrails: ProjectGuardrailsTable;
+    project_env_vars: ProjectEnvVarsTable;
+    environment_secrets: EnvironmentSecretsTable;
+    cli_models: CliModelsTable;
+    tool_catalog: ToolCatalogTable;
+    guardrail_rules: GuardrailRulesTable;
+    items: ItemsTable;
+    // Migration 015.— `items` minus the throwaway items agent test runs create.
+    // Every list, count, search and aggregate reads this; only by-id lookups
+    // read `items` directly. Same shape, so the row type is the same.
+    items_live: ItemsTable;
+    item_links: ItemLinksTable;
+    item_external_links: ItemExternalLinksTable;
+    jira_config: JiraConfigTable;
+    team_config: TeamConfigTable;
+    jira_sources: JiraSourcesTable;
+    jira_issues: JiraIssuesTable;
+    jira_attachments: JiraAttachmentsTable;
+    agent_runs: AgentRunsTable;
+    comments: CommentsTable;
+    notifications: NotificationsTable;
+    push_subscriptions: PushSubscriptionsTable;
+    issue_events: IssueEventsTable;
+    memory_regenerations: MemoryRegenerationsTable;
+    commit_verifications: CommitVerificationsTable;
+    marketplace_agents: MarketplaceAgentsTable;
+    marketplace_agent_checklists: MarketplaceAgentChecklistsTable;
+    guardrail_scripts: GuardrailScriptsTable;
+    project_guardrail_scripts: ProjectGuardrailScriptsTable;
+    agent_templates: AgentTemplatesTable;
+    cli_sessions: CliSessionsTable;
+    cli_session_subagents: CliSessionSubagentsTable;
+}
+
+// 2026-06-22 — Terminal v1. PTY-backed Claude Code sessions hosted in
+// the web app. See migration 012_cli_sessions.ts and
+// `services/cli-session-host.ts`.
+export interface CliSessionsTable {
+    id: string;
+    // Nullable since migration 030: null marks a STANDALONE session — a PTY
+    // opened directly on a folder the Owner picked, with no project, no
+    // worktree, and no `.atlas/` staging. Every standalone branch in
+    // `routes/cli-sessions.ts` keys off this being null.
+    project_id: StrN;
+    // Migration 045 — the repo of that project the session is checked out on.
+    repo_id: StrN;
+    title: Str;
+    status: ColumnType<
+        'active' | 'paused' | 'closed' | 'errored',
+        'active' | 'paused' | 'closed' | 'errored' | undefined,
+        'active' | 'paused' | 'closed' | 'errored'
+    >;
+    cli: ColumnType<AgentCli, AgentCli | undefined, AgentCli>;
+    worktree_path: StrN;
+    worktree_branch: StrN;
+    claude_session_id: StrN;
+    model: Str;
+    initial_prompt: StrN;
+    created_at: CreatedAt;
+    updated_at: UpdatedAt;
+    last_active_at: ColumnType<string, string | undefined, string | undefined>;
+    closed_at: TSn;
+    finalize_pr_url: StrN;
+    item_id: StrN;
+    // Migration 030. Set only on standalone sessions — the credential the
+    // Owner picked when opening the folder. Project sessions leave it null
+    // and resolve `projects.credential_id` at spawn/resume instead.
+    credential_id: StrN;
+    transcript_jsonl: StrN;
+    transcript_ingested_at: TSn;
+    // Token + cost columns (re-added in migration 019 after migration 014
+    // dropped them). Now populated by `pty-transcript-usage.ts` at
+    // session close time, by summing per-event `usage` blocks from the
+    // ingested JSONL transcript and multiplying by the model pricing
+    // table in `claude-model-pricing.ts`. Null for copilot rows (no
+    // equivalent per-event token data in copilot's events.jsonl).
+    total_cost_usd: IntN;
+    input_tokens: IntN;
+    output_tokens: IntN;
+    cache_creation_tokens: IntN;
+    cache_read_tokens: IntN;
+}
+
+// 2026-07-03 — Terminal v4. One row per subagent invocation that a
+// hosted CLI session spawned. See migration
+// 027_cli_session_subagents.ts and `services/pty-transcript-usage.ts`
+// (Claude) + `services/copilot-events-usage.ts` (Copilot).
+export interface CliSessionSubagentsTable {
+    id: string;
+    cli_session_id: string;
+    source: ColumnType<'claude_jsonl' | 'copilot_list', 'claude_jsonl' | 'copilot_list', 'claude_jsonl' | 'copilot_list'>;
+    subagent_key: Str;
+    agent_type: StrN;
+    description: StrN;
+    spawn_depth: IntN;
+    input_tokens: IntN;
+    output_tokens: IntN;
+    cache_creation_tokens: IntN;
+    cache_read_tokens: IntN;
+    cost_usd: IntN;
+    is_estimate: ColumnType<boolean, boolean | undefined, boolean>;
+    started_at: TSn;
+    ended_at: TSn;
+    created_at: CreatedAt;
+}
+
+// Theme 11 — SDLC commit discipline audit.
+export type CommitVerificationResult = 'compliant' | 'partial' | 'silent' | 'clean';
+
+export interface CommitVerificationsTable {
+    id: Generated<number>;
+    run_id: string;
+    item_id: StrN;
+    agent_id: string;
+    result: CommitVerificationResult;
+    commit_count: Int;
+    /**
+     * JSONB array of `{ commit_sha?: string; reason: string }` shapes.
+     * Routes return the parsed value; the auto-decoded `pg` driver
+     * gives us the array directly on select.
+     */
+    problems: ColumnType<
+        Array<{ commit_sha?: string; reason: string }>,
+        Array<{ commit_sha?: string; reason: string }> | undefined,
+        Array<{ commit_sha?: string; reason: string }>
+    >;
+    checked_at: CreatedAt;
+}

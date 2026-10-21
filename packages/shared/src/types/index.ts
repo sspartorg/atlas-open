@@ -1,0 +1,2106 @@
+import type { WorkflowRunStatus } from '../workflows/index.js';
+
+// `ollama` is Claude Code pointed at Ollama's Anthropic-compatible API — same
+// binary, same flags, different base URL. See `CLI_DIALECT` in ../cli/index.ts
+// before branching on this type anywhere.
+export type AgentCli = 'claude' | 'copilot' | 'ollama';
+
+/** Whether the binary behind an agent CLI is runnable on the API host. */
+export interface ICliAvailability {
+    cli: AgentCli;
+    /** Executable Atlas spawns for this CLI (`ollama` runs through `claude`). */
+    binary: string;
+    available: boolean;
+    /** First line of `<binary> --version`, or null when unavailable. */
+    version: string | null;
+}
+
+// Which binary + argv dialect a CLI value speaks. Ollama runs the Claude Code
+// binary, so it is `claude`. Branch on this — via `CLI_DIALECT` — anywhere the
+// question is "how do I talk to this CLI", never on `AgentCli` directly.
+export type CliDialect = 'claude' | 'copilot';
+// Task 6 — reasoning-effort knob shared by both CLIs (verified live —
+// `claude --effort` and `copilot --reasoning-effort` accept the same six
+// values).
+export type AgentEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type AgentStatus = 'active' | 'inactive';
+export type AgentCategory = 'software-dev' | 'marketing' | 'content' | 'design';
+
+// A08 — Canonical SDLC role catalog. Every SDLC agent references one of
+// these by `role_id`. Autonomous agents (Theme 09) keep `role_id = null`.
+// `designation` (free-text per agent, A01) remains as an optional display
+// override; when empty, the UI falls back to the role's label.
+export type SdlcRole =
+    | 'po'
+    | 'spec-writer'
+    | 'engineer'
+    | 'qa'
+    | 'architect'
+    | 'tester'
+    | 'automation'
+    | 'devops'
+    | 'security'
+    | 'designer'
+    | 'docs';
+
+export const SDLC_ROLES: readonly SdlcRole[] = [
+    'po',
+    'spec-writer',
+    'engineer',
+    'qa',
+    'architect',
+    'tester',
+    'automation',
+    'devops',
+    'security',
+    'designer',
+    'docs',
+];
+
+/**
+ * A08 — Role catalog row. One per canonical SDLC role. Defaults govern
+ * what a freshly-seeded agent of that role looks like:
+ * - `default_status` decides whether the agent ships enabled. Only `po`,
+ *   `engineer`, `qa`, `architect`, `automation` ship `active`; everything
+ *   else ships `inactive` (the "disable-by-default" policy).
+ * - `default_prompt_md` is the curated starter prompt. Agents copy this
+ *   into their own `prompt_md` at seed time; the Owner can then edit
+ *   per-agent without touching the role default. Owner can also edit the
+ *   role default via `PATCH /api/roles/:id` to update the canonical
+ *   starter without affecting existing agents.
+ *
+ * T1 — bundled-reviewer columns dropped. Each SDLC role's reviewer side
+ * lives on its own dedicated agent row (`agent-<role>-reviewer`), so the
+ * catalog only carries one prompt per role.
+ */
+export interface IRole {
+    id: SdlcRole;
+    label: string;
+    description: string;
+    default_prompt_md: string;
+    default_status: AgentStatus;
+    sort_order: number;
+    created_at: string;
+    updated_at: string;
+}
+
+/**
+ * Outcome every agent run emits at the end of its CLI output via the
+ * fenced `atlas-outcome` block. Replaces the prior performer/reviewer
+ * split — there's one contract for every agent regardless of role.
+ *
+ *   - 'done'           → work succeeded; the workflow follows the step's
+ *                        pass connection.
+ *   - 'rejected'       → the agent rejected the work (typically a
+ *                        reviewer-style agent); the workflow follows the
+ *                        step's fail connection.
+ *   - 'asked_question' → agent is blocked on Owner input; the workflow
+ *                        parks the item in `waiting_for_info` and re-runs
+ *                        the step when the Owner replies.
+ *
+ * NULL when the agent's output didn't contain a parseable `atlas-outcome`
+ * block — treated as `'asked_question'` (Owner-bound) so a silent agent
+ * never advances a workflow.
+ */
+export type RunOutcomeKind = 'done' | 'rejected' | 'asked_question';
+
+export interface IRunOutcomeChecklistItem {
+    id: number;
+    passed: boolean;
+    evidence?: string;
+}
+
+export interface IRunOutcome {
+    kind: RunOutcomeKind;
+    /** Free-text summary of what the agent did this round. Always populated when kind='done'. */
+    summary?: string;
+    /** Free-text rationale. Populated when kind='rejected' (why) or 'asked_question' (what's blocking). */
+    reason?: string;
+    /** Per-required-checklist-row pass/fail report. Populated when the agent has required rows. */
+    checklist?: IRunOutcomeChecklistItem[];
+}
+
+export type CredentialHost = 'github';
+export type CredentialKind = 'pat' | 'github_app';
+export type CloneStatus = 'pending' | 'cloning' | 'ready' | 'error';
+
+export type IssueStatus =
+    | 'draft'
+    | 'ready'
+    | 'in_progress'
+    | 'waiting_for_info'
+    | 'in_review'
+    | 'done';
+
+// SubTaskStatus collapses into the unified IssueStatus. Kept as an alias so
+// older imports don't break, but new code should use IssueStatus directly.
+export type SubTaskStatus = IssueStatus;
+// `setup_failed` (added 2026-06-10) is the terminal state when the
+// user-authored per-project setup script exits non-zero, times out, or
+// references an unknown secret. `runProjectSetup` writes the captured
+// stdout/stderr to `agent_runs.setup_output_text` and skips CLI dispatch.
+export type RunStatus =
+    | 'queued'
+    | 'in_progress'
+    | 'completed'
+    | 'error'
+    | 'cancelled'
+    | 'setup_failed';
+// ADR 0015 — the Owner works on Tasks; a Task's children are Sub-tasks.
+export type IssueType = 'task' | 'sub_task';
+export type IssuePriority = 'low' | 'normal' | 'high' | 'urgent';
+
+export interface IAgent {
+    id: string;
+    name: string;
+    category: AgentCategory;
+    cli: AgentCli;
+    model: string;
+    /**
+     * Task 6 — reasoning-effort level forwarded to the CLI as
+     * `--effort <value>`. DB default 'medium'; both claude and copilot
+     * accept the same value set.
+     */
+    effort: AgentEffort;
+    framework: string;
+    prompt_md: string;
+    prompt_version: number;
+    status: AgentStatus;
+    accent_color: string;
+    sort_order: number;
+    description: string;
+    /**
+     * Human-readable role label shown in the UI alongside `name`. Examples:
+     * 'Product Owner', 'Code Review Lead', 'QA'. Empty string is allowed —
+     * A08 makes this an optional override on top of the role catalog: when
+     * empty, UI falls back to the role's `label` (and ultimately to
+     * `category` for autonomous agents with `role_id = null`).
+     */
+    designation: string;
+    /**
+     * A08 — Foreign key to the SDLC role catalog. NULL on autonomous
+     * agents (Theme 09 — ai-news, market-research, regulations,
+     * jira-to-epic, ai-readiness) which sit outside the SDLC chain.
+     * For SDLC agents this drives default-status policy at seed time and
+     * the Role filter chip on the Agents page.
+     */
+    role_id: SdlcRole | null;
+    glyph: string;
+    /**
+     * Theme 08 — how many completed/errored runs trigger an automatic
+     * `agent_memory` regeneration. Errored runs count double (errors
+     * carry more signal). 1..100 (DB CHECK constraint), default 5.
+     * Editable from the Agent Detail Overview tab.
+     */
+    memory_cadence: number;
+    /**
+     * Theme 09 — soft archetype tag. The seeded autonomous-agent
+     * fleet uses fixed slugs ('ai-news' | 'market-research' |
+     * 'regulations' | 'jira-to-epic'); custom agents the Owner adds
+     * carry 'custom'. Drives per-kind settings_json validation in
+     * the API layer and the per-kind form on the Autonomous tab.
+     */
+    kind_slug: AgentKindSlug;
+    /**
+     * Theme 09 — JSONB blob of per-archetype config. Shape depends
+     * on `kind_slug`; the per-kind schemas live in
+     * `@atlas/shared/agents/settings-schemas` and validate at the
+     * route boundary.
+     */
+    settings_json: Record<string, unknown>;
+    /** Pulled from the team config repo; the next sync overwrites local edits. */
+    team_managed: boolean;
+    /**
+     * Marketplace back-link. Set when the agent was forked from a catalog
+     * entry (either by the first-run auto-install or an explicit Add).
+     * NULL on user-only agents and on agents the Owner has Detached. The
+     * runtime never gates editing on this — it's only used to surface an
+     * "upgrade available" indicator when the catalog version drifts ahead.
+     */
+    marketplace_source_id: string | null;
+    /**
+     * The marketplace_agents.version that was current when this local
+     * agent last accepted/dismissed an upgrade. NULL paired with
+     * marketplace_source_id == null. When marketplace_pulled_version is
+     * strictly less than the live marketplace_agents.version, an upgrade
+     * is available.
+     */
+    marketplace_pulled_version: number | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export type AgentKindSlug =
+    | 'ai-news'
+    | 'market-research'
+    | 'regulations'
+    | 'jira-to-epic'
+    | 'ai-readiness'
+    | 'knowledge-base'
+    | 'custom';
+
+export const AGENT_KIND_SLUGS: readonly AgentKindSlug[] = [
+    'ai-news',
+    'market-research',
+    'regulations',
+    'jira-to-epic',
+    'ai-readiness',
+    'knowledge-base',
+    'custom',
+];
+
+// Per-kind settings shapes. Each maps to a Zod schema in
+// `@atlas/shared/agents/settings-schemas`. Adding a new kind here
+// means: (1) add the slug above, (2) add the interface here, (3) add
+// the schema in settings-schemas.ts, (4) add a form in
+// AutonomousSettingsTab.tsx.
+
+export interface IAINewsSettings {
+    sources?: string[];
+    topic?: string;
+    external_notification_event_key?: string;
+}
+
+export interface IMarketResearchSettings {
+    competitors: Array<{ name: string; homepage: string; pricing_page?: string }>;
+    tracking_project_id?: string | null;
+    cadence_hours?: number;
+}
+
+export type ProjectType =
+    | 'saas'
+    | 'fintech'
+    | 'healthcare'
+    | 'ecommerce'
+    | 'gaming'
+    | 'enterprise'
+    | 'other';
+
+export type RegulationsRegion = 'US' | 'EU' | 'UK' | 'IN' | 'CA' | 'AU';
+
+export interface IRegulationsSettings {
+    project_type: ProjectType;
+    regions: RegulationsRegion[];
+    tracking_project_id?: string | null;
+}
+
+export interface IJiraToEpicSettings {
+    atlassian_resource_id: string;
+    jql: string;
+    target_project_id: string;
+    dry_run?: boolean;
+}
+
+export interface IProject {
+    id: string;
+    name: string;
+    // Jira-style 3-letter uppercase prefix used as the namespace for every
+    // issue id in this project (e.g. ATL → ATL-1, ATL-2, ...). Frozen once
+    // set; retired into retired_prefixes when the project is deleted.
+    issue_key_prefix: string;
+    description: string;
+    status: string;
+    guardrails_md: string;
+    created_at: string;
+    updated_at: string;
+    // Most recent timestamp across the project row and any of its children
+    // (schedule runs, guardrail edits, Task and sub-task edits).
+    // Computed at read time in projectsService.list/get — never persisted.
+    last_activity_at: string;
+    /**
+     * On a publisher: this project is published to the team config repo. On a
+     * subscriber: it arrived from there, and the next sync overwrites local edits.
+     */
+    team_managed: boolean;
+    /**
+     * Jira bridge: which Jira status names mean each Atlas status, e.g.
+     * `ready: ['Selected for Development']`. Null = unmapped (Jira status ignored).
+     */
+    jira_status_map: IJiraStatusMap | null;
+}
+
+/** Jira status names (case-insensitive) per Atlas status. */
+export type IJiraStatusMap = Record<IssueStatus, string[]>;
+
+/**
+ * ADR 0018 — a git repo of a Project. Every repo is an ordinary
+ * `project_repos` row; there is no primary. A repo that predates 0018 carries
+ * its project's id, which is what kept its worktrees and Jira sources valid.
+ */
+export interface IProjectRepo {
+    id: string;
+    project_id: string;
+    /** Folder name in a multi-repo workspace; lowercase slug, unique per project. */
+    name: string;
+    git_url: string;
+    git_path: string;
+    credential_id: string | null;
+    default_branch: string;
+    clone_status: CloneStatus;
+    setup_sh_body: string;
+    setup_ps1_body: string;
+}
+
+export interface ICredential {
+    id: string;
+    label: string;
+    host: CredentialHost;
+    kind: CredentialKind;
+    username: string;
+    /** Null for `github_app` credentials before the first token has been minted. */
+    token_encrypted: string | null;
+    /** Null for `github_app` credentials before the first token has been minted. */
+    token_fingerprint: string | null;
+    scope: string;
+    last_used_at: string | null;
+    expires_at: string | null;
+    /** Populated only when `kind = 'github_app'`. */
+    app_id: number | null;
+    /** True iff we have an encrypted PEM on file. The PEM itself is never exposed to clients. */
+    has_app_private_key: boolean;
+    /** Account login the App is installed on. Populated only when `kind = 'github_app'`. */
+    app_installation_owner: string | null;
+    /** Cached after the first `GET /users/{owner}/installation`. */
+    app_installation_id: number | null;
+    /** App slug (e.g. `atlas-app-bot`). Used to compose the bot's
+     *  git commit identity. Null until populated from `app-config.json`
+     *  or backfilled from `GET /app`. */
+    app_slug: string | null;
+    /** Human's display name (`sspart`). When set on a github_app
+     *  credential, `Co-Authored-By: <human_name> <human_email>` is
+     *  appended to every commit via a per-run `prepare-commit-msg` hook.
+     *  Null → bot-only attribution. */
+    human_name: string | null;
+    /** Human's email. See `human_name`. */
+    human_email: string | null;
+    /** Human's GitHub login (`sspartorg`, without `@`). Used for
+     *  `gh pr create --assignee <login>` and the `Requested-By: @<login>`
+     *  first line of every PR body. Null → no PR assignee, no
+     *  Requested-By prefix. */
+    human_gh_login: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface ITask {
+    id: string;
+    project_id: string;
+    title: string;
+    description: string;
+    status: IssueStatus;
+    /** atlas-open: the agent that runs this Task; assigning one queues a draft. */
+    assignee_agent_id: string | null;
+    reporter_agent_id: string | null;
+    priority: IssuePriority;
+    acceptance_criteria: string;
+    /** Architect's spec for the whole Task (ADR 0015). */
+    spec_md: string | null;
+    /** The FIRST PR the Task's workflow run opened; see `pr_urls` for all of them. */
+    pr_url: string | null;
+    /** Free-form labels for filtering. Max 20 per item / 40 chars each (enforced at Zod). */
+    labels: string[];
+    /**
+     * ADR 0017 — the project repos this Task changes, in order (the first
+     * holds Task-wide files). Empty = the project's primary repo only.
+     */
+    repo_ids: string[];
+    // The run branch (`atlas/wf/<id>`) and its on-disk checkout; both null
+    // until a workflow run provisions them.
+    worktree_branch: string | null;
+    worktree_path: string | null;
+    /** Made by an agent test run (ADR 0023). Shown, tagged "Test" — never hidden. */
+    is_test?: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface ITaskListItem extends ITask {
+    sub_task_count: number;
+}
+
+export interface ISubTask {
+    id: string;
+    task_id: string;
+    title: string;
+    description: string;
+    status: IssueStatus;
+    assignee_agent_id: string | null;
+    reporter_agent_id: string | null;
+    priority: IssuePriority;
+    acceptance_criteria: string;
+    started_at: string | null;
+    /** A Sub-tasks workflow node picks the sub-tasks carrying its label (ADR 0015). */
+    labels: string[];
+    /** Made by an agent test run (ADR 0023). Shown, tagged "Test" — never hidden. */
+    is_test?: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+// ── Issue tree (composite endpoint) ───────────────────────────────────────
+// One round-trip view of the workspace: Tasks with their Sub-tasks nested.
+export interface IIssueTreeNode {
+    id: string;
+    kind: IssueType;
+    short_id: string;
+    title: string;
+    status: IssueStatus;
+    assignee_agent_id: string | null;
+    reporter_agent_id: string | null;
+    created_at: string;
+    updated_at: string;
+    // Ancestor identifiers + display labels (denormalised so the row can
+    // render without follow-up lookups).
+    project_id: string;
+    project_name: string;
+    /** The parent Task of a sub-task; null on a Task. */
+    task_id: string | null;
+    task_title: string | null;
+    // Sub-tasks nested under a Task. Empty array for sub-task rows.
+    children: IIssueTreeNode[];
+}
+
+export interface IIssueTreeResponse {
+    projects: IProject[];
+    // 2026-10-14 (ADR 0031): `agents: IAgent[]` removed. It carried every
+    // agent with its full prompt (~156 KB per project page) and nothing in
+    // web or MCP read it; screens get agents from GET /api/agents.
+    tree: IIssueTreeNode[];
+    tasks: ITask[];
+}
+
+// ── Composite "full" responses for detail pages ──────────────────────────
+// Each detail page gets one of these via `GET /api/<kind>/:id/full`.
+// Ancestors, children, related items, activity and the agent dictionary are
+// all assembled server-side so the page renders from one HTTP round-trip.
+
+export interface ITaskFullResponse {
+    task: ITask;
+    project: IProject | null;
+    sub_tasks: ISubTask[];
+    related_links: IIssueLinkRow[];
+    external_links: IItemExternalLink[];
+    activity: IActivityItem[];
+    agents: IAgent[];
+}
+
+export interface ISubTaskFullResponse {
+    sub_task: ISubTask;
+    task: ITask | null;
+    project: IProject | null;
+    related_links: IIssueLinkRow[];
+    external_links: IItemExternalLink[];
+    activity: IActivityItem[];
+    agents: IAgent[];
+}
+
+// ── A12 — Reply-to-item with linked context ──────────────────────────────
+// `replyToItem` MCP tool / `/api/issues/:type/:id/reply-context` route returns
+// IReplyContext: the item, its full comment thread (head + tail with middle
+// elided when the thread is over budget), every linked item (depends_on
+// entries get description + acceptance_criteria + their last N comments
+// inlined; relates_to stays shallow), and a slice of recent activity events.
+// `replyToItem` with a body returns IReplyResponse — the new comment plus the
+// context envelope visible at post time.
+
+/**
+ * The comment thread for the item being replied to. Long threads are
+ * compacted via head + tail elision so the envelope stays under
+ * `IReplyContext.budget_cap` tokens. `elided_count` is 0 when no
+ * compaction was needed.
+ */
+export interface IReplyContextThread {
+    comments: IComment[];
+    elided_count: number;
+    total_count: number;
+}
+
+/**
+ * One linked item attached to the reply target, enriched with the data
+ * the calling LLM needs to reply intelligently about a dependency or
+ * related item without a follow-up MCP call.
+ *
+ * For `relation_type === 'depends_on'` entries, the assembler inlines
+ * the linked item's `description` + `acceptance_criteria` and its last
+ * N comments. For `'relates_to'` entries it stays shallow (title +
+ * status only) — the assembler returns `description: null`,
+ * `acceptance_criteria: null`, and an empty `recent_comments` array
+ * to match the precedent set by `buildLinkedItemsSection` in the
+ * prompt-builder.
+ */
+export interface IReplyContextLinkedItem {
+    id: number;
+    relation_type: 'depends_on' | 'relates_to' | 'tested_by';
+    direction: 'outgoing' | 'incoming';
+    type: IssueType;
+    item_id: string;
+    short_id: string;
+    title: string;
+    status: IssueStatus;
+    description: string | null;
+    acceptance_criteria: string | null;
+    recent_comments: IComment[];
+}
+
+export interface IReplyContext {
+    item: {
+        kind: IssueType;
+        id: string;
+        title: string;
+        status: IssueStatus;
+        summary: string | null;
+    };
+    project: { id: string; name: string } | null;
+    thread: IReplyContextThread;
+    linked_items: IReplyContextLinkedItem[];
+    activity_highlights: IActivityItem[];
+    /**
+     * Rough character-based estimate of the rendered envelope size
+     * (`Math.ceil(chars / 4)`). Bounded by `budget_cap`; if the
+     * pre-budget assembly was larger, the thread + linked-item comments
+     * were elided to bring it under. No `tiktoken` dependency.
+     */
+    token_estimate: number;
+    budget_cap: number;
+}
+
+export interface IReplyResponse {
+    comment: IComment;
+    context: IReplyContext;
+}
+
+export interface IAgentRun {
+    id: string;
+    agent_id: string;
+    issue_type: IssueType;
+    issue_id: string;
+    /**
+     * Theme 09b — project-scope runs (AI-Readiness Agent) carry
+     * `project_id` with `issue_type`/`issue_id` null. Item-attached
+     * + freedom-mode runs leave this null. No FK so historical rows
+     * survive project deletion.
+     */
+    project_id: string | null;
+    status: RunStatus;
+    prompt_snapshot: string | null;
+    output_text: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+    /**
+     * Links a re-spawned run (e.g. an inter-agent on-fail bounce) to its
+     * parent. NULL on every standalone run. Self-referential FK with
+     * `ON DELETE CASCADE` so deleting a parent run cleans the thread.
+     */
+    parent_run_id: string | null;
+    /**
+     * 2026-06-10 — captured stdout+stderr from the per-project setup
+     * script when it exits non-zero / times out / references an
+     * unknown `${variable.KEY}`. NULL on runs that never invoked the
+     * setup step or where it succeeded. Surfaced on the run-detail
+     * page when `status === 'setup_failed'`.
+     */
+    setup_output_text: string | null;
+    /**
+     * Task 12 — unified outcome reported by every agent (regardless of
+     * "role") via the fenced `atlas-outcome` block at the end of its
+     * CLI output. The runner parses the block on completion and writes
+     * these four columns; NULL on all four means the agent produced
+     * unparseable output and is treated as `'asked_question'`.
+     */
+    outcome_kind: RunOutcomeKind | null;
+    outcome_summary: string | null;
+    outcome_reason: string | null;
+    outcome_checklist: IRunOutcomeChecklistItem[] | null;
+    created_at: string;
+    input_tokens: number | null;
+    output_tokens: number | null;
+    cache_creation_tokens: number | null;
+    cache_read_tokens: number | null;
+    total_cost_usd: number | null;
+    /**
+     * Plan B (Owner request 2026-06-01) — Copilot CLI native cost unit.
+     * Equal to `usage.premiumRequests` from Copilot's `--output-format
+     * json` `result` event (count of model API calls). Null on Claude
+     * runs. The web run-detail card renders this as a subscript under
+     * `total_cost_usd` so the Owner sees both the dollar estimate and
+     * the underlying credit count.
+     */
+    credits: number | null;
+    /**
+     * Joined from `items.title` so run-history surfaces (project recent
+     * activity, agent runs tab) can render "MON-3 · Fix login redirect"
+     * without an extra round-trip. NULL on freedom-mode / project-scope
+     * runs (no attached item) and on rows whose item was deleted.
+     */
+    item_title: string | null;
+    /** ADR 0014 — the workflow run this step belongs to; null for ad-hoc runs. */
+    workflow_run_id: string | null;
+    /** ADR 0014 — the graph node this step executed. */
+    node_id: string | null;
+    /**
+     * ADR 0023 — what the run actually did, read once from its own transcript
+     * at completion (migration 017).
+     *
+     * **NULL on every run that finished before this shipped**, and on one whose
+     * output was not a transcript. That is not the same as a run that did
+     * nothing, so it renders as "—" rather than as zero.
+     */
+    trace_summary: IRunTraceSummary | null;
+}
+
+/**
+ * A compact reading of one dispatch's transcript.
+ *
+ * Every field a given CLI cannot report is **null, never 0** — "we did not
+ * look" and "it did not happen" are different answers, and an expectation
+ * asserting on a field this CLI cannot answer has to come back `errored`
+ * rather than silently passing. Same distinction ADR 0020 draws for a gate
+ * that could not run.
+ */
+export interface IRunTraceSummary {
+    source: 'claude' | 'copilot' | 'unknown';
+    /** Assistant messages — how many turns it took. */
+    turns: number;
+    tool_calls: number;
+    /** Tool name → call count. */
+    tools: Record<string, number>;
+    /** The order they were called in, capped at 200. */
+    tool_sequence: string[];
+    /** Null on Copilot, which emits no equivalent event. */
+    thinking_blocks: number | null;
+    /** Turns produced by a sub-agent the run spawned. Null on Copilot. */
+    subagent_turns: number | null;
+    /** Paths from tool inputs, relative to the run's own sandbox. Null on Copilot. */
+    files_touched: string[] | null;
+    /** Tool results flagged as errors. */
+    errors: number | null;
+    /** Run start → first assistant event. */
+    ttft_ms: number | null;
+    /** A cap was hit, so `tool_sequence` or `files_touched` is partial. */
+    truncated: boolean;
+}
+
+export interface ICostSummary {
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_creation_tokens: number;
+    run_count: number;
+}
+
+// Manual terminal session aggregate — parallels ICostSummary so KPI
+// surfaces can report combined (agentic + terminal) spend without the
+// caller juggling two unrelated shapes. `session_count` replaces
+// `run_count`; the underlying source is `cli_sessions` rather than
+// `agent_runs`.
+export interface ITerminalCostSummary {
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_creation_tokens: number;
+    session_count: number;
+}
+
+export interface ISettings {
+    id: number;
+    owner_name: string;
+    workspace_path: string;
+    constitution_md: string;
+    external_notification_provider: ExternalNotificationProvider;
+    // Batch-9 audit: `external_notification_token` and
+    // `external_notification_webhook_url` are ALWAYS null on the GET
+    // /api/settings response. The `_set` booleans below tell the UI
+    // whether a value is configured; the plaintext is fetched
+    // on-demand via POST /api/settings/external-notification/reveal-*.
+    external_notification_token: string | null;
+    external_notification_chat_id: string | null;
+    external_notification_webhook_url: string | null;
+    /** true when a token is stored (encrypted) in the settings row. */
+    external_notification_token_set?: boolean;
+    /** true when a webhook URL is stored (encrypted) in the settings row. */
+    external_notification_webhook_url_set?: boolean;
+    onboarding_complete: number;
+    accent_color: string;
+    external_notification_event_toggles: string;
+    quiet_hours_from: string | null;
+    quiet_hours_to: string | null;
+    quiet_hours_timezone: string | null;
+    // 1 = quiet hours active, 0 = disabled. Distinct from from/to nullness
+    // so the UI can toggle without wiping the saved time window.
+    quiet_hours_enabled: number;
+    external_notification_last_test_ok: number | null; // 1 = ok, 0 = failed, null = untested
+    external_notification_endpoint_label: string | null; // e.g. "@bot_handle" — channel-agnostic label of the configured endpoint
+    guardrails_published_at: string | null; // updated by POST /api/guardrails/save
+    // Seconds of total silence (no PTY output, no user keystrokes) before
+    // a Terminal session fires a 'waiting for input' notification.
+    // Default 300 (5 min); editable in Settings → Notifications.
+    terminal_idle_notify_seconds: number;
+    created_at: string;
+    updated_at: string;
+    // Reflects ATLAS_AI_ENABLED env var at read time; never persisted.
+    ai_enabled: boolean;
+}
+
+export interface ICliModel {
+    id: string;
+    cli: AgentCli;
+    model_name: string;
+    note: string | null;
+    sort_order: number;
+    created_at: string;
+}
+
+export interface IToolCatalogEntry {
+    tool_name: string;
+    group_name: string;
+    description: string;
+    sort_order: number;
+}
+
+export interface IEnvVar {
+    key: string;
+    value: string;
+    secret: boolean;
+    restart_required: boolean;
+    description: string;
+}
+
+export interface IToolCatalogGroup {
+    group_name: string;
+    tools: Array<{ tool_name: string; description: string }>;
+}
+
+export type ExternalNotificationProvider = 'telegram' | 'teams';
+
+export type ExternalNotificationEventKey =
+    | 'item.status_changed:waiting_for_info'
+    | 'item.status_changed:in_review'
+    | 'agent.failed'
+    | 'agent.run_finished_no_item'
+    | 'terminal.waiting_for_input'
+    | 'jira.sync_failed'
+    | 'workflow.failed'
+    | 'workflow.finished'
+    | 'agent.failed_no_item'
+    | 'ci.failed'
+    | 'autofetch.failed'
+    | 'reminder.fired';
+
+export const EXTERNAL_NOTIFICATION_EVENT_KEYS: ExternalNotificationEventKey[] = [
+    'item.status_changed:waiting_for_info',
+    'item.status_changed:in_review',
+    'agent.failed',
+    'agent.run_finished_no_item',
+    'terminal.waiting_for_input',
+    'jira.sync_failed',
+    'workflow.failed',
+    'workflow.finished',
+    'agent.failed_no_item',
+    'ci.failed',
+    'autofetch.failed',
+    'reminder.fired',
+];
+
+export const EXTERNAL_NOTIFICATION_EVENT_LABELS: Record<ExternalNotificationEventKey, { title: string; sub: string }> = {
+    'item.status_changed:waiting_for_info': {
+        title: 'Waiting for Info',
+        sub: 'item.status_changed → Waiting for Info',
+    },
+    'item.status_changed:in_review': {
+        title: 'In Review',
+        sub: 'item.status_changed → In Review · agent output ready for owner sign-off',
+    },
+    'agent.failed': {
+        title: 'Agent Failed',
+        sub: 'agent.failed · run errored or returned non-zero',
+    },
+    'agent.run_finished_no_item': {
+        title: 'Agent Run Finished (no item)',
+        sub: 'agent.run_finished_no_item · freedom-mode run completed or errored without producing an item',
+    },
+    'terminal.waiting_for_input': {
+        title: 'Terminal: Waiting for Input',
+        sub: 'terminal.waiting_for_input · session has been idle longer than the configured threshold',
+    },
+    'jira.sync_failed': {
+        title: 'Jira Sync Failed',
+        sub: 'jira.sync_failed · a Jira sync pass errored (sent once per new failure)',
+    },
+    'workflow.failed': {
+        title: 'Workflow Failed',
+        sub: 'workflow.failed · a workflow run errored and parked, or a queued Task could not be dispatched',
+    },
+    'workflow.finished': {
+        title: 'Task Finished',
+        sub: 'workflow.finished · a workflow finished a Task (with or without a PR), or an agent finished work on an item',
+    },
+    'agent.failed_no_item': {
+        title: 'Agent Run Failed (no item)',
+        sub: 'agent.failed_no_item · a standalone agent run errored',
+    },
+    'ci.failed': {
+        title: 'CI Failed',
+        sub: "ci.failed · CI failed on a Task's pull request",
+    },
+    'autofetch.failed': {
+        title: 'Auto-fetch Failed',
+        sub: 'autofetch.failed · a project auto-fetch failed, conflicted or was turned off after repeated failures',
+    },
+    'reminder.fired': {
+        title: 'Reminders',
+        sub: 'reminder.fired · a reminder set to External or Both fired',
+    },
+};
+
+export interface IComment {
+    id: number;
+    author: 'owner' | 'agent';
+    agent_id: string | null;
+    issue_type: IssueType;
+    issue_id: string;
+    body: string;
+    /**
+     * Non-null when this comment was edited after creation; rendered as
+     * a small "edited" badge next to the timestamp in the activity feed.
+     * Each edit overwrites the body and re-stamps this value. There is no
+     * version history.
+     */
+    edited_at: string | null;
+    created_at: string;
+}
+
+export interface IIssueLink {
+    id: number;
+    from_type: IssueType;
+    from_id: string;
+    to_type: IssueType;
+    to_id: string;
+    created_at: string;
+}
+
+// External (off-platform) link attached to an item: PR URLs, and the Jira
+// issue a Task was imported from (written only by the Jira bridge).
+export type ExternalLinkKind = 'pull_request' | 'jira_issue';
+
+// Kinds a caller may add by hand (UI, MCP). Jira links come only from the bridge.
+export const EXTERNAL_LINK_KINDS: ExternalLinkKind[] = ['pull_request'];
+
+/** GitHub PR lifecycle as last observed by the API (null = not yet checked or lookup failed). */
+export type ExternalPrState = 'open' | 'merged' | 'closed';
+
+/**
+ * Combined CI result for a PR's head commit (GitHub check-runs + legacy
+ * statuses), as last observed by the API. Absent/null = no CI seen — never
+ * read as success.
+ */
+export type ExternalCiState = 'pending' | 'success' | 'failure';
+
+/** One failing CI check: its name and the short title/description GitHub gave it. */
+export interface IExternalCiCheck {
+    name: string;
+    detail: string | null;
+}
+
+export interface IItemExternalLink {
+    id: number;
+    item_id: string;
+    link_kind: ExternalLinkKind;
+    url: string;
+    title: string | null;
+    /** Human-readable identifier parsed from the URL (e.g. PR number). */
+    external_ref: string | null;
+    created_at: string;
+    /** When set, points at the agent_runs row that opened the link. */
+    created_by_run_id: string | null;
+    /** Pull-request links only: last observed GitHub state; null when unknown. */
+    pr_state?: ExternalPrState | null;
+    /** Pull-request links only: CI on the PR's head commit; null when no CI was observed. */
+    ci_state?: ExternalCiState | null;
+    /** The checks that failed on that commit (empty unless ci_state is 'failure'). */
+    ci_failing_checks?: IExternalCiCheck[];
+}
+
+/**
+ * Jira bridge source: one query + agent + repos combo, belonging to a
+ * project (ADR 0016, amended). Issues matching `jql` become Tasks in
+ * `project_id` spanning `repo_ids`, assigned to `agent_id`.
+ *
+ * Sources used to live as a jsonb array on the singleton `jira_config` row and
+ * name a single `repo_id`; they are their own table now, one row per combo.
+ *
+ * **Order is load-bearing and global.** An issue matching sources in two
+ * different projects still becomes ONE Task (`jira_issues` is keyed by
+ * `jira_key`), and the **lowest `id`** — the first source ever created — wins.
+ * A serial gives that total order for free, and because new rows always sort
+ * last, adding a source to another project can never hijack routing an
+ * existing source already owns.
+ */
+export interface IJiraSource {
+    id: number;
+    project_id: string;
+    jql: string;
+    /** The agent imported Tasks are assigned to; null leaves them a draft with a `needs_you` notification. */
+    agent_id: string | null;
+    /** Ordered; the first repo holds the Task-wide files (ADR 0018). */
+    repo_ids: string[];
+}
+
+/**
+ * Jira bridge config (singleton): the connection and the poller. One
+ * self-hosted site, one token. The API token is never returned, only whether
+ * one is set. Sources are NOT here — they belong to a project
+ * (`GET /api/projects/:id/jira-sources`).
+ */
+export interface IJiraConfig {
+    enabled: boolean;
+    site_url: string | null;
+    email: string | null;
+    api_token_set: boolean;
+    poll_interval_minutes: number;
+    /** Extra Jira fields (names or ids) copied into the Task description. */
+    extra_fields: string[];
+    last_sync_at: string | null;
+    last_sync_ok: boolean | null;
+    last_sync_message: string | null;
+}
+
+export interface IJiraTestResult {
+    ok: boolean;
+    /** The Jira account the token belongs to. */
+    display_name: string;
+}
+
+export interface IJiraSyncResult {
+    imported: number;
+    queued: number;
+    needs_agent: number;
+    updated: number;
+    comments_imported: number;
+    comments_posted: number;
+}
+
+/** A link enriched with the target item's display info, for the UI list. */
+export interface IIssueLinkRow {
+    id: number;
+    /** The end of the link the caller is *not* on (i.e. the related item). */
+    type: IssueType;
+    item_id: string;
+    short_id: string;
+    title: string;
+    status: IssueStatus;
+    // Differentiates "blocked by / blocks" links (depends_on) from generic
+    // related items (relates_to) and dev↔QA twins (tested_by). The route
+    // returns this per routes/comments.ts; the UI partitions on it to
+    // render the appropriate section.
+    relation_type: 'relates_to' | 'depends_on' | 'tested_by';
+    /**
+     * For directed relations (`depends_on`, `tested_by`): whether the
+     * link's *from* endpoint is the caller (`outgoing`) or the related
+     * item (`incoming`). For undirected `relates_to`, the API always
+     * normalises to `outgoing`. The UI uses this to flip section titles
+     * (e.g. "Tested by" on a dev story vs. "Tests" on a QA twin).
+     */
+    direction: 'outgoing' | 'incoming';
+    created_at: string;
+}
+
+export type IssueEventType =
+    | 'created'
+    | 'status_changed'
+    | 'assigned'
+    | 'field_updated'
+    | 'comment_added'
+    | 'link_created'
+    | 'link_deleted'
+    | 'rounds_reset'
+    | 'dispatch_blocked'
+    | 'deleted'
+    // 2026-07-03 audit round 2 — audit trail for the MCP `remove_history`
+    // action. Emitted by historyPruneService.pruneBefore inside the same
+    // transaction as the bulk DELETE so the destructive operation stays
+    // traceable (was previously undetectable after commit — the very
+    // issue_events rows that would record it were what got wiped).
+    | 'history_pruned';
+export type IssueEventField =
+    | 'status'
+    | 'assignee'
+    | 'title'
+    | 'description'
+    | 'reporter'
+    | 'spec_md'
+    | 'pr_url'
+    | 'points'
+    | 'acceptance_criteria'
+    | 'priority'
+    | 'steps_to_reproduce'
+    | 'expected'
+    | 'actual'
+    | 'frequency'
+    | 'failure_scope'
+    | 'link'
+    | 'external_link'
+    | 'git_push'
+    | 'repo_exec'
+    | null;
+
+export interface IIssueEvent {
+    id: number;
+    issue_type: IssueType;
+    issue_id: string;
+    event_type: IssueEventType;
+    actor_agent_id: string | null;
+    field: IssueEventField;
+    from_value: string | null;
+    to_value: string | null;
+    detail: string | null;
+    created_at: string;
+}
+
+export type IActivityItem =
+    | { kind: 'comment'; data: IComment }
+    | { kind: 'event'; data: IIssueEvent };
+
+export type NotificationKind = 'needs_you' | 'update' | 'system';
+export type NotificationDeliveryStatus = 'none' | 'pending' | 'sent' | 'failed';
+export type PushDeliveryStatus = 'none' | 'pending' | 'sent' | 'failed';
+
+export interface INotification {
+    id: number;
+    event_type: string;
+    message: string;
+    issue_type: IssueType | null;
+    issue_id: string | null;
+    project_id: string | null;
+    sent_external: number;
+    kind: NotificationKind;
+    agent_id: string | null;
+    external_status: NotificationDeliveryStatus;
+    failure_reason: string | null;
+    push_status: PushDeliveryStatus;
+    push_failure_reason: string | null;
+    read_at: string | null;
+    /** Optional deep-link target. When set, both the web-push click handler
+     *  and the in-app notification row navigate here instead of deriving
+     *  the URL from issue_type/issue_id. Lets callers route to surfaces
+     *  that aren't Atlas items (Terminal sessions, etc.). */
+    link_url: string | null;
+    /** Set while quiet hours hold the outward (Telegram/Teams) send; the row
+     *  is `external_status='pending'` until the window ends and the minute
+     *  tick delivers it. Null otherwise. */
+    external_deferred_at: string | null;
+    /** The reminder whose fire produced this row; null for every other
+     *  producer, and for reminder fires from before the fire log. */
+    reminder_id: number | null;
+    /** False for rows that only track an outward send (an external-only
+     *  reminder, an MCP `send-external`): they show in the Notification Log,
+     *  never in the In-App Feed or the unread count. */
+    in_app: boolean;
+    created_at: string;
+}
+
+export interface IPushSubscription {
+    endpoint: string;
+    p256dh: string;
+    auth: string;
+    user_agent: string | null;
+    created_at: string;
+    last_seen_at: string;
+}
+
+export type GuardrailCategory =
+    | 'file_system'
+    | 'secrets_credentials'
+    | 'git_branches'
+    | 'side_effects_network'
+    | 'escalation_scope';
+
+export type GuardrailSeverity = 'block' | 'ask_owner' | 'warn';
+
+export interface IGuardrailRule {
+    id: string;
+    category: GuardrailCategory;
+    rule_text: string;
+    detail: string | null;
+    severity: GuardrailSeverity;
+    sort_order: number;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface IProjectGuardrail {
+    id: string;
+    project_id: string;
+    title: string;
+    body_md: string;
+    icon: string;
+    enabled: number;
+    sort_order: number;
+    created_at: string;
+    updated_at: string;
+}
+
+/**
+ * Phase 1.5b — Scripts are first-class entities, NOT properties of a
+ * rule. Owner authors a script with a name + description + paired
+ * bash + PowerShell bodies. Orchestrator emits each script as
+ * `.atlas/scripts/{bash,powershell}/check-<id>.{sh,ps1}` at run time.
+ *
+ * No coupling to rules — the LLM-judged Articles half (`IGuardrailRule`)
+ * and the machine-judged Scripts half (`IGuardrailScript`) compose
+ * independently into the constitution.
+ */
+export interface IGuardrailScript {
+    id: string;
+    name: string;
+    description: string;
+    body_sh: string;
+    body_ps1: string;
+    sort_order: number;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface IProjectGuardrailScript {
+    id: string;
+    project_id: string;
+    name: string;
+    description: string;
+    body_sh: string;
+    body_ps1: string;
+    sort_order: number;
+    created_at: string;
+    updated_at: string;
+}
+
+/**
+ * Quality-gate checklist item. The agent reports each row in its
+ * `atlas-outcome` block; a failed `required: true` row turns `done` into a
+ * fail for the workflow's routing.
+ */
+export interface IAgentChecklistItem {
+    id: number;
+    agent_id: string;
+    label: string;
+    sort_order: number;
+    required: boolean;
+}
+
+export interface IAgentPromptVersion {
+    id: number;
+    agent_id: string;
+    version: number;
+    body_md: string;
+    edited_by: string;
+    reverted_from: number | null;
+    created_at: string;
+}
+
+export type AgentMemorySource = 'ai-generated' | 'manual-edit';
+
+export interface IAgentMemory {
+    agent_id: string;
+    body_md: string;
+    version: number;
+    source: AgentMemorySource;
+    last_run_id: string | null;
+    /**
+     * Theme 08 — increments per completed/errored run (errors count
+     * double). When this reaches `agents.memory_cadence`, the orchestrator
+     * regenerates and resets to 0.
+     */
+    runs_since_regen: number;
+    updated_at: string;
+}
+
+// Theme 08 — RAG + memory regenerations audit.
+
+export type MemoryRegenerationTrigger = 'manual' | 'cadence' | 'high_signal' | 'mcp_update';
+
+export type MemoryBoundaryFlag = 'item_id' | 'agent_id' | 'project_id' | 'run_id';
+
+export interface IMemoryRegeneration {
+    id: number;
+    agent_id: string;
+    /** Null for manual regenerations not bound to a run. */
+    run_id: string | null;
+    trigger: MemoryRegenerationTrigger;
+    prev_version: number;
+    new_version: number;
+    prev_body_hash: string;
+    new_body_hash: string;
+    chars_added: number;
+    chars_removed: number;
+    /**
+     * A06 — soft filter for boundary-rule violations in the newly-written
+     * body. Empty array when the memory is clean. Persisted on every audit
+     * row (manual / cadence / high_signal / mcp_update); the Memory tab
+     * renders an amber chip on the history row when non-empty.
+     */
+    boundary_flags: MemoryBoundaryFlag[];
+    created_at: string;
+}
+
+// Theme 11 — SDLC commit discipline audit.
+export type CommitVerificationResult = 'compliant' | 'partial' | 'silent' | 'clean';
+
+export interface ICommitProblem {
+    commit_sha?: string;
+    reason: string;
+}
+
+export interface ICommitVerification {
+    id: number;
+    run_id: string;
+    item_id: string | null;
+    agent_id: string;
+    result: CommitVerificationResult;
+    commit_count: number;
+    problems: ICommitProblem[];
+    checked_at: string;
+}
+
+export interface SSEEvent {
+    type:
+        | 'agent_status'
+        | 'agent_output'
+        | 'run_completed'
+        | 'run_error'
+        | 'run_queued'
+        // 2026-06-10 — the per-project setup script exited non-zero,
+        // timed out, or referenced an unknown `${variable.KEY}`. Run
+        // is finalized with `agent_runs.status='setup_failed'` and no
+        // CLI is spawned. Web UI shows a distinct amber affordance and
+        // links to `setup_output_text` for the captured stdout/stderr.
+        | 'run_setup_failed'
+        | 'clone_status'
+        | 'clone_output'
+        | 'clone_completed'
+        | 'clone_error'
+        | 'delete_status'
+        | 'delete_output'
+        | 'delete_completed'
+        | 'delete_error'
+        | 'reclone_status'
+        | 'reclone_output'
+        | 'reclone_completed'
+        | 'reclone_error'
+        | 'autofetch_status'
+        | 'autofetch_output'
+        | 'autofetch_completed'
+        | 'autofetch_error'
+        | 'counts_changed'
+        | 'notification_created'
+        | 'notification_updated'
+        | 'dry_run_started'
+        | 'dry_run_output'
+        | 'dry_run_done'
+        | 'memory_regenerated'
+        | 'commit_verification'
+        // 2026-06-22 — Terminal v1. Session lifecycle events.
+        // PTY byte stream goes over a dedicated WebSocket, NOT over SSE.
+        | 'cli_session_status'
+        | 'cli_session_closed'
+        // ADR 0014 — a workflow run changed status or moved to another node.
+        | 'workflow_run_updated'
+        // ADR 0023 — a test run got its verdict; carries `agentTestId`.
+        | 'agent_test_judged';
+    agentId?: string;
+    /** Payload of `agent_test_judged`. */
+    agentTestId?: string;
+    /** ADR 0014 — payload of `workflow_run_updated`. */
+    workflowId?: string;
+    workflowRunId?: string;
+    workflowRunStatus?: WorkflowRunStatus;
+    nodeId?: string | null;
+    /** Set when the run is a sub-task's run, so the Task run's view refreshes too. */
+    parentWorkflowRunId?: string;
+    runId?: string;
+    /** Theme 08 — payload field carried by `memory_regenerated`. */
+    memoryRegenerationTrigger?: MemoryRegenerationTrigger;
+    /** Theme 08 — new memory version after a `memory_regenerated`. */
+    memoryVersion?: number;
+    /** Theme 11 — result of a `commit_verification` SSE event. */
+    commitVerificationResult?: CommitVerificationResult;
+    issueType?: IssueType;
+    issueId?: string;
+    status?: RunStatus | CloneStatus | 'starting' | 'fetching' | 'merging' | 'skipped';
+    output?: string;
+    cloneId?: string;
+    deleteId?: string;
+    recloneId?: string;
+    autofetchId?: string;
+    dryRunId?: string;
+    stream?: 'stdout' | 'stderr';
+    exitCode?: number;
+    projectId?: string;
+    /** ADR 0018 — which repo of the project an auto-fetch / reclone event is about. */
+    repoId?: string;
+    mode?: 'unregister' | 'purge';
+    stashPath?: string | null;
+    /** Set on `reclone_completed`: commits the fast-forward brought in (null when HEAD was unreadable). */
+    commitsPulled?: number | null;
+    result?: ScheduleRunStatus;
+    detail?: string | null;
+    project?: IProject;
+    /** Set on `clone_completed`: the repo the clone registered. */
+    repo?: IProjectRepo;
+    errorDetail?: string;
+    /** W4 — typed kind on `run_error` SSE events. Lets the UI render a
+     *  kind-aware banner (e.g. "claude CLI not on PATH") instead of dumping
+     *  the raw error string. Undefined on non-error events and on errors
+     *  the runner couldn't classify. */
+    errorKind?: ApiErrorKind;
+    /** W4 — optional structured context that pairs with `errorKind`. */
+    errorDetails?: unknown;
+    /** 2026-06-10 — typed kind on `run_setup_failed` SSE events.
+     *  `unknown_secret` (placeholder references a missing key),
+     *  `nonzero` (script exited with non-zero exit code),
+     *  `timeout` (script exceeded ATLAS_SETUP_TIMEOUT_MS),
+     *  `spawn_failed` (couldn't launch the script process at all). */
+    setupFailedKind?: 'unknown_secret' | 'nonzero' | 'timeout' | 'spawn_failed';
+    notificationId?: number;
+    notificationKind?: NotificationKind;
+    scope?: 'sidenav' | 'dashboard';
+    timestamp?: string;
+    // 2026-06-22 — Terminal v1 SSE payload fields.
+    cliSessionId?: string;
+    cliSessionStatus?: CliSessionStatus;
+    cliSessionFinalizePrUrl?: string | null;
+}
+
+export type SchedulePreset = 'hourly' | 'every_4h' | 'daily' | 'weekly' | 'custom';
+export type ScheduleConflictPolicy = 'skip' | 'stash' | 'abort';
+export type ScheduleRunStatus = 'success' | 'skipped' | 'failure' | 'conflict';
+
+export interface IProjectSchedule {
+    // ADR 0018 — auto-fetch is per repo; project_id rides along so the
+    // "pause while agents are active" guard resolves without a join.
+    repo_id: string;
+    project_id: string;
+    enabled: boolean;
+    preset: SchedulePreset;
+    cron_expression: string;
+    time_of_day: string;
+    weekday: number | null;
+    skip_if_dirty: boolean;
+    pause_while_agents_active: boolean;
+    conflict_policy: ScheduleConflictPolicy;
+    last_run_at: string | null;
+    last_run_status: ScheduleRunStatus | null;
+    last_run_detail: string | null;
+    next_run_at: string | null;
+    auth_failure_count: number;
+    created_at: string;
+    updated_at: string;
+}
+
+// Theme 07 — reminder runtime. The MCP `setReminder` tool inserts a row;
+// `agent-schedule-registry.tick()` fires due rows as external notifications
+// + in-app notification + SSE.
+export type ReminderScheduleKind = 'once' | 'daily' | 'weekly' | 'cron';
+export type ReminderChannel = 'external' | 'notification' | 'both';
+export type ReminderStatus = 'active' | 'paused' | 'cancelled' | 'completed';
+
+export type ReminderSchedule =
+    | { kind: 'once'; at: string }
+    | { kind: 'daily'; time_of_day: string }
+    | { kind: 'weekly'; weekdays: number[]; time_of_day: string }
+    | { kind: 'cron'; expr: string };
+
+export interface IReminder {
+    id: number;
+    label: string;
+    body: string;
+    schedule_kind: ReminderScheduleKind;
+    /**
+     * Encoded schedule payload, format depends on `schedule_kind`:
+     *   once   -> ISO datetime
+     *   daily  -> 'HH:MM'
+     *   weekly -> '<HH:MM>|<weekdays-comma-sep-ISO-1-7>'
+     *   cron   -> cron expression
+     */
+    schedule_value: string;
+    channel: ReminderChannel;
+    next_fire_at: string;
+    last_fired_at: string | null;
+    /** Fires logged in `notifications.reminder_id` (fires before the log existed don't count). */
+    fire_count: number;
+    created_by_agent_id: string | null;
+    status: ReminderStatus;
+    created_at: string;
+    updated_at: string;
+}
+
+/** One fire of a reminder: the notification row it produced and how it was delivered. */
+export interface IReminderFire {
+    notification_id: number;
+    fired_at: string;
+    push_status: PushDeliveryStatus;
+    external_status: NotificationDeliveryStatus;
+    failure_reason: string | null;
+}
+
+// P12 — Scratch Pad. A free-form markdown-tile workspace for the Owner;
+// stored in the `scratch_pad` table. id is a client-minted string (ULID-ish)
+// so the route handler accepts an explicit id from the create payload,
+// matching how items and projects are minted.
+export interface IScratchPad {
+    id: string;
+    title: string;
+    body_md: string;
+    created_at: string;
+    updated_at: string;
+}
+
+// 2026-06-22 — Terminal v1. PTY-backed interactive Claude Code sessions
+// hosted in the web app. A session owns a project-scoped worktree + branch
+// and a Claude CLI session_id (minted by us via `--session-id <uuid>` at
+// spawn). PTY bytes stream over WS (`/api/cli/sessions/:id/stream`); SSE
+// only carries metadata-change events for cache invalidation.
+export type CliSessionStatus = 'active' | 'paused' | 'closed' | 'errored';
+
+export interface ICliSession {
+    id: string;
+    /**
+     * Null on a STANDALONE session — one the Owner opened directly on a folder
+     * of their choosing with no Atlas project, no worktree, and no `.atlas/`
+     * staging. `project_id === null` is the discriminator for that whole mode.
+     */
+    project_id: string | null;
+    /** ADR 0018 — the repo of that project the session is checked out on. Null on a standalone session. */
+    repo_id: string | null;
+    title: string;
+    status: CliSessionStatus;
+    /** Which CLI this session is running. The claude dialect (`claude`, `ollama`) supports `--resume`; `copilot` does not. */
+    cli: AgentCli;
+    /**
+     * The session's cwd. For a project session that is the Atlas-provisioned
+     * worktree; for a standalone session it is the folder the Owner picked.
+     * `worktree_branch !== null` is what means "Atlas created and owns this
+     * directory" — the finalize path keys its teardown off that, never off
+     * this field, because deleting a standalone session's folder would
+     * destroy the Owner's real repo.
+     */
+    worktree_path: string | null;
+    worktree_branch: string | null;
+    /**
+     * Git credential this session's PTY authenticates with. Standalone
+     * sessions carry the Owner's pick here; project sessions leave it null and
+     * resolve `project.credential_id` at spawn/resume time instead.
+     */
+    credential_id: string | null;
+    /** Only set for `claude` sessions — minted via `--session-id` for `--resume`. Null for copilot. */
+    claude_session_id: string | null;
+    model: string;
+    initial_prompt: string | null;
+    created_at: string;
+    updated_at: string;
+    last_active_at: string;
+    closed_at: string | null;
+    finalize_pr_url: string | null;
+    /** Optional Atlas item this session is helping with. Null = project-scoped only. */
+    item_id: string | null;
+    /**
+     * Token + USD cost columns. Populated at session close for Claude PTY
+     * sessions by summing per-event `usage` blocks in the ingested JSONL
+     * transcript and multiplying by the model pricing table (see api
+     * `pty-transcript-usage.ts` + `claude-model-pricing.ts`). Null for
+     * copilot rows — copilot's `events.jsonl` doesn't carry equivalent
+     * per-event token data, so cost for copilot terminals is deferred.
+     * `cache_creation_tokens` is the SUM of ephemeral_5m + ephemeral_1h
+     * cache writes; the per-tier split lives only in the JSONL itself.
+     */
+    total_cost_usd: number | null;
+    input_tokens: number | null;
+    output_tokens: number | null;
+    cache_creation_tokens: number | null;
+    cache_read_tokens: number | null;
+}
+
+export interface CliSessionCreateInput {
+    project_id: string;
+    /** ADR 0018 — which repo to check out. Optional only for a single-repo project. */
+    repo_id?: string;
+    /** Defaults to `Session <short-id>` server-side if omitted. */
+    title?: string;
+    /** Defaults to `atlas/terminal/<short-id>` server-side if omitted. */
+    branch_name?: string;
+    /** Optional first prompt sent to the PTY after a settle delay. */
+    initial_prompt?: string;
+    /** Defaults to the per-CLI default model server-side if omitted. */
+    model?: string;
+    /** Optional Atlas item id to anchor this session to. Must belong to the same project. */
+    item_id?: string;
+    /** Which CLI to spawn. Defaults to `claude` server-side. */
+    cli?: AgentCli;
+}
+
+/**
+ * Standalone terminal — a PTY opened directly on a folder the Owner picked,
+ * under a credential they picked. Deliberately a separate shape from
+ * `CliSessionCreateInput`: the two have disjoint required fields (folder vs
+ * project) and nothing the project path does — worktree provisioning,
+ * `.atlas/` staging, the setup script, the commit/push/PR finalize — happens
+ * here.
+ */
+export interface CliSessionStandaloneCreateInput {
+    /** Absolute path to an existing directory on the API host. */
+    folder_path: string;
+    /** Git credential to authenticate the PTY's git/gh calls. Omit for none. */
+    credential_id?: string;
+    /** Defaults to the folder's basename server-side if omitted. */
+    title?: string;
+    /** Optional first prompt sent to the PTY after a settle delay. */
+    initial_prompt?: string;
+    /** Defaults to the per-CLI default model server-side if omitted. */
+    model?: string;
+    /** Which CLI to spawn. Defaults to `claude` server-side. */
+    cli?: AgentCli;
+}
+
+/** One entry from `git status --porcelain -z` in the session worktree. */
+export interface CliSessionUnstagedFile {
+    /** Two-char porcelain code, e.g. ` M`, `??`, `A `, `MM`. */
+    code: string;
+    /** Path relative to the worktree root. */
+    path: string;
+}
+
+export interface CliSessionPreflightStopResponse {
+    unstaged: CliSessionUnstagedFile[];
+    current_branch: string;
+    /** Number of local commits ahead of `origin/<branch>` (0 if remote tracking absent). */
+    ahead_of_remote: number;
+}
+
+/** GET /api/cli/sessions/:id/transcript response — only valid for closed/errored sessions. */
+export interface ICliSessionTranscriptResponse {
+    /** Full JSONL file content from the CLI's on-disk session state. Null if unavailable. */
+    jsonl_content: string | null;
+    /** ISO timestamp of the last on-disk read, or null if never ingested. */
+    ingested_at: string | null;
+    /**
+     * Which on-disk transcript FORMAT this is — the CLI dialect, not the cli
+     * value. Ollama sessions run the Claude binary, so they report `claude`.
+     * The viewer dispatches on this.
+     */
+    source: CliDialect;
+}
+
+export interface CliSessionStopInput {
+    /** Paths to `git add` before commit. Empty array = no commit, just push + teardown. */
+    files_to_stage: string[];
+    /** Required only if `files_to_stage` is non-empty. */
+    commit_message?: string;
+    /**
+     * Open a pull request after a successful push. Defaults to `true`
+     * server-side, so callers that predate this field keep the original
+     * auto-PR behaviour. `false` still pushes the branch — the worktree is
+     * torn down immediately after close, so skipping the push would destroy
+     * the work. It only suppresses PR creation (and, with it, the
+     * `item_external_links` row that records the PR URL).
+     */
+    open_pull_request?: boolean;
+}
+
+export interface CliSessionStopResponse {
+    session: ICliSession;
+    pushed: boolean;
+    committed: boolean;
+    finalize_pr_url: string | null;
+}
+
+// 2026-08-04 — Terminal finalize diff. The Stop modal reviews two scopes,
+// which together are exactly what the PR will contain:
+//   `uncommitted` — working tree vs HEAD; these are the stageable files.
+//   `committed`   — HEAD vs the merge-base with the project's default branch;
+//                   work already committed inside the session, read-only.
+export type CliSessionDiffScopeName = 'uncommitted' | 'committed';
+
+/** One changed file in one scope. */
+export interface CliSessionDiffFile {
+    /** Repo-relative, forward slashes. The POST-image (new) path for renames. */
+    path: string;
+    /** Pre-image path when `status` is `renamed` or `copied`; else null. */
+    old_path: string | null;
+    status:
+        | 'added'
+        | 'modified'
+        | 'deleted'
+        | 'renamed'
+        | 'copied'
+        | 'type_changed'
+        | 'untracked';
+    /**
+     * Two-char `git status --porcelain` code (` M`, `??`, `MM`, `A `). Only
+     * the uncommitted scope has index/worktree columns, so this is null for
+     * the committed scope.
+     */
+    code: string | null;
+    /** Lines added. 0 when `binary`. */
+    additions: number;
+    /** Lines removed. 0 when `binary`. */
+    deletions: number;
+    binary: boolean;
+    /** Over the per-file size cap — the patch endpoint returns `patch: null`. */
+    too_large: boolean;
+}
+
+export interface CliSessionDiffScope {
+    files: CliSessionDiffFile[];
+    /** Files git reported BEFORE the server-side cap; may exceed `files.length`. */
+    total_files: number;
+    truncated: boolean;
+    /** Sums across the UNCAPPED set, so the header stat stays honest. */
+    additions: number;
+    deletions: number;
+}
+
+/** GET /api/cli/sessions/:id/diff */
+export interface CliSessionDiffSummaryResponse {
+    uncommitted: CliSessionDiffScope;
+    committed: CliSessionDiffScope;
+    current_branch: string;
+    /** Ref the merge-base came from (`origin/main`, `main`, …). Null if none resolved. */
+    base_ref: string | null;
+    /** 40-hex merge-base commit. Null when `base_ref` is null. */
+    base_sha: string | null;
+    commits_ahead_of_base: number;
+}
+
+/** GET /api/cli/sessions/:id/diff/file */
+export interface CliSessionFilePatchResponse {
+    path: string;
+    scope: CliSessionDiffScopeName;
+    /** Raw unified diff. Null when `binary` or `truncated`. */
+    patch: string | null;
+    binary: boolean;
+    truncated: boolean;
+    /** Byte size of the patch git produced, even when `patch` is null. */
+    byte_size: number;
+}
+
+/**
+ * Where a workflow run's changes for one repo were read from.
+ *   worktree    — the run's live checkout (running, parked or cancelled run).
+ *   branch      — the repo's own clone, at the run's branch (local or
+ *                 `origin/<branch>`), after delivery removed the worktree.
+ *   unavailable — neither exists any more; `reason` says why.
+ */
+export type WorkflowRunDiffSource = 'worktree' | 'branch' | 'unavailable';
+
+/** One repo of a run in GET /api/workflow-runs/:id/diff. */
+export interface WorkflowRunRepoDiff {
+    repo_id: string;
+    repo_name: string;
+    source: WorkflowRunDiffSource;
+    /** Set when `source` is `unavailable`; else null. */
+    reason: string | null;
+    /** Null when `source` is `unavailable`. `uncommitted` is empty for `branch`. */
+    summary: CliSessionDiffSummaryResponse | null;
+}
+
+/** GET /api/workflow-runs/:id/diff */
+export interface WorkflowRunDiffResponse {
+    run_id: string;
+    branch: string | null;
+    /** Empty when the run has no project or branch (nothing was checked out). */
+    repos: WorkflowRunRepoDiff[];
+}
+
+// W4 — Typed API error envelope. Every non-2xx response from @atlas/api
+// SHOULD carry an ApiErrorBody. Legacy callers that send `{ error: '…' }`
+// alone are still tolerated; the web client defaults `kind` to
+// 'internal_error' when missing so round-trip back-compat holds.
+export type ApiErrorKind =
+    | 'unauthorized'           // missing/bad MCP token
+    | 'credentials_missing'    // user hasn't configured this integration yet
+    | 'credentials_invalid'    // creds present but rejected by upstream (Jira/OpenAI/etc.)
+    | 'rate_limited'           // upstream returned 429
+    | 'upstream_unavailable'   // upstream returned 5xx or connection refused (covers MCP server down)
+    | 'cli_not_installed'      // `claude` / `copilot` binary not on PATH (ENOENT)
+    | 'validation_error'       // request didn't parse
+    | 'not_found'              // GET on missing id
+    | 'conflict'               // unique constraint, status transition, depends_on block, etc.
+    | 'internal_error';        // catch-all — bug, fix and reclassify next time
+
+export interface ApiErrorBody {
+    error: string;       // human one-liner (back-compat with existing { error } responses)
+    kind: ApiErrorKind;  // machine code (new)
+    details?: unknown;   // optional structured context (e.g. which binary is missing)
+}
+
+// ── Marketplace ──────────────────────────────────────────────────────────────
+//
+// The marketplace catalog is an immutable-from-the-runtime-perspective list of
+// shareable agents. Catalog content lives on disk under
+// `packages/api/src/marketplace/catalog/<id>/`; the seed script loads it into
+// the `marketplace_agents` table, bumping `version` whenever the canonical
+// content hash changes. Local agents carry an optional soft back-link
+// (IAgent.marketplace_source_id) so the UI can surface "upgrade available"
+// when the catalog has moved on.
+
+export interface IMarketplaceAgent {
+    id: string;
+    name: string;
+    category: AgentCategory;
+    cli: AgentCli;
+    model: string;
+    effort: AgentEffort;
+    framework: string;
+    prompt_md: string;
+    description: string;
+    designation: string;
+    accent_color: string;
+    sort_order: number;
+    glyph: string;
+    role_id: SdlcRole | null;
+    status: AgentStatus;
+    kind_slug: AgentKindSlug;
+    settings_json: Record<string, unknown>;
+    memory_cadence: number;
+    /** Optional starter memory body. Most catalog entries ship empty. */
+    memory_template_md: string;
+    /** Short blurb shown on marketplace cards. */
+    summary: string;
+    /** Monotonic integer bumped by the seed when content_hash changes. */
+    version: number;
+    published_at: string;
+    updated_at: string;
+}
+
+/** Lightweight projection returned by list / search endpoints + MCP. */
+export interface IMarketplaceAgentSummary {
+    id: string;
+    name: string;
+    /**
+     * F-010 — the CLI this catalog agent runs on. Carried on the SUMMARY, not
+     * just the full record, so an install surface can warn that the binary is
+     * missing BEFORE installing. Without it a workflow template happily
+     * installed ten agents for a CLI that is not on the machine, and the
+     * failure only surfaced mid-run.
+     */
+    cli: AgentCli;
+    category: AgentCategory;
+    kind_slug: AgentKindSlug;
+    summary: string;
+    accent_color: string;
+    glyph: string;
+    version: number;
+    /** Whether some local agent has marketplace_source_id === this id.
+     *  Detached agents (source_id NULL) are NOT counted. */
+    is_installed: boolean;
+    /** @deprecated Equal to `is_installed`; kept on the shape for one
+     *  release for back-compat. New code should use `is_installed`. */
+    is_linked: boolean;
+    /** The local agent's id when installed, null otherwise. May differ
+     *  from `id` (the catalog id) when the user picked a custom slug on
+     *  install — the frontend must use this to navigate to the agent's
+     *  detail page, NOT the catalog id. */
+    installed_agent_id: string | null;
+    /** The linked local agent's pulled_version, null when not installed. */
+    installed_version: number | null;
+    /** True when installed AND installed_version < version. */
+    upgrade_available: boolean;
+}
+
+export interface IMarketplaceAgentChecklist {
+    label: string;
+    sort_order: number;
+    required: boolean;
+}
+
+/** Full composite returned by GET /api/marketplace/agents/:id + MCP. */
+export interface IMarketplaceAgentFull {
+    agent: IMarketplaceAgent;
+    checklists: IMarketplaceAgentChecklist[];
+}
+
+/** Per-field diff returned by POST /api/marketplace/agents/:id/diff/:agent_id. */
+export interface IMarketplaceUpgradeDiff {
+    marketplace_id: string;
+    local_agent_id: string;
+    marketplace_version: number;
+    local_pulled_version: number | null;
+    fields: {
+        prompt_md: { from: string; to: string; changed: boolean };
+        settings_json: {
+            from: Record<string, unknown>;
+            to: Record<string, unknown>;
+            changed: boolean;
+        };
+        checklists: {
+            from: IMarketplaceAgentChecklist[];
+            to: IMarketplaceAgentChecklist[];
+            changed: boolean;
+        };
+    };
+}
+
+export type MarketplaceUpgradeField =
+    | 'prompt_md'
+    | 'settings_json'
+    | 'checklists';
+
+/** Body of POST /api/agents/:id/accept-upgrade. */
+export interface IAcceptUpgradeRequest {
+    fields: MarketplaceUpgradeField[];
+}
+
+/** Manifest JSON inside an agent export zip. Round-trips with the catalog. */
+export interface IAgentBundleManifest {
+    /** Catalog/agent id (kebab slug). */
+    id: string;
+    name: string;
+    category: AgentCategory;
+    cli: AgentCli;
+    model: string;
+    effort: AgentEffort;
+    framework: string;
+    description: string;
+    designation: string;
+    accent_color: string;
+    sort_order: number;
+    glyph: string;
+    role_id: SdlcRole | null;
+    status: AgentStatus;
+    kind_slug: AgentKindSlug;
+    settings_json: Record<string, unknown>;
+    memory_cadence: number;
+    summary: string;
+    version: number;
+    published_at: string;
+}
+
+// ── Analytics (delivery + workflow insight endpoints) ──────────────────────
+
+/** `?window=` on every `/api/analytics*` summary. `month` = this calendar month in the viewer's tz. */
+export const ANALYTICS_WINDOWS = ['7d', '30d', '90d', 'month'] as const;
+export type AnalyticsWindow = (typeof ANALYTICS_WINDOWS)[number];
+
+/**
+ * Why a workflow run parked (`workflow_run_events.park_kind`, migration 014).
+ * Set by the engine at every park site, so analytics groups exactly instead of
+ * reading prose. `subtask_waiting` is a Task run held by its parked sub-task:
+ * the sub-task's own park carries the real kind, so analytics skips the copy.
+ * `other` only labels rows the migration's backfill could not classify.
+ */
+export const WORKFLOW_PARK_KINDS = [
+    'question',
+    'no_outcome',
+    'review_requested',
+    'rejected',
+    'checklist_failed',
+    'gate_failed',
+    'check_unavailable',
+    'loop_limit',
+    'step_error',
+    'setup_failed',
+    'delivery_failed',
+    'lost_step',
+    'missing_agent',
+    'dispatch_failed',
+    'wiring_gap',
+    'subtask_waiting',
+    'other',
+] as const;
+export type WorkflowParkKind = (typeof WORKFLOW_PARK_KINDS)[number];
+
+/**
+ * The span a response covers, resolved in the viewer's tz. `previous_*` is the
+ * span its deltas compare against: the N days before for a rolling window, the
+ * same number of days into last month for `month`.
+ */
+export interface IAnalyticsPeriod {
+    window: AnalyticsWindow;
+    tz: string;
+    /** `day` for 7d / 30d / month, `week` (Monday start) for 90d. */
+    bucket: 'day' | 'week';
+    start: string;
+    end: string;
+    previous_start: string;
+    previous_end: string;
+}
+
+export interface IAnalyticsSpread {
+    /** How many Tasks the percentiles are over. */
+    count: number;
+    p50_s: number | null;
+    p90_s: number | null;
+}
+
+/**
+ * One headline number with its trend: this window (`cur`), the previous
+ * equal-length window (`prev`, null when it has no data to compare) and the
+ * per-bucket series behind a sparkline (aligned with `buckets`, null where a
+ * bucket has nothing to measure).
+ */
+export interface IAnalyticsTrend {
+    cur: number | null;
+    prev: number | null;
+    series: Array<number | null>;
+}
+
+export type AnalyticsDeliveryTrendKey =
+    | 'tasks_shipped'
+    | 'lead_p50_s'
+    | 'cycle_p50_s'
+    | 'wip'
+    | 'waiting_s'
+    | 'reopen_rate'
+    | 'prs_merged'
+    | 'time_to_pr_s'
+    | 'flow_efficiency'
+    | 'owner_response_p50_s'
+    | 'weekly_throughput'
+    | 'rework_rate'
+    | 'first_attempt_merge_rate';
+
+export type AnalyticsWorkflowsTrendKey = 'success_rate' | 'runs' | 'gate_pass_rate' | 'retries' | 'retries_per_task';
+
+export type AnalyticsSpendTrendKey = 'spend' | 'cost_per_task' | 'cache_savings' | 'cache_hit_rate';
+
+export interface IAnalyticsDelivery {
+    period: IAnalyticsPeriod;
+    /** Bucket keys (`YYYY-MM-DD`, Monday for weeks) every `trends[*].series` is aligned with. */
+    buckets: string[];
+    trends: Record<AnalyticsDeliveryTrendKey, IAnalyticsTrend>;
+    /**
+     * Flow over the shipped Tasks: time In progress or In review (worked) vs
+     * every other status before Done (waiting), the Owner's answer time to
+     * workflow parks, and Tasks shipped per Monday week.
+     */
+    flow: {
+        efficiency: number | null;
+        active_s: number;
+        waiting_s: number;
+        owner_response: { answered: number; unanswered: number; p50_s: number | null; p90_s: number | null };
+        weekly_throughput: number | null;
+        weekly: Array<{ bucket: string; tasks: number }>;
+    };
+    /** Tasks shipped in the window that later left Done (by the window's end). */
+    rework: { shipped: number; reopened: number; rate: number | null };
+    /** Task runs whose every PR merged, and how many got there with no retried step and no park. */
+    first_attempt: { merged_runs: number; clean: number; rate: number | null };
+    /** Items whose first move into Done falls in the window. */
+    shipped: { tasks: number; sub_tasks: number };
+    /** One row per bucket, zero-filled. `cycle_p50_s` is over the bucket's Tasks. */
+    throughput: Array<{ bucket: string; tasks: number; sub_tasks: number; cycle_p50_s: number | null }>;
+    /** Task created → first Done. */
+    lead_time: IAnalyticsSpread;
+    /** Task's first In progress → first Done. Tasks that never entered In progress are left out. */
+    cycle_time: IAnalyticsSpread;
+    cycle_histogram: Array<{ label: string; min_s: number; max_s: number | null; count: number }>;
+    /** Shipped Tasks' time in each status before Done, averaged over every shipped Task. */
+    time_in_status: Array<{ status: IssueStatus; avg_s: number; items: number }>;
+    /** Moves into Waiting for info that started in the window, open ones measured to the window's end. */
+    waiting: { parks: number; total_s: number; median_s: number | null; still_waiting: number };
+    /** Distinct items moved out of Done vs into Done, in the window. */
+    reopens: { reopened: number; done: number; rate: number | null };
+    /** Tasks in progress, waiting for info or in review right now (not windowed). */
+    wip: {
+        count: number;
+        aging: number;
+        aging_after_s: number;
+        oldest: Array<{ id: string; title: string; status: IssueStatus; project_id: string; age_s: number }>;
+    };
+    by_priority: Array<{ priority: IssuePriority; shipped: number; cycle_p50_s: number | null }>;
+    by_project: Array<{
+        project_id: string;
+        project_name: string;
+        shipped: number;
+        cycle_p50_s: number | null;
+        lead_p50_s: number | null;
+    }>;
+    /** Shipped Tasks with a Jira issue link vs without. */
+    source_mix: { jira: number; native: number };
+    /** The fleet page's delivery maths (`agent-scorecard.ts`) over runs started in the window. */
+    prs: { opened: number; merged: number; merge_rate: number | null; median_s_to_pr: number | null };
+    previous: { tasks_shipped: number; cycle_p50_s: number | null; prs_merged: number };
+}
+
+export interface IAnalyticsWorkflowRow {
+    workflow_id: string;
+    name: string;
+    runs: number;
+    completed: number;
+    /** Completed ÷ finished (completed, cancelled, error). */
+    success_rate: number | null;
+    /** Completed runs only. */
+    median_duration_s: number | null;
+    avg_loops: number;
+    avg_gate_rounds: number;
+    cost_per_run_usd: number | null;
+}
+
+/** One agent's row: the fleet page's numbers (`shapeAgent`), in name order, no ranking (ADR 0023). */
+export interface IAnalyticsAgentRow {
+    agent_id: string;
+    name: string;
+    accent_color: string | null;
+    steps: number;
+    first_pass: { applied: number; rejected: number; parked: number };
+    loops: number;
+    gate_catch: number;
+    cost_usd: number;
+    per_step_usd: number | null;
+    p95_s: number | null;
+}
+
+export interface IAnalyticsWorkflows {
+    period: IAnalyticsPeriod;
+    /** Bucket keys every `trends[*].series` is aligned with. */
+    buckets: string[];
+    trends: Record<AnalyticsWorkflowsTrendKey, IAnalyticsTrend>;
+    /** Agent-run retries ÷ the Tasks that had an agent run in the window. */
+    retries_per_task: { retries: number; tasks: number; rate: number | null };
+    /** Failed Script-step checks in the window by script, most failures first. */
+    gate_failures: Array<{ script_id: string; name: string; failures: number; runs: number; last_at: string }>;
+    /** Top-level runs started in the window, agent tests left out. */
+    runs: {
+        total: number;
+        completed: number;
+        cancelled: number;
+        error: number;
+        waiting_for_owner: number;
+        running: number;
+        success_rate: number | null;
+    };
+    by_workflow: IAnalyticsWorkflowRow[];
+    /** Script-step verdicts in the window. `pass_rate` = pass ÷ (pass + fail). */
+    gates: { pass: number; fail: number; unavailable: number; needs_review: number; pass_rate: number | null };
+    /** Parks in the window by `park_kind`; `reason` is its label (`WORKFLOW_PARK_KIND_LABELS`). */
+    park_reasons: Array<{ kind: WorkflowParkKind; reason: string; count: number }>;
+    /** Agent dispatches that retried an earlier run (`agent_runs.parent_run_id`). */
+    retries: { retries: number; dispatches: number; rate: number | null };
+    agents: IAnalyticsAgentRow[];
+    previous: { runs: number; success_rate: number | null };
+}
+
+/**
+ * One row of cost efficiency: what the workflow runs started in the window
+ * cost (every step of the run tree), the PRs they opened, and the Tasks among
+ * theirs that shipped in the window.
+ */
+export interface IAnalyticsCostEfficiencyRow {
+    runs: number;
+    cost_usd: number;
+    prs: number;
+    shipped_tasks: number;
+    per_pr_usd: number | null;
+    per_task_usd: number | null;
+}
+
+/** The trend and cost-efficiency part of `GET /api/analytics` (the Spend tab). */
+export interface IAnalyticsSpendInsight {
+    /** Bucket keys every `trends[*].series` is aligned with. */
+    buckets: string[];
+    trends: Record<AnalyticsSpendTrendKey, IAnalyticsTrend>;
+    cost_efficiency: {
+        by_workflow: Array<IAnalyticsCostEfficiencyRow & { workflow_id: string; name: string }>;
+        /** A model's spend in the run trees it worked in, over those trees' PRs and shipped Tasks. */
+        by_model: Array<IAnalyticsCostEfficiencyRow & { model: string | null; cli: string | null }>;
+    };
+}

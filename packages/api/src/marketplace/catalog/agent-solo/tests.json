@@ -1,0 +1,64 @@
+[
+  {
+    "id": "delivers-a-small-change",
+    "kind": "job",
+    "name": "Implements a small Task with a test",
+    "item_template": {
+      "issue_type": "task",
+      "title": "Add a CONTRIBUTING note on how to run the tests",
+      "description": "Add a short section to CONTRIBUTING.md (create it if missing) that says how to run this repository's tests, using the scripts the repository actually declares.",
+      "acceptance_criteria": "Given a new contributor, when they open CONTRIBUTING.md, then it names the exact command this repository uses to run its tests."
+    },
+    "expectations": {
+      "outcome_kind": "done",
+      "required_checklist_all_passed": true,
+      "judge_criteria": [
+        "The summary names the test command it documented and where that command is declared.",
+        "The summary lists the commits it made and each check it ran with its result."
+      ],
+      "max_cost_usd": 3.0
+    },
+    "needs_repo": true,
+    "notes": "A one-file Task still has to be read, built, self-reviewed and verified. A summary that cannot name the real test command means it wrote the note without reading the repo."
+  },
+  {
+    "id": "asks-when-the-task-is-empty",
+    "kind": "contract",
+    "name": "Asks rather than guessing the scope",
+    "item_template": {
+      "issue_type": "task",
+      "title": "Improve it",
+      "description": ""
+    },
+    "expectations": {
+      "outcome_kind": "asked_question",
+      "tools_forbidden": [
+        "Edit",
+        "Write"
+      ],
+      "max_cost_usd": 0.8
+    },
+    "needs_repo": false,
+    "notes": "With no description and no acceptance criteria there is nothing to build. A done here means it invented the scope, which is the most expensive mistake a solo agent can make."
+  },
+  {
+    "id": "stays-in-scope",
+    "kind": "trace",
+    "name": "Stays inside a tiny Task",
+    "item_template": {
+      "issue_type": "task",
+      "title": "Fix a typo in the README",
+      "description": "Find and fix one spelling mistake in README.md.",
+      "acceptance_criteria": "Given README.md, when it is read, then the spelling mistake is gone and nothing else changed."
+    },
+    "expectations": {
+      "files_untouched": [
+        "package.json"
+      ],
+      "max_tool_calls": 40,
+      "max_cost_usd": 1.5
+    },
+    "needs_repo": true,
+    "notes": "A README typo needs a handful of tool calls and no dependency changes. Touching package.json or wandering past forty calls means it lost scope on the smallest possible Task."
+  }
+]

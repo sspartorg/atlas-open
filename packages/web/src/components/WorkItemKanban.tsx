@@ -1,0 +1,365 @@
+import { useMemo, useState, type DragEvent } from 'react';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import Button from '@mui/material/Button';
+import ButtonBase from '@mui/material/ButtonBase';
+import {
+    ISSUE_STATUSES,
+    STATUS_LABELS,
+    getValidNextStatuses,
+    type IssueStatus,
+    type IssueType,
+} from '@atlas/shared';
+import { KindIcon } from './KindIcon.js';
+import { LiveDot } from './LiveDot.js';
+import { AgentChip } from './AgentChip.js';
+import { useIsMobile } from '../hooks/useIsMobile.js';
+import { useToast } from '../hooks/useToast.js';
+import { ATLAS_PALETTE, STATUS_PALETTE } from '../theme/tokens.js';
+import type { AgentSummary } from '../api/types.js';
+
+export interface KanbanItem {
+    id: string;
+    kind: IssueType;
+    shortId: string;
+    title: string;
+    status: IssueStatus;
+    assignee_agent_id: string | null;
+}
+
+interface Props {
+    items: KanbanItem[];
+    agents: AgentSummary[];
+    ownerName: string;
+    ownerAccent: string;
+    /** Called when a card is dropped on a legal column. `override` is always
+     *  false: an illegal drop is refused here, and the Override picker on the
+     *  item's page is the only way to force a status. */
+    onTransition: (item: KanbanItem, nextStatus: IssueStatus, override: boolean) => void;
+    onOpen: (item: KanbanItem) => void;
+}
+
+const COLUMN_ORDER: IssueStatus[] = [...ISSUE_STATUSES];
+
+/**
+ * Cards a column draws before "Show more". A kanban of 2,000 Tasks drew every
+ * card — 24k DOM nodes, and every scroll frame over budget. Nobody reads the
+ * 300th card in a column; the count in the header still says it is there.
+ */
+const COLUMN_PAGE = 50;
+
+function ColumnHeader({ status, count }: { status: IssueStatus; count: number }) {
+    const cfg = STATUS_PALETTE[status];
+    return (
+        <Box
+            sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1.5,
+                py: 1,
+                px: 1.5,
+                borderBottom: `1px solid ${ATLAS_PALETTE.slate10}`,
+            }}
+        >
+            {/* Single mid-tone `.dot` colour — the previous pastel-bg +
+                tonal-fg border combo read as washy at 8px. The dot now
+                reads as a recognisable colour on both light and dark
+                column headers. */}
+            <Box
+                sx={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '9999px',
+                    /* v8 ignore next -- every IssueStatus in COLUMN_ORDER has a STATUS_PALETTE entry with a dot; defensive fallback only */
+                    background: cfg?.dot ?? ATLAS_PALETTE.slate40,
+                    flexShrink: 0,
+                }}
+            />
+            <Typography
+                sx={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    color: ATLAS_PALETTE.slate60,
+                    flex: 1,
+                }}
+            >
+                {STATUS_LABELS[status]}
+            </Typography>
+            <Typography
+                sx={{
+                    fontFamily: '"JetBrains Mono", monospace',
+                    fontSize: 11,
+                    color: ATLAS_PALETTE.slate40,
+                }}
+            >
+                {count}
+            </Typography>
+        </Box>
+    );
+}
+
+function Card({
+    item,
+    agentsById,
+    ownerName,
+    ownerAccent,
+    onDragStart,
+    onClick,
+    draggable,
+}: {
+    item: KanbanItem;
+    agentsById: Map<string, AgentSummary>;
+    ownerName: string;
+    ownerAccent: string;
+    onDragStart: (e: DragEvent<HTMLDivElement>, item: KanbanItem) => void;
+    onClick: () => void;
+    draggable: boolean;
+}) {
+    const assignee = item.assignee_agent_id ? agentsById.get(item.assignee_agent_id) : null;
+    // ButtonBase: a card opens from the keyboard (Tab, Enter/Space) too.
+    return (
+        <ButtonBase
+            component="div"
+            disableRipple
+            draggable={draggable}
+            onDragStart={
+                draggable ? (e: DragEvent<HTMLDivElement>) => onDragStart(e, item) : undefined
+            }
+            onClick={onClick}
+            sx={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                '&.Mui-focusVisible': { outline: `2px solid ${ATLAS_PALETTE.brandBlue}` },
+                background: ATLAS_PALETTE.white,
+                border: `1px solid ${ATLAS_PALETTE.slate10}`,
+                borderRadius: '10px',
+                p: 2,
+                mb: 1.5,
+                cursor: draggable ? 'grab' : 'pointer',
+                transition: 'box-shadow 120ms ease, transform 120ms ease',
+                '&:hover': {
+                    boxShadow: '0 4px 12px rgba(0,0,14,.08)',
+                    transform: 'translateY(-1px)',
+                },
+                '&:active': draggable ? { cursor: 'grabbing' } : undefined,
+            }}
+        >
+            <Box
+                sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 1,
+                    mb: 2,
+                }}
+            >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <KindIcon kind={item.kind} size={14} />
+                    <Typography
+                        sx={{
+                            fontFamily: '"JetBrains Mono", monospace',
+                            fontSize: 11,
+                            color: ATLAS_PALETTE.slate60,
+                        }}
+                    >
+                        {item.shortId}
+                    </Typography>
+                </Box>
+                {item.status === 'in_progress' && <LiveDot />}
+            </Box>
+            <Typography
+                sx={{
+                    fontSize: 13,
+                    color: ATLAS_PALETTE.slate,
+                    lineHeight: 1.4,
+                    fontWeight: 500,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    mb: 2,
+                }}
+            >
+                {item.title}
+            </Typography>
+            {/* `minWidth: 0` lets AgentChip's inline-flex shrink below its
+                intrinsic content size, which is what activates the ellipsis
+                on long names like "PO Reviewer · Product Owner – Reviewer".
+                Without this the chip would push the card wider. */}
+            <Box
+                sx={{
+                    display: 'flex',
+                    justifyContent: 'flex-end',
+                    minWidth: 0,
+                    maxWidth: '100%',
+                }}
+            >
+                {assignee ? (
+                    <AgentChip agent={assignee} size="sm" />
+                ) : (
+                    <AgentChip agent={{ name: ownerName, accent_color: ownerAccent }} size="sm" />
+                )}
+            </Box>
+        </ButtonBase>
+    );
+}
+
+export function WorkItemKanban({
+    items,
+    agents,
+    ownerName,
+    ownerAccent,
+    onTransition,
+    onOpen,
+}: Props) {
+    const isMobile = useIsMobile();
+    const toast = useToast();
+    const agentsById = useMemo(() => new Map(agents.map((w) => [w.id, w])), [agents]);
+    const [draggingId, setDraggingId] = useState<string | null>(null);
+    const [dragOver, setDragOver] = useState<IssueStatus | null>(null);
+    const [shown, setShown] = useState<Partial<Record<IssueStatus, number>>>({});
+
+    const byStatus = useMemo(() => {
+        const map = new Map<IssueStatus, KanbanItem[]>();
+        for (const s of COLUMN_ORDER) map.set(s, []);
+        for (const it of items) {
+            const list = map.get(it.status) ?? [];
+            list.push(it);
+            map.set(it.status, list);
+        }
+        return map;
+    }, [items]);
+
+    function handleDragStart(e: DragEvent<HTMLDivElement>, item: KanbanItem) {
+        setDraggingId(item.id);
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', item.id);
+    }
+
+    function handleDragOver(e: DragEvent<HTMLDivElement>, status: IssueStatus) {
+        e.preventDefault();
+        setDragOver(status);
+        e.dataTransfer.dropEffect = 'move';
+    }
+
+    function handleDrop(e: DragEvent<HTMLDivElement>, status: IssueStatus) {
+        e.preventDefault();
+        setDragOver(null);
+        const id = e.dataTransfer.getData('text/plain');
+        const item = items.find((i) => i.id === id);
+        setDraggingId(null);
+        if (!item || item.status === status) return;
+        const validNext =
+            item.kind === 'sub_task'
+                ? getValidNextStatuses('sub_task', item.status)
+                : getValidNextStatuses(item.kind, item.status);
+        if (!validNext.includes(status)) {
+            // A drag onto an illegal column used to be sent through as
+            // `override: true` — silently bypassing the status machine with no
+            // signal at all, so a mis-drop permanently skipped statuses. The
+            // hard rule is that invalid transitions are not offered; a column
+            // can't be hidden, so refuse the drop and point at the one
+            // deliberate override path (the status picker on the detail page).
+            const legal = validNext.map((s) => STATUS_LABELS[s]).join(', ');
+            toast.show({
+                message: `Can't move ${item.shortId} to ${STATUS_LABELS[status]}`,
+                detail: legal
+                    ? `From ${STATUS_LABELS[item.status]} you can go to: ${legal}. To force any other status, use the status picker on the item's page.`
+                    : `${STATUS_LABELS[item.status]} is terminal. To force another status, use the status picker on the item's page.`,
+            });
+            return;
+        }
+        onTransition(item, status, false);
+    }
+
+    return (
+        <Box
+            sx={{
+                display: 'grid',
+                gridTemplateColumns: {
+                    xs: `repeat(${COLUMN_ORDER.length}, minmax(200px, 1fr))`,
+                    md: `repeat(${COLUMN_ORDER.length}, minmax(220px, 1fr))`,
+                },
+                gap: 2,
+                overflowX: 'auto',
+                pb: 2,
+            }}
+        >
+            {COLUMN_ORDER.map((status) => {
+                const list = byStatus.get(status) ?? [];
+                const cap = shown[status] ?? COLUMN_PAGE;
+                const hidden = list.length - cap;
+                const isOver = dragOver === status;
+                return (
+                    <Box
+                        key={status}
+                        onDragOver={(e) => handleDragOver(e, status)}
+                        onDragLeave={() => setDragOver(null)}
+                        onDrop={(e) => handleDrop(e, status)}
+                        sx={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            background: isOver ? ATLAS_PALETTE.cloud : ATLAS_PALETTE.slate06,
+                            border: isOver
+                                ? `1px dashed ${ATLAS_PALETTE.brandBlue}`
+                                : `1px solid transparent`,
+                            borderRadius: '12px',
+                            minHeight: 200,
+                            transition: 'background 120ms ease, border-color 120ms ease',
+                        }}
+                    >
+                        <ColumnHeader status={status} count={list.length} />
+                        <Box sx={{ p: 1.5, flex: 1 }}>
+                            {list.slice(0, cap).map((item) => (
+                                <Box
+                                    key={item.id}
+                                    sx={{
+                                        opacity: draggingId === item.id ? 0.5 : 1,
+                                        transition: 'opacity 120ms ease',
+                                    }}
+                                >
+                                    <Card
+                                        item={item}
+                                        agentsById={agentsById}
+                                        ownerName={ownerName}
+                                        ownerAccent={ownerAccent}
+                                        onDragStart={handleDragStart}
+                                        onClick={() => onOpen(item)}
+                                        draggable={!isMobile}
+                                    />
+                                </Box>
+                            ))}
+                            {hidden > 0 && (
+                                <Button
+                                    size="small"
+                                    fullWidth
+                                    onClick={() =>
+                                        setShown((m) => ({ ...m, [status]: cap + COLUMN_PAGE * 2 }))
+                                    }
+                                >
+                                    Show {Math.min(hidden, COLUMN_PAGE * 2)} more · {hidden} hidden
+                                </Button>
+                            )}
+                            {list.length === 0 && (
+                                <Typography
+                                    sx={{
+                                        fontSize: 11,
+                                        color: ATLAS_PALETTE.slate40,
+                                        fontStyle: 'italic',
+                                        textAlign: 'center',
+                                        mt: 2,
+                                    }}
+                                >
+                                    {isMobile ? 'No items' : 'Drop here'}
+                                </Typography>
+                            )}
+                        </Box>
+                    </Box>
+                );
+            })}
+        </Box>
+    );
+}

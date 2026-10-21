@@ -1,0 +1,693 @@
+import type { AgentCli, AnalyticsWindow, IAgent, IAnalyticsSpendInsight, IssueType } from '@atlas/shared';
+
+export interface SidenavCounts {
+    projects: number;
+    tasks: number;
+    queue: number;
+    agents: number;
+    notifications: number;
+}
+
+export interface CostSummary {
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_creation_tokens: number;
+    run_count: number;
+}
+
+// Terminal-session counterpart to CostSummary — keeps `session_count`
+// instead of `run_count` so callers can tell the two sources apart at
+// the type level.
+export interface TerminalCostSummary {
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_creation_tokens: number;
+    session_count: number;
+}
+
+// `GET /api/projects/task-summary`: one row per project with any listed Task.
+export interface ProjectTaskSummary {
+    project_id: string;
+    task_count: number;
+    sub_task_count: number;
+    /** Distinct Task assignees; the list's category filter reads them. */
+    assignee_agent_ids: string[];
+}
+
+export interface ProjectCounts {
+    open_tasks: number;
+    tasks_ready: number;
+    tasks_in_flight: number;
+    tasks_waiting_info: number;
+    task_count: number;
+    active_agent_ids: string[];
+    costSummary?: CostSummary;
+    terminalCostSummary?: TerminalCostSummary;
+}
+
+type AgentCategoryKey = 'software-dev' | 'marketing' | 'content' | 'design';
+
+interface CategoryStat {
+    running: number;
+}
+
+type AgentStatsByCategory = Record<AgentCategoryKey, CategoryStat>;
+
+interface TodaysPassItem {
+    run_id: string;
+    agent_id: string;
+    agent_name: string;
+    agent_category: AgentCategoryKey;
+    agent_accent_color: string;
+    issue_type: string;
+    issue_id: string;
+    completed_at: string;
+}
+
+interface TodaysPass {
+    items: TodaysPassItem[];
+    total: number;
+}
+
+interface DashboardKpis {
+    activeAgents: number;
+    doneThisWeek: number;
+    projectCount: number;
+    // True totals — `awaiting` / `queue` are capped at 20 for rendering.
+    awaitingTotal?: number;
+    inMotionTotal?: number;
+    agentStatsByCategory: AgentStatsByCategory;
+    todaysPass: TodaysPass;
+    costSummary30d?: CostSummary;
+    terminalCostSummary30d?: TerminalCostSummary;
+}
+
+export interface AwaitingItem {
+    issue_type: IssueType;
+    id: string;
+    title: string;
+    status: string;
+    updated_at: string;
+}
+
+export interface QueueItem {
+    issue_type: IssueType;
+    id: string;
+    title: string;
+    status: string;
+    updated_at: string;
+    assignee_agent_id: string | null;
+    agent_name: string | null;
+    accent_color: string | null;
+}
+
+/** An agent without its prompt: `GET /api/agents?view=summary`. */
+export type AgentSummary = Omit<IAgent, 'prompt_md'>;
+
+export interface DashboardResponse {
+    kpis: DashboardKpis;
+    awaiting: AwaitingItem[];
+    queue: QueueItem[];
+}
+
+interface AnalyticsDailyRow {
+    date: string;
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    run_count: number;
+    // Terminal-session aggregates for the same day (closed sessions only,
+    // bucketed by closed_at in the viewer's tz). Token sums let the
+    // dedicated terminal Daily card stack Input/Output/Cached the same
+    // way the agentic Daily card does.
+    terminal_total_cost_usd: number;
+    terminal_session_count: number;
+    terminal_input_tokens: number;
+    terminal_output_tokens: number;
+    terminal_cache_read_tokens: number;
+}
+
+interface AnalyticsAgentRow {
+    agent_id: string;
+    agent_name: string;
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    run_count: number;
+}
+
+interface AnalyticsProjectRow {
+    project_id: string | null;
+    project_name: string;
+    total_cost_usd: number;
+    run_count: number;
+}
+
+interface AnalyticsTopRun {
+    run_id: string;
+    agent_id: string;
+    agent_name: string;
+    issue_type: string;
+    issue_id: string | null;
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    created_at: string;
+}
+
+interface AnalyticsMonthlyRow {
+    month: string; // YYYY-MM
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    run_count: number;
+    // Terminal-session aggregates for the same month (closed only).
+    terminal_total_cost_usd: number;
+    terminal_session_count: number;
+}
+
+// Per-CLI terminal-session breakdown for the current month. Surfaces the
+// claude vs copilot split on the dedicated "Manual terminal sessions"
+// card and powers the per-CLI bar inside it.
+interface AnalyticsTerminalByCliRow {
+    cli: AgentCli;
+    total_cost_usd: number;
+    session_count: number;
+    input_tokens: number;
+    output_tokens: number;
+}
+
+// Per-project terminal-session breakdown for the current month. Lets the
+// existing Cost by Project bars split each project bar into agent vs
+// terminal segments.
+interface AnalyticsTerminalByProjectRow {
+    project_id: string | null;
+    // Null for standalone sessions — they have no project to left-join to.
+    project_name: string | null;
+    total_cost_usd: number;
+    session_count: number;
+}
+
+// Top 10 most expensive terminal sessions for the current month. Each
+// row deep-links to /terminal/<session_id>/history.
+export interface AnalyticsSessionSubagent {
+    subagent_key: string;
+    source: 'claude_jsonl' | 'copilot_list';
+    agent_type: string | null;
+    description: string | null;
+    spawn_depth: number | null;
+    input_tokens: number | null;
+    output_tokens: number | null;
+    cache_read_tokens: number | null;
+    cache_creation_tokens: number | null;
+    cost_usd: number | null;
+    is_estimate: boolean;
+}
+
+interface AnalyticsTopTerminalSession {
+    session_id: string;
+    project_id: string | null;
+    // Null for standalone sessions — they have no project to left-join to.
+    project_name: string | null;
+    title: string;
+    cli: AgentCli;
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    closed_at: string;
+    subagents: AnalyticsSessionSubagent[];
+}
+
+// Terminal-session aggregates for the current month, matching the shape
+// of the existing CostSummary so the Hero can sum the two cleanly.
+// `closed_at` is the period anchor (vs agent_runs' `completed_at`).
+export interface TerminalCostSummary {
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_creation_tokens: number;
+    session_count: number;
+}
+
+interface AnalyticsModelRow {
+    source: 'agentic' | 'terminal';
+    cli: AgentCli;
+    model: string | null;
+    total_cost_usd: number;
+    cache_read_tokens: number;
+    count: number;
+}
+
+/** `GET /api/analytics`. The trend and cost-efficiency part is `IAnalyticsSpendInsight` (@atlas/shared). */
+export interface AnalyticsResponse extends IAnalyticsSpendInsight {
+    period: {
+        start: string;
+        end: string;
+        tz?: string;
+        window?: AnalyticsWindow;
+        previous_start?: string;
+        previous_end?: string;
+    };
+    /** Spend over the previous window (same span into last month for `month`). */
+    previous?: { total_cost_usd: number; terminal_total_cost_usd: number };
+    byModel?: AnalyticsModelRow[];
+    /** What cache reads saved against fresh-input prices, priced per model. */
+    cache_savings_usd?: number;
+    /** Cache reads on models with no known price, left out of the saving. */
+    cache_savings_unpriced_tokens?: number;
+    /** Tasks first moved into Done in the window (the Delivery tab's definition). */
+    shipped_tasks?: number;
+    summary: CostSummary;
+    daily: AnalyticsDailyRow[];
+    monthly: AnalyticsMonthlyRow[];
+    byAgent: AnalyticsAgentRow[];
+    byProject: AnalyticsProjectRow[];
+    topRuns: AnalyticsTopRun[];
+    cacheEfficiency: number;
+    // Terminal-session aggregates parallel to `summary` / `byProject` /
+    // `topRuns`. The daily + monthly arrays already carry terminal data
+    // inline (the chart stacks two bars per day/month).
+    terminalSummary: TerminalCostSummary;
+    terminalByCli: AnalyticsTerminalByCliRow[];
+    terminalByProject: AnalyticsTerminalByProjectRow[];
+    topTerminalSessions: AnalyticsTopTerminalSession[];
+}
+
+// Per-item cost drill-down. Cost rolls up across the parent/child tree
+// in the `items` table via a recursive CTE on items.parent_id; the
+// `byKind` block lets the UI split the rollup by item type (task /
+// sub_task) without paging through descendant rows.
+
+interface CostTotals {
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    run_count: number;
+}
+
+interface CostByKindRow {
+    type: IssueType;
+    total_cost_usd: number;
+    run_count: number;
+    item_count: number;
+}
+
+interface ItemCostRow {
+    id: string;
+    title: string;
+    type: IssueType;
+    parent_id: string | null;
+    depth: number;
+    total_cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    run_count: number;
+    last_run_at: string | null;
+}
+
+export interface AnalyticsProjectResponse {
+    project: { id: string; name: string };
+    totals: CostTotals;
+    byKind: CostByKindRow[];
+    /** Top 25 tasks by total cost. Use `/tasks` for the full paginated list. */
+    topTasks: Array<{
+        id: string;
+        title: string;
+        descendant_count: number;
+        totals: CostTotals;
+        last_run_at: string | null;
+    }>;
+    task_count: number;
+    // Terminal-session aggregates scoped to this project (all-time, closed
+    // sessions only). Parallel to the page-level analytics response so the
+    // drill-down can render the same per-CLI breakdown + top-sessions
+    // table for whichever project the Owner clicked through to.
+    terminalSummary: TerminalCostSummary;
+    terminalByCli: AnalyticsTerminalByCliRow[];
+    topTerminalSessions: AnalyticsTopTerminalSession[];
+}
+
+export interface AnalyticsProjectTasksResponse {
+    rows: Array<{
+        id: string;
+        title: string;
+        descendant_count: number;
+        totals: CostTotals;
+        last_run_at: string | null;
+    }>;
+    total: number;
+    page: number;
+    limit: number;
+}
+
+export interface AnalyticsTaskResponse {
+    task: { id: string; title: string; project_id: string; project_name: string };
+    totals: CostTotals;
+    byKind: CostByKindRow[];
+    descendant_count: number;
+}
+
+export interface AnalyticsTaskChildrenResponse {
+    rows: ItemCostRow[];
+    total: number;
+    page: number;
+    limit: number;
+}
+
+
+/**
+ * A saved test for one agent (ADR 0023).
+ *
+ * It carries the ITEM the agent should act on, not a prompt: PO Writer refuses
+ * anything that is not a Task, Coder needs a sub-task with a repo. A bare
+ * prompt cannot exercise them, which is why the Test Run tab has never been
+ * usable as a test.
+ */
+export interface AgentTestItemTemplate {
+    issue_type: 'task' | 'sub_task';
+    title: string;
+    description?: string;
+    acceptance_criteria?: string;
+    labels?: string[];
+}
+
+export interface AgentTestExpectations {
+    /** `asked_question` is a pass when that is what the agent should do. */
+    outcome_kind?: 'done' | 'rejected' | 'asked_question';
+    required_checklist_all_passed?: boolean;
+    summary_contains?: string[];
+    summary_omits?: string[];
+    max_cost_usd?: number;
+    max_duration_s?: number;
+    /** ADR 0023 phase 3 — a workflow eval's assertions about the whole delivery. */
+    terminal_status?: string[];
+    min_sub_tasks?: number;
+    /** `false` is a real assertion: inventing a feature shows up as a PR. */
+    requires_pr?: boolean;
+    gate_verdicts_all_pass?: boolean;
+    /** Migration 017 — what the run DID. Unanswerable here is `errored`, never a pass. */
+    tools_required?: string[];
+    tools_forbidden?: string[];
+    max_turns?: number;
+    max_tool_calls?: number;
+    files_touched?: string[];
+    files_untouched?: string[];
+    /** Pass criteria in your own words, graded by a cheap fixed model. Off unless set. */
+    judge_criteria?: string[];
+    /** Scope checks (ADR 0023 amendment) — case-insensitive regexes on what it said and ran. */
+    reply_must_match?: string[];
+    reply_must_not_match?: string[];
+    commands_forbidden?: string[];
+    /** The checkout must be unchanged. */
+    no_code_changes?: boolean;
+    /** Path prefixes every changed file must start with. */
+    files_changed_only?: string[];
+    /** The Owner's own bash check, run over the evidence files. */
+    script?: { body_sh: string };
+}
+
+export interface AgentTest {
+    id: string;
+    /** Exactly one of `agent_id` / `workflow_id` is set (migration 019). */
+    agent_id: string | null;
+    /** Set when this fixture runs through a whole workflow, not one agent. */
+    workflow_id: string | null;
+    /** A tag, for grouping fixtures into a set. */
+    suite: string | null;
+    /** Null since migration 021: a fixture belongs to the agent and binds to a project when it runs. */
+    project_id: string | null;
+    repo_id: string | null;
+    name: string;
+    item_template: AgentTestItemTemplate;
+    expectations: AgentTestExpectations;
+    created_at: string;
+    updated_at: string;
+    /** The newest batch, folded in by `GET /agents/:id/tests`; null when never run. */
+    latest_batch?: AgentTestBatch | null;
+}
+
+export interface AgentTestRun {
+    id: string;
+    agent_test_id: string;
+    agent_run_id: string | null;
+    item_id: string | null;
+    /** `errored` is a broken environment, not a failing agent. */
+    verdict: 'running' | 'passed' | 'failed' | 'errored';
+    failures: string[];
+    cost_usd: number | null;
+    duration_s: number | null;
+    created_at: string;
+    /** Migration 018 — one press of Run is a batch of n of these. */
+    batch_id: string;
+    sample_index: number;
+    label: string | null;
+    judge_verdict: 'pass' | 'fail' | 'abstained' | null;
+    judge_reason: string | null;
+    judge_cost_usd: number | null;
+    /** Set for a workflow eval; the run it is judged on. */
+    workflow_run_id: string | null;
+}
+
+/**
+ * What n samples of one test add up to.
+ *
+ * An agent is stochastic, so a single run's verdict was whichever of two
+ * answers the Owner happened to press the button on.
+ */
+export interface AgentTestBatch {
+    batch_id: string;
+    label: string | null;
+    created_at: string;
+    n_runs: number;
+    passed: number;
+    failed: number;
+    errored: number;
+    running: number;
+    /** The first sample. Comparable with every un-sampled run in history. */
+    pass_at_1: boolean | null;
+    /** Any sample passed — "can it do this at all", not "reliably". */
+    pass_at_k: boolean | null;
+    /** passed / (n_runs - errored). A broken environment is not a wrong answer. */
+    consistency: number | null;
+    /** It passed sometimes. The most useful thing a batch can say. */
+    flaky: boolean;
+    /** Which expectation was unstable, and in how many samples. */
+    failure_histogram: Array<{ failure: string; count: number }>;
+    cost_usd: number;
+    judge_cost_usd: number;
+    duration_s_p50: number | null;
+    duration_s_p95: number | null;
+    runs: AgentTestRun[];
+}
+
+export interface AgentCostEstimate {
+    /** Null, not zero, when the agent has never run — those differ. */
+    estimated_cost_usd: number | null;
+    sample_size: number;
+    n_runs: number;
+    /** What the Owner is about to spend, not what one run costs. */
+    estimated_total_usd: number | null;
+    /** p25..p75 of the same history, times n. A mean alone reads as a promise. */
+    estimated_range_usd: [number, number] | null;
+}
+
+// ── Agent performance (ADR 0023 phase 2, ATL-140) ────────────────────────
+
+/**
+ * How a step's FIRST dispatch went, split three ways rather than summed.
+ *
+ * ADR 0023: `pass@1` must not be shown as a bare ranking. On the v4 golden set
+ * `agent-release-reviewer` scored 64% **because it rejected four times**, and
+ * those rejections were the most valuable thing in the run. So the API does
+ * not return a percentage and the page does not compute one.
+ */
+export interface FirstPass {
+    applied: number;
+    rejected: number;
+    parked: number;
+}
+
+export interface AgentPerformance {
+    agent_id: string;
+    role_id: string | null;
+    window: { since: string | null; until: string | null };
+    quality: {
+        steps: number;
+        dispatches: number;
+        first_pass: FirstPass;
+        loops: number;
+        gate_catch: number;
+    };
+    cost: {
+        total_usd: number;
+        per_step_usd: number | null;
+        input_tokens: number;
+        output_tokens: number;
+        cache_read_tokens: number;
+        cache_creation_tokens: number;
+        cache_hit_pct: number | null;
+    };
+    latency: {
+        p50_s: number | null;
+        p95_s: number | null;
+        max_s: number | null;
+        ttft_p50_ms: number | null;
+    };
+    tools: {
+        /** Traces exist only from migration 017 on — hence a stated denominator. */
+        runs_with_trace: number;
+        runs_total: number;
+        top: Array<{ name: string; calls: number; runs: number }>;
+        avg_turns: number | null;
+        avg_tool_calls: number | null;
+    };
+    by_config: Array<{
+        model: string | null;
+        effort: string | null;
+        cli: string | null;
+        /** The agent's prompt version at dispatch. A prompt edit is a new configuration. */
+        prompt_version: number | null;
+        steps: number;
+        first_pass: FirstPass;
+        cost_usd: number;
+    }>;
+    trend: TrendBucket[];
+}
+
+/** One ISO week of an agent's first attempts. `bucket` is the week's Monday. */
+export interface TrendBucket {
+    bucket: string;
+    steps: number;
+    first_pass: FirstPass;
+    cost_usd: number;
+    p95_s: number | null;
+}
+
+/** GET /api/agents/performance — one row per agent that worked a Task run. Sorted by name, never by success. */
+export interface FleetAgentRow {
+    agent_id: string;
+    name: string;
+    accent_color: string | null;
+    quality: AgentPerformance['quality'];
+    cost: { total_usd: number; per_step_usd: number | null };
+    latency: { p95_s: number | null };
+    trend: TrendBucket[];
+}
+
+/** What the fleet delivered. Agent-test items are excluded. */
+export interface FleetDelivery {
+    runs: number;
+    prs_opened: number;
+    prs_merged: number;
+    merge_rate: number | null;
+    tasks_merged: number;
+    merged_cost_usd: number;
+    cost_per_merged_task_usd: number | null;
+    median_s_to_pr: number | null;
+    interventions: {
+        parked: number;
+        parked_tasks: number;
+        tasks: number;
+        per_task: number | null;
+        /** When park history began (migration 024). Nothing earlier survived. */
+        since: string | null;
+    };
+}
+
+/** The windows the fleet page offers; the API refuses any other. */
+export type FleetWindowDays = 30 | 90;
+
+export interface FleetPerformance {
+    window: { since: string | null; until: string | null };
+    agents: FleetAgentRow[];
+    delivery: FleetDelivery;
+}
+
+/**
+ * A test an agent ships with (ADR 0023 phase 4).
+ *
+ * A template, not a row: `agent_tests` needs a project and a repo, and a
+ * catalog bundle has neither. Adopting one writes an ordinary test that is
+ * then the Owner's — a bundle upgrade can never clobber it.
+ */
+export interface StarterTest {
+    id: string;
+    name: string;
+    item_template: AgentTestItemTemplate;
+    expectations: AgentTestExpectations;
+    needs_repo: boolean;
+    /** What this test catches. The part that makes a starter test teach. */
+    notes: string;
+}
+
+/**
+ * Whether an agent's suite says it does its job — and whether that is still
+ * true of the agent as it is configured right now.
+ *
+ * Per-agent counts, never a fleet percentage. ADR 0023's rule against ranking
+ * agents on pass@1 stands: a reviewer that correctly rejects would sort worst
+ * on any average. What makes a per-agent verdict safe is that a fixture
+ * declares what a pass IS, so a reviewer's fixture expects `rejected`.
+ */
+export type QualificationVerdict =
+    'no_tests' | 'never_run' | 'running' | 'failing' | 'blocked' | 'stale' | 'qualified';
+
+interface QualificationFixture {
+    agent_test_id: string;
+    name: string;
+    provenance: 'catalog' | 'edited' | 'owner';
+    pass_at_1: boolean | null;
+    pass_at_k: boolean | null;
+    consistency: number | null;
+    flaky: boolean;
+    n_runs: number;
+    last_run_at: string | null;
+    failures: string[];
+}
+
+export interface AgentQualification {
+    agent_id: string;
+    verdict: QualificationVerdict;
+    fixtures: number;
+    never_run: number;
+    passed_at_1: number;
+    passed_at_k: number;
+    failed: number;
+    /** Fixtures whose latest batch still has a sample in flight. */
+    running: number;
+    flaky: number;
+    blocked: number;
+    last_run_at: string | null;
+    cost_usd: number;
+    stale: boolean;
+    stale_reason: string | null;
+    ran_at_config: {
+        model: string | null;
+        effort: string | null;
+        prompt_version: number | null;
+    } | null;
+    per_fixture: QualificationFixture[];
+}
+
+/** GET /api/projects/:id/health — the Project page's Health card (30 days). */
+export interface ProjectHealth {
+    window: { since: string | null };
+    runs: number;
+    prs_opened: number;
+    prs_merged: number;
+    tasks_merged: number;
+    median_s_to_pr: number | null;
+    specs: { reviewed: number; accepted_first_try: number };
+    escalations: { items: number; pauses: number; since: string | null };
+}

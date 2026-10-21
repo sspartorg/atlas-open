@@ -1,0 +1,583 @@
+import { randomUUID } from 'node:crypto';
+
+
+import { db } from '../db/kysely-client.js';
+import type { AgentTestExpectations } from './agent-tests-evaluate.js';
+import {
+    asRun,
+    asTest,
+    judgePendingInBackground,
+    type AgentTestItemTemplate,
+    type AgentTestRow,
+    type AgentTestRunRow,
+} from './agent-tests-evaluate-run.js';
+import { spawnAgentRun } from './agent-runner.js';
+import { summariseBatch, toBatches, type AgentTestBatch } from './agent-test-batches.js';
+import { subTasksService } from './sub-tasks.js';
+import { tasksService } from './tasks.js';
+import { projectReposService } from './project-repos.js';
+import { ensureTestProject } from './test-project.js';
+import { collectTestWorkspace, openTestWorkspace } from './agent-test-workspace.js';
+
+// Agent tests as product data (ADR 0023).
+//
+// The items a run materialises carry `is_test` (migration 016): real to the
+// agent in every way it can observe, and — since migration 002 — visible to the
+// Owner too, tagged "Test". They land in the Tests sandbox project unless the
+// Owner picks another (`test-project.ts`).
+//
+// A test owns the item it wants the agent to act on, because a bare prompt
+// cannot exercise the agents Atlas ships — PO Writer refuses anything that is
+// not a Task, Coder needs a sub-task with a repo. Each run materialises a fresh
+// throwaway item from the template, so the same test asks the same question
+// every time; pointing at a live item would give a different answer whenever
+// the repo moved under it.
+//
+// Judging happens at completion (`agent-tests-evaluate-run.ts`, called by the
+// runner), with a fallback on read for a run the API missed by crashing between
+// the dispatch finishing and the hook firing.
+
+export type { AgentTestRow, AgentTestRunRow };
+
+/**
+ * Ten is the cap because the dialog shows the estimated total before the
+ * click, and past ten the number stops being a decision anybody makes lightly.
+ */
+const MAX_SAMPLES = 10;
+
+/**
+ * What a read of test runs returns. Not `selectAll()`: `evidence` holds the
+ * run's whole diff and nothing that lists runs shows it.
+ */
+const RUN_COLUMNS = [
+    'id',
+    'agent_test_id',
+    'agent_run_id',
+    'item_id',
+    'verdict',
+    'failures',
+    'cost_usd',
+    'duration_s',
+    'created_at',
+    'batch_id',
+    'sample_index',
+    'label',
+    'judge_verdict',
+    'judge_reason',
+    'judge_cost_usd',
+    'workflow_run_id',
+] as const;
+
+export interface RunTestOptions {
+    /** Samples to take. 1 keeps the old behaviour exactly. */
+    n_runs?: number | undefined;
+    /** Free-text tag, e.g. `before-prompt-diet`, for comparing two batches. */
+    label?: string | undefined;
+    /**
+     * Where the test's item is made (migration 021).
+     *
+     * A fixture is agent-scoped at rest, so the project comes from the caller,
+     * falls back to the fixture's own, and otherwise to the Tests sandbox
+     * project — never to one of the Owner's real projects.
+     */
+    project_id?: string | undefined;
+    repo_id?: string | null | undefined;
+    /** Run in the Tests sandbox project even if the fixture is pinned elsewhere. */
+    sandbox?: boolean | undefined;
+}
+
+
+/** A suite run while one is already in flight would double the bill. 409. */
+export class AgentTestSuiteBusyError extends Error {
+    constructor() {
+        super('a run of this suite is already in flight');
+        this.name = 'AgentTestSuiteBusyError';
+    }
+}
+
+/** Nothing to run. A 400 rather than an empty 202 that looks like success. */
+export class AgentTestSuiteEmptyError extends Error {
+    constructor() {
+        super('this agent has no tests to run');
+        this.name = 'AgentTestSuiteEmptyError';
+    }
+}
+
+export interface CreateAgentTestInput {
+    /** Exactly one of these, by CHECK (migration 019). */
+    agent_id?: string | null | undefined;
+    workflow_id?: string | null | undefined;
+    suite?: string | null | undefined;
+    /** Migration 021 — optional: a fixture can bind to a project at run time. */
+    project_id?: string | null | undefined;
+    repo_id?: string | null | undefined;
+    name: string;
+    item_template: AgentTestItemTemplate;
+    expectations?: AgentTestExpectations | undefined;
+}
+
+/** `Partial<CreateAgentTestInput>` will not do: under `exactOptionalPropertyTypes`
+ *  it forbids the explicit `undefined` a zod-parsed patch body carries. */
+export interface UpdateAgentTestInput {
+    project_id?: string | null | undefined;
+    repo_id?: string | null | undefined;
+    suite?: string | null | undefined;
+    name?: string | undefined;
+    item_template?: AgentTestItemTemplate | undefined;
+    expectations?: AgentTestExpectations | undefined;
+}
+
+export const agentTestsService = {
+    async list(agentId: string): Promise<AgentTestRow[]> {
+        const rows = await db
+            .selectFrom('agent_tests')
+            .selectAll()
+            .where('agent_id', '=', agentId)
+            .orderBy('created_at', 'desc')
+            .execute();
+        return rows.map((r) => asTest(r as never));
+    },
+
+    async get(id: string): Promise<AgentTestRow | null> {
+        const row = await db.selectFrom('agent_tests').selectAll().where('id', '=', id).executeTakeFirst();
+        return row ? asTest(row as never) : null;
+    },
+
+    async create(input: CreateAgentTestInput): Promise<AgentTestRow> {
+        const id = randomUUID();
+        await db
+            .insertInto('agent_tests')
+            .values({
+                id,
+                agent_id: input.agent_id ?? null,
+                workflow_id: input.workflow_id ?? null,
+                suite: input.suite ?? null,
+                project_id: input.project_id ?? null,
+                repo_id: input.repo_id ?? null,
+                name: input.name,
+                item_template: JSON.stringify(input.item_template) as never,
+                expectations: JSON.stringify(input.expectations ?? {}) as never,
+            } as never)
+            .execute();
+        return (await this.get(id))!;
+    },
+
+    async update(id: string, patch: UpdateAgentTestInput): Promise<AgentTestRow | null> {
+        const set: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (patch.name !== undefined) set['name'] = patch.name;
+        if (patch.project_id !== undefined) set['project_id'] = patch.project_id;
+        if (patch.repo_id !== undefined) set['repo_id'] = patch.repo_id;
+        if (patch.suite !== undefined) set['suite'] = patch.suite;
+        if (patch.item_template !== undefined) set['item_template'] = JSON.stringify(patch.item_template);
+        if (patch.expectations !== undefined) set['expectations'] = JSON.stringify(patch.expectations);
+        await db.updateTable('agent_tests').set(set as never).where('id', '=', id).execute();
+        return this.get(id);
+    },
+
+    /**
+     * Delete a test, and the throwaway items its runs made.
+     *
+     * `agent_test_runs.item_id` is `ON DELETE SET NULL`, so the cascade that
+     * takes the run rows would otherwise leave every item behind with nothing
+     * pointing at it — invisible now (migration 016), but never collectable.
+     *
+     * For a sub-task template, `item_id` is the sub-task; its throwaway parent
+     * Task is only reachable through `parent_id`, so both are collected here
+     * and the parent's delete cascades to the child.
+     */
+    async remove(id: string): Promise<void> {
+        const rows = await db
+            .selectFrom('agent_test_runs as r')
+            .innerJoin('items as i', 'i.id', 'r.item_id')
+            .select(['i.id as id', 'i.parent_id as parent_id'])
+            .where('r.agent_test_id', '=', id)
+            .execute();
+        const itemIds = [...new Set(rows.flatMap((r) => [r.id, r.parent_id]))].filter(
+            (v): v is string => v !== null,
+        );
+        await db.deleteFrom('agent_tests').where('id', '=', id).execute();
+        if (itemIds.length > 0) {
+            // Belt and braces: only ever delete rows this flagged as its own.
+            await db.deleteFrom('items').where('id', 'in', itemIds).where('is_test', '=', true).execute();
+        }
+    },
+
+    /**
+     * Materialise the test's item and dispatch the agent at it.
+     *
+     * Returns as soon as the run is queued — the verdict lands when the run is
+     * next read. The throwaway item is created through the normal item services
+     * so it carries the project's repo wiring and issue key, exactly as a real
+     * one would; an agent that behaved differently against a synthetic item
+     * would make the test worthless.
+     */
+    /**
+     * Run a test `n` times and return the batch.
+     *
+     * One sample is a coin flip: the agent is stochastic, so a test that passes
+     * three times in five reported whichever of the two the Owner happened to
+     * press the button on. The samples are independent — each materialises its
+     * own throwaway item, because a second dispatch against an item the first
+     * one already changed is measuring something else.
+     *
+     * They run in parallel, which is safe here specifically: an agent test
+     * calls `spawnAgentRun` with no workflow run, so each one gets its own
+     * detached checkout (migration 003) and holds the repo's git lock only
+     * for the `worktree add`. A workflow-level eval would have to serialise.
+     */
+    async run(testId: string, opts: RunTestOptions = {}): Promise<AgentTestBatch> {
+        const test = await this.get(testId);
+        if (!test) throw new Error(`Agent test ${testId} not found`);
+        // Caller first, then the fixture's own pin, then the Tests sandbox
+        // project (ADR 0023 amendment) — so a test only spends a real
+        // project's issue key when the Owner picks that project on purpose.
+        const projectId =
+            opts.project_id ?? (opts.sandbox ? null : test.project_id) ?? (await ensureTestProject());
+        const wanted = opts.repo_id !== undefined ? opts.repo_id : test.repo_id;
+        // A repo pinned in another project would fail the Task create; drop it
+        // and let `resolveRepoIds` pick this project's own.
+        const repoId =
+            wanted && (await projectReposService.list(projectId)).some((r) => r.id === wanted) ? wanted : null;
+        const binding = { projectId, repoId };
+        const samples = Math.min(MAX_SAMPLES, Math.max(1, Math.trunc(opts.n_runs ?? 1)));
+        const batchId = randomUUID();
+        const label = opts.label?.trim() || null;
+
+        // Agent tests run in parallel because each gets its own `mkdtemp` directory.
+        const rows: AgentTestRunRow[] = await Promise.all(
+            Array.from({ length: samples }, (_, i) => runOneSample(test, batchId, i, label, binding)),
+        );
+        return summariseBatch(batchId, rows);
+    },
+
+    /**
+     * Every fixture this agent has, in one press, under one label.
+     *
+     * Sequential across fixtures and parallel within one, which is exactly what
+     * `run` already does and for the reason its comment gives: agent tests take
+     * no project git lock, but firing every fixture at once would multiply the
+     * in-flight dispatches by the suite size rather than by `n_runs`.
+     *
+     * The label is what makes it a suite run. `WHERE label = 'suite-<iso>'` is
+     * "the suite run of 14:32" — no table, no new row kind, and directly
+     * comparable with a second labelled run after a prompt change, which is
+     * what migration 018 added `label` for.
+     */
+    async runSuite(agentId: string, opts: RunTestOptions = {}): Promise<AgentTestBatch[]> {
+        const tests = await this.list(agentId);
+        if (tests.length === 0) throw new AgentTestSuiteEmptyError();
+
+        const inFlight = await db
+            .selectFrom('agent_test_runs')
+            .select('id')
+            .where(
+                'agent_test_id',
+                'in',
+                tests.map((t) => t.id),
+            )
+            .where('verdict', '=', 'running')
+            .executeTakeFirst();
+        if (inFlight) throw new AgentTestSuiteBusyError();
+
+        const label = opts.label?.trim() || `suite-${new Date().toISOString()}`;
+        const batches: AgentTestBatch[] = [];
+        for (const t of tests) {
+            batches.push(await this.run(t.id, { ...opts, label }));
+        }
+        return batches;
+    },
+
+    /**
+     * A test's runs, newest first, optionally only its latest `batches` batches.
+     *
+     * Returned as stored: a run that finished without being judged (the API
+     * crashed before the completion hook fired) is judged in the background,
+     * and the page hears `agent_test_judged` when it lands.
+     */
+    async listRuns(testId: string, opts: { batches?: number | undefined } = {}): Promise<AgentTestRunRow[]> {
+        let q = db
+            .selectFrom('agent_test_runs')
+            .select(RUN_COLUMNS)
+            .where('agent_test_id', '=', testId)
+            .orderBy('created_at', 'desc');
+        if (opts.batches !== undefined) {
+            const newest = db
+                .selectFrom('agent_test_runs')
+                .select('batch_id')
+                .where('agent_test_id', '=', testId)
+                .groupBy('batch_id')
+                .orderBy((eb) => eb.fn.max('created_at'), 'desc')
+                .limit(opts.batches);
+            q = q.where('batch_id', 'in', newest);
+        }
+        const rows = (await q.execute()).map((r) => asRun(r as never));
+        const test = await this.get(testId);
+        if (test) judgePendingInBackground(rows, new Map([[test.id, test]]));
+        return rows;
+    },
+
+    /** The same runs, folded into the batches the Owner actually pressed. */
+    async listBatches(testId: string, opts: { batches?: number | undefined } = {}): Promise<AgentTestBatch[]> {
+        return toBatches(await this.listRuns(testId, opts));
+    },
+
+    /**
+     * Each test's newest batch, in one query — the headline the Tests tab shows
+     * per row. Before this, every row fetched its whole history to show one line.
+     */
+    async latestBatches(tests: AgentTestRow[]): Promise<Map<string, AgentTestBatch>> {
+        const out = new Map<string, AgentTestBatch>();
+        if (tests.length === 0) return out;
+        const newest = db
+            .selectFrom('agent_test_runs')
+            .select('batch_id')
+            .distinctOn('agent_test_id')
+            .where(
+                'agent_test_id',
+                'in',
+                tests.map((t) => t.id),
+            )
+            .orderBy('agent_test_id')
+            .orderBy('created_at', 'desc');
+        const rows = (
+            await db
+                .selectFrom('agent_test_runs')
+                .select(RUN_COLUMNS)
+                .where('batch_id', 'in', newest)
+                .orderBy('created_at', 'desc')
+                .execute()
+        ).map((r) => asRun(r as never));
+        judgePendingInBackground(rows, new Map(tests.map((t) => [t.id, t])));
+        for (const b of toBatches(rows)) {
+            const testId = b.runs[0]?.agent_test_id;
+            if (testId) out.set(testId, b);
+        }
+        return out;
+    },
+
+    /** The fixtures pointed at one workflow (ADR 0023 phase 3). */
+    async listForWorkflow(workflowId: string): Promise<AgentTestRow[]> {
+        const rows = await db
+            .selectFrom('agent_tests')
+            .selectAll()
+            .where('workflow_id', '=', workflowId)
+            .orderBy('created_at', 'desc')
+            .execute();
+        return rows.map((r) => asTest(r as never));
+    },
+
+    /**
+     * Every fixture in a suite, with its history.
+     *
+     * A "suite" is a tag: running the golden set means running each of its
+     * fixtures, and comparing two fleet versions is reading the same suite
+     * filtered by the `label` each run carried.
+     */
+    async suite(name: string): Promise<Array<{ test: AgentTestRow; batches: AgentTestBatch[] }>> {
+        const rows = await db
+            .selectFrom('agent_tests')
+            .selectAll()
+            .where('suite', '=', name)
+            .orderBy('name', 'asc')
+            .execute();
+        const out: Array<{ test: AgentTestRow; batches: AgentTestBatch[] }> = [];
+        for (const r of rows) {
+            const test = asTest(r as never);
+            out.push({ test, batches: await this.listBatches(test.id) });
+        }
+        return out;
+    },
+
+    /**
+     * Runs of this test that are parked, waiting on the Owner.
+     *
+     * ATL-173: every fixture parks once at PO Writer's brainstorm by design,
+     * and across a set that is ~12 substantive answers — the slowest part of
+     * the whole exercise, and the Owner is the bottleneck, not the agents. If
+     * those parks are not something to answer in the UI, a set run from the UI
+     * is worse than the CLI, not better.
+     */
+    async parked(testIds: string[]): Promise<ParkedFixture[]> {
+        if (testIds.length === 0) return [];
+        const runs = await db
+            .selectFrom('agent_test_runs')
+            .select(['id', 'agent_test_id', 'workflow_run_id'])
+            .where('agent_test_id', 'in', testIds)
+            .where('workflow_run_id', 'is not', null)
+            .execute();
+        const runIds = runs.flatMap((r) => (r.workflow_run_id ? [r.workflow_run_id] : []));
+        if (runIds.length === 0) return [];
+
+        // Two reads rather than one join: `workflow_run_id` is nullable, and
+        // Kysely will not join from the nullable side.
+        const [parkedRuns, tests] = await Promise.all([
+            db
+                .selectFrom('workflow_runs')
+                .select(['id', 'item_id', 'parked_node_id', 'park_reason', 'started_at'])
+                .where('id', 'in', runIds)
+                .where('status', '=', 'waiting_for_owner')
+                .execute(),
+            db.selectFrom('agent_tests').select(['id', 'name']).where('id', 'in', testIds).execute(),
+        ]);
+        const nameOf = new Map(tests.map((t) => [t.id, t.name]));
+        const byWorkflowRun = new Map(parkedRuns.map((w) => [w.id, w]));
+
+        return runs
+            .flatMap((r) => {
+                const wf = r.workflow_run_id ? byWorkflowRun.get(r.workflow_run_id) : undefined;
+                if (!wf) return [];
+                return [
+                    {
+                        run_id: r.id,
+                        agent_test_id: r.agent_test_id,
+                        test_name: nameOf.get(r.agent_test_id) ?? r.agent_test_id,
+                        workflow_run_id: wf.id,
+                        item_id: wf.item_id ?? null,
+                        parked_node_id: wf.parked_node_id ?? null,
+                        park_reason: wf.park_reason ?? null,
+                        // `timestamptz` arrives as a Date whatever Kysely says.
+                        started_at: String(wf.started_at ?? ''),
+                    },
+                ];
+            })
+            .sort((x, y) => x.started_at.localeCompare(y.started_at));
+    },
+};
+
+/**
+ * A fixture waiting on an answer.
+ *
+ * Carrying `park_reason` across the whole set is the second thing ATL-173
+ * names: two fixtures once escalated on the same defect and the two Owner
+ * rulings would have contradicted each other, because each run only ever sees
+ * its own branch.
+ */
+export interface ParkedFixture {
+    run_id: string;
+    agent_test_id: string;
+    test_name: string;
+    workflow_run_id: string;
+    item_id: string | null;
+    parked_node_id: string | null;
+    park_reason: string | null;
+    started_at: string;
+}
+
+/** One sample: its own throwaway item, its own dispatch, its own row. */
+/**
+ * Check out the first repo the Task works in, and record where on the run row.
+ *
+ * Null when the repo has no folder on disk (a clone that never finished): the
+ * run then gets the old empty folder rather than failing to start at all.
+ */
+async function openWorkspace(
+    projectId: string,
+    repoIds: string[],
+    testRunId: string,
+): Promise<{ path: string; base_sha: string } | null> {
+    const [repo] = await projectReposService.forTask({ project_id: projectId, repo_ids: repoIds });
+    if (!repo?.git_path) return null;
+    const workspace = await openTestWorkspace(repo, testRunId);
+    await db
+        .updateTable('agent_test_runs')
+        .set({
+            worktree_path: workspace.path,
+            evidence: JSON.stringify({ base_sha: workspace.base_sha }),
+        } as never)
+        .where('id', '=', testRunId)
+        .execute();
+    return workspace;
+}
+
+async function runOneSample(
+    test: AgentTestRow,
+    batchId: string,
+    sampleIndex: number,
+    label: string | null,
+    binding: { projectId: string; repoId: string | null },
+): Promise<AgentTestRunRow> {
+    const t = test.item_template;
+    const suffix = `[test] ${test.name}`;
+    let itemId: string;
+    /** The Task's repos — a sub-task works in its parent's. */
+    let taskRepoIds: string[];
+    if (t.issue_type === 'sub_task') {
+        // A sub-task needs a parent. The test owns a throwaway Task for it
+        // so the agent sees the shape it expects rather than an orphan.
+        const parent = await tasksService.create({
+            project_id: binding.projectId,
+            title: `${t.title} ${suffix}`,
+            description: t.description ?? '',
+            is_test: true,
+            ...(binding.repoId ? { repo_ids: [binding.repoId] } : {}),
+        });
+        const sub = await subTasksService.create({
+            task_id: parent.id,
+            title: `${t.title} ${suffix}`,
+            description: t.description ?? '',
+            acceptance_criteria: t.acceptance_criteria ?? '',
+            labels: t.labels ?? [],
+            is_test: true,
+        });
+        itemId = sub.id;
+        taskRepoIds = parent.repo_ids;
+    } else {
+        const task = await tasksService.create({
+            project_id: binding.projectId,
+            title: `${t.title} ${suffix}`,
+            description: t.description ?? '',
+            acceptance_criteria: t.acceptance_criteria ?? '',
+            labels: t.labels ?? [],
+            is_test: true,
+            ...(binding.repoId ? { repo_ids: [binding.repoId] } : {}),
+        });
+        itemId = task.id;
+        taskRepoIds = task.repo_ids;
+    }
+
+    const id = randomUUID();
+    await db
+        .insertInto('agent_test_runs')
+        .values({
+            id,
+            agent_test_id: test.id,
+            item_id: itemId,
+            batch_id: batchId,
+            sample_index: sampleIndex,
+            label,
+        } as never)
+        .execute();
+
+    let workspace: { path: string; base_sha: string } | null = null;
+    try {
+        // Migration 003 — a real checkout of the Task's repo, so an agent
+        // that edits code has code to edit. Collected (diff kept, folder
+        // deleted) when the run finishes, in `judgePendingRun`.
+        workspace = await openWorkspace(binding.projectId, taskRepoIds, id);
+        const runId = await spawnAgentRun({
+            agentId: test.agent_id as string,
+            issueType: t.issue_type,
+            issueId: itemId,
+            projectId: binding.projectId,
+            ...(workspace ? { workingDir: workspace.path } : {}),
+        });
+        await db.updateTable('agent_test_runs').set({ agent_run_id: runId } as never).where('id', '=', id).execute();
+    } catch (err) {
+        // The dispatch never happened — a missing CLI, a bad model, a repo
+        // that would not check out. That is a broken environment, not a
+        // failing agent, so it is `errored`.
+        if (workspace) await collectTestWorkspace(workspace.path, workspace.base_sha).catch(() => undefined);
+        await db
+            .updateTable('agent_test_runs')
+            .set({
+                verdict: 'errored',
+                failures: JSON.stringify([`could not start the run: ${(err as Error).message}`]),
+                evaluated_at: new Date().toISOString(),
+            } as never)
+            .where('id', '=', id)
+            .execute();
+    }
+
+    const row = await db.selectFrom('agent_test_runs').selectAll().where('id', '=', id).executeTakeFirst();
+    return asRun(row as never);
+}

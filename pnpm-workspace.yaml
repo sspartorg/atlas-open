@@ -1,0 +1,37 @@
+packages:
+  - 'packages/*'
+# When node_modules is out of date, warn before running scripts (pnpm run/exec)
+# instead of auto-reinstalling. Auto-reinstall can hit an interactive
+# "remove node_modules?" prompt and abort in a non-TTY shell (e.g. the husky
+# pre-commit hook), failing the commit with
+# ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY. Run `pnpm install` when you see the warning.
+verifyDepsBeforeRun: warn
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  msw: true
+  node-pty: true
+overrides:
+  # Security floors for transitive advisories (campaign finding F-020).
+  # Every module below resolves to exactly ONE version in this tree, so a
+  # plain caret override is safe - there is no other major to strand.
+  # Re-derive after a dependency bump with `pnpm audit --json`; drop an entry
+  # once the direct dependency ships a patched range on its own.
+  '@fastify/static': '^10.1.2'
+  '@hono/node-server': '^1.19.15'
+  '@vitest/mocker': '^4.1.11'
+  body-parser: '^2.3.0'
+  brace-expansion: '^5.0.9'
+  fast-uri: '^3.1.6'
+  fastify: '^5.12.1'
+  find-my-way: '^9.6.1'
+  hono: '^4.13.5'
+  ip-address: '^10.3.1'
+  js-yaml: '^4.3.2'
+  nanoid: '^3.3.18'
+  postcss: '^8.5.23'
+  qs: '^6.16.0'
+  react-router: '^7.18.2'
+  smol-toml: '^1.7.1'
+  undici: '^7.29.0'
+  vitest: '^4.1.11'

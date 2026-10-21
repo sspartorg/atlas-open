@@ -1,0 +1,195 @@
+import { test, expect } from '@playwright/test';
+import { gotoWithPerfCold, gotoWithPerfWarm } from '../helpers/perf-cold-warm.js';
+import { gotoWithPerf } from '../helpers/perf.js';
+import { firstAgentId, firstMarketplaceAgentId, firstProjectId } from '../helpers/entities.js';
+
+// W7 chunk 1 — cold + warm TTI baseline for all 26+ routes.
+//
+// Cold variant: clears cookies + browser caches before navigation.
+// Warm variant:  first visit to populate caches, then re-navigates.
+//
+// TTI proxy: nav_timing.load_ms (conservative upper bound — fires after
+// all sub-resources + initial React render + mount-time API fan-out).
+//
+// Budget: p95 TTI < 200ms on hermetic e2e stack.  This spec does NOT
+// assert the budget — it records the baseline so the p95 can be
+// computed from the NDJSON log.  Budget assertions are introduced in
+// the follow-on W7 perf-fix chunk once we know which routes breach it.
+//
+// Gated by PERF=1.  Invoke via `pnpm e2e:perf`.
+
+const PERF_ENABLED = process.env['PERF'] === '1';
+
+// Static routes plus seeded detail routes: always navigable.
+const STATIC_ROUTES = [
+    '/',
+    '/projects',
+    '/tasks',
+    '/tasks/new',
+    '/search',
+    '/terminal',
+    '/terminal/layout',
+    '/agents',
+    '/agents/mcp-tools',
+    '/agents/marketplace',
+    '/notifications',
+    '/reminders',
+    '/guardrails',
+    '/settings',
+    '/settings/credentials',
+    '/analytics',
+    '/scratch-pad',
+    // Seeded by e2e/fixtures/run-seed.ts: Task ETM-1 and its sub-task ETM-2.
+    '/tasks/ETM-1',
+    '/sub-tasks/ETM-2',
+    '/analytics/task/ETM-1',
+] as const;
+
+test.describe('cold/warm TTI baseline', () => {
+    test.skip(!PERF_ENABLED, 'PERF=1 not set; skipping cold/warm baseline capture');
+    // Cold + warm visits do double the navigation work; per-test bump to
+    // 120s matches the baseline.spec.ts ceiling and accommodates slow
+    // chart-heavy routes (/analytics, /agents/marketplace).
+    test.setTimeout(120_000);
+
+    // ------------------------------------------------------------------
+    // Static routes — cold
+    // ------------------------------------------------------------------
+    test.describe('cold navigation', () => {
+        for (const path of STATIC_ROUTES) {
+            test(`cold ${path}`, async ({ page, context }) => {
+                const record = await gotoWithPerfCold(page, context, path);
+                expect(record.path).toBe(path);
+                expect(record.variant).toBe('cold');
+                // Record but don't assert — we're building the baseline.
+                // The load_ms annotation in the NDJSON will be processed
+                // externally to compute p95 per route.
+                expect(record.perf.nav_timing.load_ms).toBeGreaterThanOrEqual(0);
+            });
+        }
+    });
+
+    // ------------------------------------------------------------------
+    // Static routes — warm
+    // ------------------------------------------------------------------
+    test.describe('warm navigation', () => {
+        for (const path of STATIC_ROUTES) {
+            test(`warm ${path}`, async ({ page, context }) => {
+                const record = await gotoWithPerfWarm(page, context, path);
+                expect(record.path).toBe(path);
+                expect(record.variant).toBe('warm');
+                expect(record.perf.nav_timing.load_ms).toBeGreaterThanOrEqual(0);
+            });
+        }
+    });
+
+    // ------------------------------------------------------------------
+    // Dynamic routes — cold (sampled from list pages)
+    // ------------------------------------------------------------------
+    test.describe('dynamic routes cold', () => {
+        test('cold /projects/:id (first seeded project)', async ({ page, context }) => {
+            // Warm-up the list to find the first project link.
+            // G-018 — id from the API. The cards navigate via onClick, so the
+            // old anchor locator matched nothing even with a seeded DB and
+            // every one of these walks silently never ran.
+            const href = `/projects/${await firstProjectId(page)}`;
+            const record = await gotoWithPerfCold(page, context, href);
+            expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
+        });
+
+        test('cold /projects/:id/guardrails (first seeded project)', async ({ page, context }) => {
+            // G-018 — id from the API. The cards navigate via onClick, so the
+            // old anchor locator matched nothing even with a seeded DB and
+            // every one of these walks silently never ran.
+            const href = `/projects/${await firstProjectId(page)}`;
+            const projectId = href.replace('/projects/', '').split('/')[0];
+            const record = await gotoWithPerfCold(page, context, `/projects/${projectId}/guardrails`);
+            expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
+        });
+
+        test('cold /agents/:id (first seeded agent)', async ({ page, context }) => {
+            const href = `/agents/${await firstAgentId(page)}`;
+            const record = await gotoWithPerfCold(page, context, href);
+            expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
+        });
+
+        test('cold /agents/marketplace/:id (first marketplace agent)', async ({ page, context }) => {
+            const href = `/agents/marketplace/${await firstMarketplaceAgentId(page)}`;
+            const record = await gotoWithPerfCold(page, context, href);
+            expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
+        });
+
+        test('cold /analytics/project/:id (first analytics project)', async ({ page, context }) => {
+            await gotoWithPerf(page, '/analytics');
+            const projLink = page.locator('a[href^="/analytics/project/"]').first();
+            if ((await projLink.count()) === 0) {
+                // Honest: a project only appears here once it has cost rows, and
+                // the seed creates no agent runs. Genuinely absent.
+                test.skip(true, 'no project has cost rows yet — genuinely absent');
+                return;
+            }
+            const href = await projLink.getAttribute('href');
+            if (!href) return;
+            const record = await gotoWithPerfCold(page, context, href);
+            expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
+        });
+    });
+
+    // ------------------------------------------------------------------
+    // Dynamic routes — warm (sampled from list pages)
+    // ------------------------------------------------------------------
+    test.describe('dynamic routes warm', () => {
+        test('warm /projects/:id (first seeded project)', async ({ page, context }) => {
+            // G-018 — id from the API. The cards navigate via onClick, so the
+            // old anchor locator matched nothing even with a seeded DB and
+            // every one of these walks silently never ran.
+            const href = `/projects/${await firstProjectId(page)}`;
+            const record = await gotoWithPerfWarm(page, context, href);
+            expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
+        });
+
+        test('warm /projects/:id/guardrails (first seeded project)', async ({ page, context }) => {
+            // G-018 — id from the API. The cards navigate via onClick, so the
+            // old anchor locator matched nothing even with a seeded DB and
+            // every one of these walks silently never ran.
+            const href = `/projects/${await firstProjectId(page)}`;
+            const projectId = href.replace('/projects/', '').split('/')[0];
+            const record = await gotoWithPerfWarm(page, context, `/projects/${projectId}/guardrails`);
+            expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
+        });
+
+        test('warm /agents/:id (first seeded agent)', async ({ page, context }) => {
+            const href = `/agents/${await firstAgentId(page)}`;
+            const record = await gotoWithPerfWarm(page, context, href);
+            expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
+        });
+
+        test('warm /agents/marketplace/:id (first marketplace agent)', async ({ page, context }) => {
+            const href = `/agents/marketplace/${await firstMarketplaceAgentId(page)}`;
+            const record = await gotoWithPerfWarm(page, context, href);
+            expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
+        });
+
+        test('warm /analytics/project/:id (first analytics project)', async ({ page, context }) => {
+            await gotoWithPerf(page, '/analytics');
+            const projLink = page.locator('a[href^="/analytics/project/"]').first();
+            if ((await projLink.count()) === 0) {
+                // Honest: a project only appears here once it has cost rows, and
+                // the seed creates no agent runs. Genuinely absent.
+                test.skip(true, 'no project has cost rows yet — genuinely absent');
+                return;
+            }
+            const href = await projLink.getAttribute('href');
+            if (!href) return;
+            const record = await gotoWithPerfWarm(page, context, href);
+            expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
+        });
+    });
+
+    // The TTI < 200ms enforcement is intentionally NOT in this spec —
+    // it is owned by the follow-on W7 chunk (perf-fix), which will read
+    // the NDJSON output produced here, compute the p95 per route, and
+    // tighten the bar only on routes that have legitimately landed under
+    // the budget. Asserting in dev today would flake on Vite proxy
+    // overhead (~50ms per call) and Windows networking jitter.
+});

@@ -1,0 +1,868 @@
+import { describe, expect, it } from 'vitest';
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+import type { IAgent } from '@atlas/shared';
+
+import { server } from '../../test-setup.js';
+import { renderWithProviders } from '../../test-utils/renderWithProviders.js';
+import { makeAgent } from '../../test-utils/factories.js';
+import { TestsTabContent } from './TestsTabContent.js';
+import { Toast } from '../../components/Toast.js';
+
+const BASE = 'http://localhost:3000/api';
+const agent: IAgent = makeAgent({ id: 'agent-coder', name: 'Coder' });
+
+interface MountOpts {
+    tests?: unknown[];
+    /** Samples of ONE batch. `batches` takes precedence when both are given. */
+    runs?: Array<Record<string, unknown>>;
+    batches?: unknown[];
+    estimate?: Record<string, unknown>;
+    starters?: unknown[];
+    repos?: unknown[];
+    /** The suite verdict the header renders. Omitted ⇒ the panel is absent. */
+    qualification?: Record<string, unknown> | null;
+    failWrites?: boolean;
+    onWrite?: (kind: string, payload: unknown) => void;
+}
+
+/** What the API returns for a set of samples — the fold the service performs. */
+function aBatch(samples: Array<Record<string, unknown>>, over: Record<string, unknown> = {}) {
+    const runs = samples.map((r, i) => ({ ...aRun(r), id: `tr${i}`, sample_index: i }));
+    const passed = runs.filter((r) => r.verdict === 'passed').length;
+    const errored = runs.filter((r) => r.verdict === 'errored').length;
+    const running = runs.filter((r) => r.verdict === 'running').length;
+    const judged = runs.length - errored;
+    const counts = new Map<string, number>();
+    for (const r of runs) for (const f of r.failures as string[]) counts.set(f, (counts.get(f) ?? 0) + 1);
+    return {
+        batch_id: 'b1',
+        label: null,
+        created_at: '2026-09-24T00:00:00Z',
+        n_runs: runs.length,
+        passed,
+        failed: runs.length - passed - errored - running,
+        errored,
+        running,
+        pass_at_1: runs[0]?.verdict === 'passed',
+        pass_at_k: passed > 0,
+        consistency: judged === 0 ? null : passed / judged,
+        flaky: running === 0 && passed > 0 && passed < judged,
+        failure_histogram: [...counts].map(([failure, count]) => ({ failure, count })),
+        cost_usd: runs.reduce((n, r) => n + ((r.cost_usd as number) ?? 0), 0),
+        judge_cost_usd: 0,
+        duration_s_p50: (runs[0]?.duration_s as number) ?? null,
+        duration_s_p95: (runs[0]?.duration_s as number) ?? null,
+        runs,
+        ...over,
+    };
+}
+
+/** What `GET /agent-qualification?agent_id=` returns for one agent. */
+function aQualification(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+        agent_id: 'agent-coder',
+        verdict: 'qualified',
+        fixtures: 3,
+        never_run: 0,
+        passed_at_1: 3,
+        passed_at_k: 3,
+        failed: 0,
+        running: 0,
+        flaky: 0,
+        blocked: 0,
+        last_run_at: '2026-09-24T00:00:00Z',
+        cost_usd: 0.84,
+        stale: false,
+        stale_reason: null,
+        ran_at_config: { model: 'claude-sonnet-5', effort: 'medium', prompt_version: 4 },
+        per_fixture: [],
+        ...over,
+    };
+}
+
+function mount({
+    tests = [],
+    runs,
+    batches,
+    estimate,
+    starters = [],
+    repos = [],
+    qualification = null,
+    failWrites = false,
+    onWrite,
+}: MountOpts = {}) {
+    const history = batches ?? (runs ? [aBatch(runs)] : []);
+    server.use(
+        http.get(`${BASE}/agent-qualification`, () => HttpResponse.json(qualification ? [qualification] : [])),
+        http.post(`${BASE}/agents/agent-coder/test-suite/runs`, async ({ request }) => {
+            onWrite?.('run-suite', await request.json());
+            return HttpResponse.json([], { status: 202 });
+        }),
+        http.post(`${BASE}/agents/agent-coder/tests`, async ({ request }) => {
+            onWrite?.('create', await request.json());
+            if (failWrites) return HttpResponse.json({ error: 'that project has no repos' }, { status: 400 });
+            return HttpResponse.json(aTest(), { status: 201 });
+        }),
+        http.patch(`${BASE}/agent-tests/:id`, async ({ params, request }) => {
+            onWrite?.('update', { id: params['id'], body: await request.json() });
+            if (failWrites) return HttpResponse.json({ error: 'no such project' }, { status: 400 });
+            return HttpResponse.json(aTest());
+        }),
+        http.delete(`${BASE}/agent-tests/:id`, ({ params }) => {
+            onWrite?.('delete', params['id']);
+            return new HttpResponse(null, { status: 204 });
+        }),
+        http.post(`${BASE}/agent-tests/:id/run`, async ({ params, request }) => {
+            onWrite?.('run', { id: params['id'], body: await request.json() });
+            if (failWrites) return HttpResponse.json({ error: 'the CLI is not installed' }, { status: 500 });
+            return HttpResponse.json(aBatch([{ verdict: 'running' }]), { status: 202 });
+        }),
+        // The list carries each row's newest batch (one request per tab).
+        http.get(`${BASE}/agents/agent-coder/tests`, () =>
+            HttpResponse.json(
+                (tests as Array<Record<string, unknown>>).map((t) => ({ latest_batch: history[0] ?? null, ...t })),
+            ),
+        ),
+        http.get(`${BASE}/agents/agent-coder/cost-estimate`, ({ request }) => {
+            const n = Number(new URL(request.url).searchParams.get('n') ?? '1');
+            const base = estimate ?? { estimated_cost_usd: null, sample_size: 0 };
+            const per = base['estimated_cost_usd'] as number | null;
+            return HttpResponse.json({
+                ...base,
+                n_runs: n,
+                // The server multiplies by n; the button shows the TOTAL.
+                estimated_total_usd: per === null ? null : Number((per * n).toFixed(4)),
+                estimated_range_usd: per === null ? null : [per * n, per * n],
+            });
+        }),
+        http.get(`${BASE}/agent-tests/:id/batches`, () => {
+            onWrite?.('read-history', null);
+            return HttpResponse.json(history);
+        }),
+        http.get(`${BASE}/agents/agent-coder/starter-tests`, () => HttpResponse.json(starters)),
+        http.get(`${BASE}/projects`, () => HttpResponse.json([{ id: 'p1', name: 'Sandbox' }])),
+        http.get(`${BASE}/projects/:id/repos`, () => HttpResponse.json(repos)),
+    );
+    // `Toast` renders what `toast.show` queues; without it the success and
+    // error handlers have nowhere to appear.
+    return renderWithProviders(
+        <>
+            <TestsTabContent agent={agent} />
+            <Toast />
+        </>,
+    );
+}
+
+const aTest = (over: Record<string, unknown> = {}) => ({
+    id: 't1',
+    agent_id: 'agent-coder',
+    project_id: 'p1',
+    repo_id: 'r1',
+    name: 'Asks rather than building a whole Task',
+    item_template: { issue_type: 'task', title: 'Add a health endpoint' },
+    expectations: { outcome_kind: 'asked_question' },
+    created_at: '2026-09-24T00:00:00Z',
+    updated_at: '2026-09-24T00:00:00Z',
+    ...over,
+});
+
+const aRun = (over: Record<string, unknown> = {}) => ({
+    id: 'tr1',
+    agent_test_id: 't1',
+    agent_run_id: 'ar1',
+    item_id: 'ATL-174',
+    verdict: 'passed',
+    failures: [],
+    cost_usd: 0.24,
+    duration_s: 19,
+    created_at: '2026-09-24T00:00:00Z',
+    batch_id: 'b1',
+    sample_index: 0,
+    label: null,
+    judge_verdict: null,
+    judge_reason: null,
+    judge_cost_usd: null,
+    ...over,
+});
+
+const NAME = 'Asks rather than building a whole Task';
+
+/** A row opens its history on click; the ⋮ menu holds the rest. */
+async function openHistory(name = NAME) {
+    await userEvent.click(await screen.findByRole('button', { name: `Show history for ${name}` }));
+}
+async function menuAction(action: string | RegExp, name = NAME) {
+    await userEvent.click(await screen.findByRole('button', { name: `More actions for ${name}` }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: action }));
+}
+
+describe('TestsTabContent', () => {
+    // Without a test there is no way to tell whether an agent works — the empty
+    // state has to say that rather than shrug.
+    it('says why the absence matters when there are no tests', async () => {
+        mount();
+        expect(await screen.findByText(/No tests yet/)).toBeInTheDocument();
+    });
+
+    it('lists a test with the item it acts on and what it expects', async () => {
+        mount({ tests: [aTest()] });
+        expect(await screen.findByText('Asks rather than building a whole Task')).toBeInTheDocument();
+        expect(screen.getByText(/Task: Add a health endpoint · expects asked_question/)).toBeInTheDocument();
+    });
+
+    // Running a test spends real money; a refusal that vanished silently
+    // would be the worst way to find out it did not start.
+    it('says why a test could not start', async () => {
+        mount({ tests: [aTest()], failWrites: true });
+        await userEvent.click(await screen.findByRole('button', { name: /^Run/ }));
+        expect(await screen.findByText(/the CLI is not installed/)).toBeInTheDocument();
+    });
+
+    it('confirms when a single test starts, and when several do', async () => {
+        mount({ tests: [aTest()] });
+        await userEvent.click(await screen.findByRole('button', { name: /^Run/ }));
+        expect(await screen.findByText('Test started')).toBeInTheDocument();
+    });
+
+    it('covers every kind of assertion in the summary line', async () => {
+        mount({
+            tests: [
+                aTest({
+                    expectations: {
+                        required_checklist_all_passed: true,
+                        summary_contains: ['migration'],
+                        summary_omits: ['TODO'],
+                        tools_required: ['Read'],
+                        max_tool_calls: 40,
+                        files_touched: ['src/'],
+                        judge_criteria: ['did it say why?'],
+                        max_duration_s: 300,
+                    },
+                }),
+            ],
+        });
+        const line = await screen.findByText(/^Checks:/);
+        expect(line).toHaveTextContent('every required checklist row passed');
+        expect(line).toHaveTextContent('says "migration"');
+        expect(line).toHaveTextContent('does not say "TODO"');
+        expect(line).toHaveTextContent('uses `Read`');
+        expect(line).toHaveTextContent('≤ 40 tool calls');
+        expect(line).toHaveTextContent('touches src/');
+        expect(line).toHaveTextContent('judged: did it say why?');
+        expect(line).toHaveTextContent('under 300s');
+    });
+
+    it('says how far through a multi-sample batch is while it runs', async () => {
+        mount({
+            tests: [aTest()],
+            runs: [{ verdict: 'passed' }, { verdict: 'running' }, { verdict: 'running' }],
+        });
+        expect(await screen.findAllByText('running 1/3…')).not.toHaveLength(0);
+    });
+
+    it('shows the label a batch was run under', async () => {
+        mount({ tests: [aTest()], batches: [aBatch([{}], { label: 'before-prompt-diet' })] });
+        await openHistory();
+        expect(await screen.findByText('before-prompt-diet')).toBeInTheDocument();
+    });
+
+    // Expectations arrive from the API, from MCP and with starter tests — not
+    // only from the one field the create form offers. A test whose assertions
+    // you cannot see is half a test.
+    it('says everything the test checks, not just the outcome', async () => {
+        mount({
+            tests: [
+                aTest({
+                    expectations: {
+                        outcome_kind: 'rejected',
+                        tools_forbidden: ['Edit', 'Write'],
+                        max_turns: 12,
+                        files_untouched: ['src/'],
+                        max_cost_usd: 0.5,
+                    },
+                }),
+            ],
+        });
+        const line = await screen.findByText(/^Checks:/);
+        expect(line).toHaveTextContent('never uses `Edit`');
+        expect(line).toHaveTextContent('never uses `Write`');
+        expect(line).toHaveTextContent('≤ 12 turns');
+        expect(line).toHaveTextContent('leaves src/ alone');
+        expect(line).toHaveTextContent('under $0.5');
+    });
+
+    // Spend that surprises you afterwards is what stops people running tests at
+    // all, so the estimate is on the button itself.
+    it('puts the cost estimate on the Run button', async () => {
+        mount({ tests: [aTest()], estimate: { estimated_cost_usd: 0.32, sample_size: 20 } });
+        expect(await screen.findByRole('button', { name: /Run · ~\$0\.32/ })).toBeInTheDocument();
+    });
+
+    it('offers a plain Run when the agent has never run, rather than inventing a number', async () => {
+        mount({ tests: [aTest()], estimate: { estimated_cost_usd: null, sample_size: 0 } });
+        const btn = await screen.findByRole('button', { name: 'Run' });
+        expect(btn).toBeInTheDocument();
+    });
+
+    // The row's headline arrives with the list. Fetching every test's whole
+    // history just to draw one line per row is what made this tab slow.
+    it('does not read a test\'s history until its row is opened', async () => {
+        const writes: Array<[string, unknown]> = [];
+        mount({ tests: [aTest()], runs: [{}], onWrite: (k, p) => writes.push([k, p]) });
+        expect(await screen.findByText('passed')).toBeInTheDocument();
+        expect(writes).toEqual([]);
+        await openHistory();
+        await waitFor(() => expect(writes).toEqual([['read-history', null]]));
+    });
+
+    it('opens and closes a row from the keyboard and from its menu', async () => {
+        mount({ tests: [aTest()], runs: [{}] });
+        const row = await screen.findByRole('button', { name: `Show history for ${NAME}` });
+        row.focus();
+        await userEvent.keyboard('{Enter}');
+        expect(await screen.findByText('19s median')).toBeInTheDocument();
+        await menuAction('Hide history');
+        await waitFor(() => expect(screen.queryByText('19s median')).not.toBeInTheDocument());
+        await menuAction('History');
+        expect(await screen.findByText('19s median')).toBeInTheDocument();
+    });
+
+    it('says a test has never run rather than showing an empty verdict', async () => {
+        mount({ tests: [aTest()] });
+        expect(await screen.findByText('Never run')).toBeInTheDocument();
+        await openHistory();
+        expect(await screen.findByText('Never run.')).toBeInTheDocument();
+    });
+
+    describe('history', () => {
+        it('shows the verdict, cost, duration and the item the agent acted on', async () => {
+            mount({ tests: [aTest()], runs: [{}] });
+            await openHistory();
+            await waitFor(() => expect(screen.getAllByText('passed').length).toBeGreaterThan(0));
+            expect(screen.getByText('19s median')).toBeInTheDocument();
+        });
+
+        // A verdict you cannot act on is barely better than no verdict.
+        it('lists every expectation that did not hold', async () => {
+            mount({
+                tests: [aTest()],
+                runs: [{ verdict: 'failed', failures: ['expected outcome `asked_question`, got `done`'] }],
+            });
+            await openHistory();
+            expect(
+                await screen.findByText(/expected outcome `asked_question`, got `done`/),
+            ).toBeInTheDocument();
+        });
+
+        // A dispatch that never ran is a broken environment, not a failing
+        // agent — the ADR 0020 distinction, carried into the UI.
+        it('shows a dispatch that never ran as "could not run", not failed', async () => {
+            mount({ tests: [aTest()], runs: [{ verdict: 'errored', failures: ['could not start the run'] }] });
+            await openHistory();
+            // Twice over: once as the card's headline, once in the batch block.
+            await waitFor(() => expect(screen.getAllByText('could not run')).toHaveLength(2));
+            expect(screen.queryByText('failed')).not.toBeInTheDocument();
+        });
+    });
+
+    // "I don't see already pre-built tests for agent to evaluate work" — a
+    // customer installing an agent from the marketplace does it on trust, and
+    // these are what make "does this work?" pressable on day one.
+    describe('tests the agent ships with', () => {
+        const starter = {
+            id: 'refuses-a-sub-task',
+            name: 'Refuses work that is not a Task',
+            item_template: { issue_type: 'sub_task', title: 'Add a spinner' },
+            expectations: { outcome_kind: 'asked_question', tools_forbidden: ['Edit'], max_cost_usd: 0.6 },
+            needs_repo: false,
+            notes: "PO Writer's kind guard. A `done` here means the guard is gone.",
+        };
+
+        it('lists them by what each one asserts, with the rationale on hover', async () => {
+            mount({ starters: [starter] });
+            expect(await screen.findByText('Ships with this agent')).toBeInTheDocument();
+            // The assertions, not the prose: a caption is not the place for an
+            // essay, so `notes` is the tooltip.
+            const assertions = screen.getByText(/never uses `Edit`/);
+            expect(assertions).toBeInTheDocument();
+            expect(assertions).toHaveAttribute('title', starter.notes);
+        });
+
+        // A permanent strip of things you have already done is noise.
+        it('stops offering one that has already been added', async () => {
+            mount({ starters: [starter], tests: [aTest({ name: starter.name })] });
+            await screen.findByText(starter.name);
+            expect(screen.queryByText('Ships with this agent')).not.toBeInTheDocument();
+        });
+
+        // Through the form, not a one-click create: a test needs a project to
+        // make its throwaway item in, which a catalog bundle cannot know.
+        it('prefills the form rather than creating it blind', async () => {
+            mount({ starters: [starter] });
+            await userEvent.click(await screen.findByRole('button', { name: 'Add' }));
+            expect(screen.getByLabelText('Test name')).toHaveValue(starter.name);
+            expect(screen.getByLabelText('Item title')).toHaveValue('Add a spinner');
+            // No project needed: an unpinned test runs in the Tests sandbox.
+            expect(screen.getByRole('button', { name: 'Create test' })).toBeEnabled();
+        });
+
+        // The form can only show the outcome. Dropping the rest on adoption
+        // would make the adopted copy weaker than the one it came from.
+        it('keeps every assertion the shipped test made, not just the outcome', async () => {
+            const writes: Array<[string, unknown]> = [];
+            mount({ starters: [starter], onWrite: (k, p) => writes.push([k, p]) });
+            await userEvent.click(await screen.findByRole('button', { name: 'Add' }));
+            await userEvent.click(screen.getByLabelText('Project'));
+            await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
+            await userEvent.click(screen.getByRole('button', { name: 'Create test' }));
+
+            await waitFor(() => expect(writes).toHaveLength(1));
+            expect((writes[0]?.[1] as { expectations: unknown }).expectations).toEqual({
+                outcome_kind: 'asked_question',
+                tools_forbidden: ['Edit'],
+                max_cost_usd: 0.6,
+            });
+        });
+    });
+
+    describe('the create form', () => {
+        it('cannot be submitted until it names a test and an item', async () => {
+            mount();
+            await userEvent.click(await screen.findByRole('button', { name: 'New test' }));
+            expect(screen.getByRole('button', { name: 'Create test' })).toBeDisabled();
+        });
+
+        // ADR 0018: every Task names at least one repo, and `resolveRepoIds`
+        // refuses to guess when a project has several. Without this the run
+        // fails at dispatch with "A Task needs at least one repo" — which is
+        // exactly what happened the first time this was driven in a browser.
+        it('requires a repo when the project has more than one', async () => {
+            mount({ repos: [{ id: 'r1', name: 'web' }, { id: 'r2', name: 'cli' }] });
+            await userEvent.click(await screen.findByRole('button', { name: 'New test' }));
+            await userEvent.type(screen.getByLabelText('Test name'), 'a test');
+            await userEvent.type(screen.getByLabelText('Item title'), 'an item');
+            await userEvent.click(screen.getByLabelText('Project'));
+            await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
+            // The project has two repos and none is picked, so it stays disabled.
+            expect(screen.getByRole('button', { name: 'Create test' })).toBeDisabled();
+        });
+
+        it('offers asked_question as an expected outcome, not just success', async () => {
+            mount();
+            await userEvent.click(await screen.findByRole('button', { name: 'New test' }));
+            await userEvent.click(screen.getByLabelText('Expected outcome'));
+            expect(await screen.findByText(/asked_question — asked instead of guessing/)).toBeInTheDocument();
+        });
+    });
+
+    // Sampling. An agent is stochastic, so one run's verdict was whichever of
+    // two answers the Owner happened to press the button on.
+    describe('sampling', () => {
+        it('reports how many of a batch’s samples passed, not a single verdict', async () => {
+            mount({
+                tests: [aTest()],
+                runs: [{ verdict: 'passed' }, { verdict: 'failed' }, { verdict: 'passed' }],
+            });
+            // Once: the row's headline. The history is not mounted until opened.
+            await waitFor(() => expect(screen.getAllByText('2/3 passed')).toHaveLength(1));
+            expect(screen.getAllByText('· flaky')).toHaveLength(1);
+        });
+
+        // A batch that says "1 of 3 failed" is less useful than one that says
+        // WHICH expectation was the unstable one.
+        it('says which expectation was unstable, and in how many runs', async () => {
+            mount({
+                tests: [aTest()],
+                runs: [{ verdict: 'passed' }, { verdict: 'failed', failures: ['summary does not mention "migration"'] }],
+            });
+            await openHistory();
+            expect(
+                await screen.findByText(/1 of 2 runs: summary does not mention "migration"/),
+            ).toBeInTheDocument();
+        });
+
+        // A dispatch that never started is not a wrong answer, so it must not
+        // drag the score down with it.
+        it('keeps a broken environment out of the score', async () => {
+            mount({ tests: [aTest()], runs: [{ verdict: 'passed' }, { verdict: 'errored' }] });
+            // One sample errored, so one was judged — and it passed. The
+            // broken dispatch is reported beside the score, not inside it.
+            await waitFor(() => expect(screen.getAllByText('passed')).toHaveLength(1));
+            expect(screen.getAllByText('· 1 could not run')).toHaveLength(1);
+        });
+
+        // `5×` silently costing five times over is exactly the surprise ADR
+        // 0023 says stops people running tests at all.
+        it('shows the total for n runs on the button, not the per-run price', async () => {
+            const writes: Array<[string, unknown]> = [];
+            mount({
+                tests: [aTest()],
+                estimate: { estimated_cost_usd: 0.2, sample_size: 20 },
+                onWrite: (k, p) => writes.push([k, p]),
+            });
+            expect(await screen.findByRole('button', { name: /Run · ~\$0\.20/ })).toBeInTheDocument();
+
+            await userEvent.click(await screen.findByRole('button', { name: `More actions for ${NAME}` }));
+            const five = await screen.findByRole('menuitem', { name: /Run 5× · ~\$1\.00/ });
+            await userEvent.click(five);
+            await waitFor(() => expect(writes).toEqual([['run', { id: 't1', body: { n_runs: 5, sandbox: true } }]]));
+        });
+    });
+
+    // These are the flows a customer actually performs, and the ones that were
+    // broken the first time this page was driven in a real browser.
+    describe('writes', () => {
+        it('creates a test with the item template and expectations it was given', async () => {
+            const writes: Array<[string, unknown]> = [];
+            mount({ onWrite: (k, p) => writes.push([k, p]) });
+
+            await userEvent.click(await screen.findByRole('button', { name: 'New test' }));
+            await userEvent.type(screen.getByLabelText('Test name'), 'refuses a Task');
+            await userEvent.click(screen.getByLabelText('Project'));
+            await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
+            await userEvent.type(screen.getByLabelText('Item title'), 'Add a health endpoint');
+
+            await userEvent.click(screen.getByRole('button', { name: 'Create test' }));
+            await waitFor(() => expect(writes).toHaveLength(1));
+            expect(writes[0]![0]).toBe('create');
+            expect(writes[0]![1]).toMatchObject({
+                project_id: 'p1',
+                name: 'refuses a Task',
+                item_template: { issue_type: 'task', title: 'Add a health endpoint' },
+            });
+        });
+
+        it('runs a test once by default', async () => {
+            const writes: Array<[string, unknown]> = [];
+            mount({ tests: [aTest()], onWrite: (k, p) => writes.push([k, p]) });
+            await userEvent.click(await screen.findByRole('button', { name: /^Run/ }));
+            await waitFor(() =>
+                expect(writes).toEqual([['run', { id: 't1', body: { n_runs: 1, sandbox: true } }]]),
+            );
+        });
+
+        it('deletes a test', async () => {
+            const writes: Array<[string, unknown]> = [];
+            mount({ tests: [aTest()], onWrite: (k, p) => writes.push([k, p]) });
+            await menuAction('Delete');
+            await waitFor(() => expect(writes).toEqual([['delete', 't1']]));
+        });
+
+        // Drives every field, because each one is a handler and a half-covered
+        // form is one where the field nobody tested is the one that silently
+        // does not bind.
+        it('sends every field the form collects', async () => {
+            const writes: Array<[string, unknown]> = [];
+            mount({
+                repos: [{ id: 'r1', name: 'web' }, { id: 'r2', name: 'cli' }],
+                onWrite: (k, p2) => writes.push([k, p2]),
+            });
+
+            await userEvent.click(await screen.findByRole('button', { name: 'New test' }));
+            await userEvent.type(screen.getByLabelText('Test name'), 'full form');
+
+            await userEvent.click(screen.getByLabelText('Project'));
+            await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
+
+            await userEvent.click(await screen.findByLabelText('Repo'));
+            await userEvent.click(await screen.findByRole('option', { name: 'cli' }));
+
+            await userEvent.click(screen.getByLabelText('Item kind'));
+            await userEvent.click(await screen.findByRole('option', { name: 'Sub-task' }));
+
+            await userEvent.type(screen.getByLabelText('Item title'), 'Build the endpoint');
+            await userEvent.type(screen.getByLabelText('Item description'), 'some context');
+
+            await userEvent.click(screen.getByLabelText('Expected outcome'));
+            await userEvent.click(await screen.findByRole('option', { name: /asked_question/ }));
+
+            await userEvent.click(screen.getByRole('button', { name: 'Create test' }));
+            await waitFor(() => expect(writes).toHaveLength(1));
+            expect(writes[0]![1]).toMatchObject({
+                project_id: 'p1',
+                repo_id: 'r2',
+                name: 'full form',
+                item_template: {
+                    issue_type: 'sub_task',
+                    title: 'Build the endpoint',
+                    description: 'some context',
+                },
+                expectations: { outcome_kind: 'asked_question' },
+            });
+        });
+
+        it('closes the form and clears it after a successful create', async () => {
+            mount();
+            await userEvent.click(await screen.findByRole('button', { name: 'New test' }));
+            await userEvent.type(screen.getByLabelText('Test name'), 'x');
+            await userEvent.click(screen.getByLabelText('Project'));
+            await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
+            await userEvent.type(screen.getByLabelText('Item title'), 'y');
+            await userEvent.click(screen.getByRole('button', { name: 'Create test' }));
+            // The toggle goes back to "New test" only when `adding` is cleared.
+            expect(await screen.findByRole('button', { name: 'New test' })).toBeInTheDocument();
+        });
+    });
+});
+
+// The Owner's actual question: "how do I know ABC Agent does what it is
+// supposed to?" — and the half that makes the first half worth anything.
+describe('TestsTabContent — qualification', () => {
+    it('says the suite is qualified, on which configuration, and what it cost', async () => {
+        mount({ tests: [aTest()], qualification: aQualification() });
+        expect(await screen.findByText('QUALIFIED')).toBeInTheDocument();
+        expect(screen.getByText('3 of 3 fixtures')).toBeInTheDocument();
+        expect(screen.getByText(/claude-sonnet-5.*prompt v4/)).toBeInTheDocument();
+    });
+
+    // A green suite proven on a model the agent no longer runs is not a green
+    // suite, and the badge has to say which field moved or it is decoration.
+    it('names the field that went stale', async () => {
+        mount({
+            tests: [aTest()],
+            qualification: aQualification({
+                verdict: 'stale',
+                stale: true,
+                stale_reason: 'the model changed from claude-sonnet-5 to haiku since the last run',
+            }),
+        });
+        expect(await screen.findByText('STALE')).toBeInTheDocument();
+        expect(screen.getByText(/changed from claude-sonnet-5 to haiku/)).toBeInTheDocument();
+    });
+
+    it('does not call a never-run suite passing', async () => {
+        mount({
+            tests: [aTest()],
+            qualification: aQualification({ verdict: 'never_run', never_run: 3, passed_at_1: 0, passed_at_k: 0 }),
+        });
+        expect(await screen.findByText('NEVER RUN')).toBeInTheDocument();
+        expect(screen.queryByText('QUALIFIED')).not.toBeInTheDocument();
+    });
+
+    // "Run all" used to flash FAILING while its samples were still in flight.
+    it('says a suite with samples in flight is running, not failing', async () => {
+        mount({
+            tests: [aTest()],
+            qualification: aQualification({ verdict: 'running', running: 1, failed: 0 }),
+        });
+        expect(await screen.findByText('RUNNING…')).toBeInTheDocument();
+        expect(screen.queryByText('FAILING')).not.toBeInTheDocument();
+    });
+
+    // ADR 0023 amendment — with nothing picked, a suite runs in the Tests
+    // sandbox, never in one of the Owner's projects.
+    it('runs the whole suite in the Tests sandbox by default', async () => {
+        const writes: Array<{ kind: string; payload: unknown }> = [];
+        mount({
+            tests: [aTest()],
+            qualification: aQualification(),
+            onWrite: (kind, payload) => writes.push({ kind, payload }),
+        });
+        expect((await screen.findAllByText('Tests sandbox (default)')).length).toBeGreaterThan(0);
+        await userEvent.click(await screen.findByRole('button', { name: /^Run all/ }));
+        await waitFor(() => expect(writes).toEqual([{ kind: 'run-suite', payload: { sandbox: true } }]));
+    });
+
+    it('runs the whole suite in the project the header names', async () => {
+        const writes: Array<{ kind: string; payload: unknown }> = [];
+        mount({
+            tests: [aTest()],
+            qualification: aQualification(),
+            onWrite: (kind, payload) => writes.push({ kind, payload }),
+        });
+        // Pick the project first: a suite run makes real items, so it is never
+        // dispatched against a project the Owner did not choose.
+        await userEvent.click(await screen.findByRole('combobox', { name: 'Run in' }));
+        await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
+        await userEvent.click(await screen.findByRole('button', { name: /Run all 3/ }));
+
+        await waitFor(() => expect(writes.some((w) => w.kind === 'run-suite')).toBe(true));
+        expect(writes.find((w) => w.kind === 'run-suite')?.payload).toMatchObject({ project_id: 'p1' });
+    });
+
+    it('says whether a fixture came from the bundle or from you', async () => {
+        const test = aTest();
+        mount({
+            tests: [test],
+            qualification: aQualification({
+                per_fixture: [{ agent_test_id: (test as { id: string }).id, provenance: 'catalog' }],
+            }),
+        });
+        expect(await screen.findByText('Ships with this agent · upgrades with it')).toBeInTheDocument();
+    });
+});
+
+describe('TestsTabContent — qualification edges', () => {
+    it('offers no suite run when the agent has no fixtures', async () => {
+        mount({ qualification: aQualification({ verdict: 'no_tests', fixtures: 0, passed_at_1: 0, passed_at_k: 0 }) });
+        expect(await screen.findByText('NO TESTS')).toBeInTheDocument();
+        expect(screen.getByText(/Nothing here has been proven/)).toBeInTheDocument();
+        // Nothing to run, so the button that spends money is not offered.
+        expect(screen.queryByRole('button', { name: /Run all/ })).not.toBeInTheDocument();
+    });
+
+    it('counts the flaky fixtures beside pass@k', async () => {
+        mount({
+            tests: [aTest()],
+            qualification: aQualification({ flaky: 2, passed_at_1: 1, passed_at_k: 3 }),
+        });
+        expect(await screen.findByText(/3 of 3.*2 flaky/)).toBeInTheDocument();
+    });
+
+    it('says how many have never run when the rest have passed', async () => {
+        mount({
+            tests: [aTest()],
+            qualification: aQualification({ verdict: 'stale', never_run: 1, passed_at_1: 2, passed_at_k: 2 }),
+        });
+        expect(await screen.findByText('1 of 3 have never run.')).toBeInTheDocument();
+    });
+
+    // Multi-repo projects (ADR 0018) have nothing sensible to default to, so
+    // the picker only appears when the choice is real.
+    it('asks for a repo only when the project has more than one', async () => {
+        mount({
+            tests: [aTest()],
+            qualification: aQualification(),
+            repos: [
+                { id: 'r1', name: 'api' },
+                { id: 'r2', name: 'web' },
+            ],
+        });
+        await userEvent.click(await screen.findByRole('combobox', { name: 'Run in' }));
+        await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
+        expect(await screen.findByRole('combobox', { name: 'Repo' })).toBeInTheDocument();
+    });
+});
+
+// A private window, or site data cleared, throws on access. The picker is a
+// convenience; the page must render without it.
+it('renders when localStorage is unavailable', async () => {
+    const store = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    Object.defineProperty(window, 'localStorage', {
+        configurable: true,
+        get() {
+            throw new Error('site data blocked');
+        },
+    });
+    try {
+        mount({ tests: [aTest()], qualification: aQualification() });
+        expect(await screen.findByText('QUALIFIED')).toBeInTheDocument();
+        await userEvent.click(await screen.findByRole('combobox', { name: 'Run in' }));
+        await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
+        expect(await screen.findByRole('button', { name: /Run all 3/ })).toBeEnabled();
+    } finally {
+        if (store) Object.defineProperty(window, 'localStorage', store);
+    }
+});
+
+describe('TestsTabContent — edit', () => {
+    it('opens the form prefilled and saves a merged patch', async () => {
+        const writes: Array<{ kind: string; payload: unknown }> = [];
+        mount({
+            tests: [
+                aTest({
+                    expectations: { outcome_kind: 'asked_question', tools_forbidden: ['Write'], max_cost_usd: 1 },
+                }),
+            ],
+            onWrite: (kind, payload) => writes.push({ kind, payload }),
+        });
+        await menuAction('Edit');
+        const nameField = screen.getByLabelText('Test name');
+        expect(nameField).toHaveValue('Asks rather than building a whole Task');
+        expect(screen.getByLabelText('Item title')).toHaveValue('Add a health endpoint');
+
+        await userEvent.clear(nameField);
+        await userEvent.type(nameField, 'Asks first');
+        await userEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+        await waitFor(() => expect(writes.find((w) => w.kind === 'update')).toBeDefined());
+        expect(writes.find((w) => w.kind === 'update')?.payload).toMatchObject({
+            id: 't1',
+            body: {
+                name: 'Asks first',
+                project_id: 'p1',
+                repo_id: 'r1',
+                // What the form never showed is kept, not dropped.
+                expectations: { outcome_kind: 'asked_question', tools_forbidden: ['Write'], max_cost_usd: 1 },
+            },
+        });
+        expect(await screen.findByText('Test saved')).toBeInTheDocument();
+    });
+
+    it('clears the outcome when "Any outcome" is chosen, and reports a failed save', async () => {
+        const writes: Array<{ kind: string; payload: unknown }> = [];
+        mount({
+            tests: [aTest({ project_id: null, repo_id: null })],
+            failWrites: true,
+            onWrite: (kind, payload) => writes.push({ kind, payload }),
+        });
+        await menuAction('Edit');
+        await userEvent.click(screen.getByLabelText('Project'));
+        await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
+        await userEvent.click(screen.getByLabelText('Expected outcome'));
+        await userEvent.click(await screen.findByRole('option', { name: 'Any outcome' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+        await waitFor(() => expect(writes.find((w) => w.kind === 'update')).toBeDefined());
+        const body = (writes.find((w) => w.kind === 'update')?.payload as { body: { expectations: object } }).body;
+        expect(body.expectations).not.toHaveProperty('outcome_kind');
+        expect(await screen.findByText('no such project')).toBeInTheDocument();
+        // Cancel leaves edit mode behind.
+        await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+        await userEvent.click(screen.getByRole('button', { name: 'New test' }));
+        expect(screen.getByRole('button', { name: 'Create test' })).toBeInTheDocument();
+    });
+});
+
+// ADR 0023 amendment — scope an agent in the form: read-only, what its reply
+// may say, what it may run, a judge question and the Owner's own script.
+describe('TestsTabContent — checks', () => {
+    it('sends every check the form collects, and summarises them on the card', async () => {
+        const writes: Array<[string, unknown]> = [];
+        mount({ onWrite: (k, p) => writes.push([k, p]) });
+        await userEvent.click(await screen.findByRole('button', { name: 'New test' }));
+        await userEvent.type(screen.getByLabelText('Test name'), 'stays on the menu');
+        await userEvent.type(screen.getByLabelText('Item title'), 'Who is the president?');
+        await userEvent.click(screen.getByLabelText('Read-only agent — must not edit any file'));
+        await userEvent.type(screen.getByLabelText('Reply must match'), 'menu');
+        await userEvent.type(screen.getByLabelText('Reply must not match'), 'president');
+        await userEvent.type(screen.getByLabelText('Forbidden shell commands'), '^curl');
+        await userEvent.type(screen.getByLabelText('Judge questions'), 'It declines politely.');
+        await userEvent.type(screen.getByLabelText('Check script (bash)'), 'exit 0');
+        await userEvent.click(screen.getByRole('button', { name: 'Create test' }));
+
+        await waitFor(() => expect(writes).toHaveLength(1));
+        expect((writes[0]?.[1] as { expectations: unknown }).expectations).toEqual({
+            reply_must_match: ['menu'],
+            reply_must_not_match: ['president'],
+            commands_forbidden: ['^curl'],
+            judge_criteria: ['It declines politely.'],
+            script: { body_sh: 'exit 0' },
+            no_code_changes: true,
+            tools_forbidden: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'],
+        });
+    });
+
+    it('prefills the checks when editing, and shows them on the card', async () => {
+        mount({
+            tests: [
+                aTest({
+                    expectations: {
+                        reply_must_not_match: ['president'],
+                        commands_forbidden: ['^curl'],
+                        no_code_changes: true,
+                        files_changed_only: ['src/'],
+                        reply_must_match: ['menu'],
+                        script: { body_sh: 'exit 0' },
+                    },
+                }),
+            ],
+        });
+        expect(await screen.findByText(/reply avoids \/president\/.*never runs \/\^curl\/.*changes no code.*changes only src\/.*passes your script/)).toBeInTheDocument();
+        await menuAction('Edit');
+        expect(screen.getByLabelText('Reply must not match')).toHaveValue('president');
+        expect(screen.getByLabelText('Read-only agent — must not edit any file')).toBeChecked();
+    });
+});

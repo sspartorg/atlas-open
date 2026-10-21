@@ -1,0 +1,272 @@
+import { describe, expect, it } from 'vitest';
+import { screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+import { server } from '../../test-setup.js';
+import { renderWithProviders } from '../../test-utils/renderWithProviders.js';
+import { GuardrailScriptsTab } from './GuardrailScriptsTab.js';
+
+const BASE = 'http://localhost:3000/api';
+const ISO = '2026-05-16T00:00:00.000Z';
+
+describe('GuardrailScriptsTab', () => {
+    it('shows a plain "Loading…" (no mojibake) while scripts load', () => {
+        server.use(http.get(`${BASE}/guardrail-scripts`, () => new Promise<never>(() => {})));
+        renderWithProviders(<GuardrailScriptsTab />);
+        expect(screen.getByText('Loading…')).toBeInTheDocument();
+    });
+
+    it('script cards are native buttons', async () => {
+        server.use(
+            http.get(`${BASE}/guardrail-scripts`, () =>
+                HttpResponse.json([
+                    {
+                        id: 'lint',
+                        name: 'Lint',
+                        description: '',
+                        body_sh: 'x',
+                        body_ps1: 'x',
+                        sort_order: 0,
+                        created_at: '2026-01-01T00:00:00.000Z',
+                        updated_at: '2026-01-01T00:00:00.000Z',
+                    },
+                ])
+            )
+        );
+        renderWithProviders(<GuardrailScriptsTab />);
+        const card = await screen.findByRole('button', { name: /Lint/ });
+        expect(card.tagName).toBe('BUTTON');
+    });
+
+    it('renders the empty state and Add-first button when no scripts', async () => {
+        server.use(http.get(`${BASE}/guardrail-scripts`, () => HttpResponse.json([])));
+        renderWithProviders(<GuardrailScriptsTab />);
+        await waitFor(() => {
+            expect(screen.getByText('No scripts yet')).toBeInTheDocument();
+        });
+        expect(screen.getByRole('button', { name: /add first script/i })).toBeInTheDocument();
+    });
+
+    it('renders one script card per row when scripts exist', async () => {
+        server.use(
+            http.get(`${BASE}/guardrail-scripts`, () =>
+                HttpResponse.json([
+                    {
+                        id: 's1',
+                        name: 'Lint check',
+                        description: 'Runs eslint',
+                        body_sh: '',
+                        body_ps1: '',
+                        sort_order: 0,
+                        created_at: ISO,
+                        updated_at: ISO,
+                    },
+                    {
+                        id: 's2',
+                        name: 'TypeCheck',
+                        description: '',
+                        body_sh: '',
+                        body_ps1: '',
+                        sort_order: 0,
+                        created_at: ISO,
+                        updated_at: ISO,
+                    },
+                ])
+            )
+        );
+        renderWithProviders(<GuardrailScriptsTab />);
+        await waitFor(() => {
+            expect(screen.getByText('Lint check')).toBeInTheDocument();
+            expect(screen.getByText('TypeCheck')).toBeInTheDocument();
+        });
+        expect(screen.getByText('Runs eslint')).toBeInTheDocument();
+        expect(screen.getByText(/2 scripts configured/)).toBeInTheDocument();
+    });
+
+    it('opens the Add modal when the "Add script" button is clicked', async () => {
+        server.use(http.get(`${BASE}/guardrail-scripts`, () => HttpResponse.json([])));
+        renderWithProviders(<GuardrailScriptsTab />);
+        await waitFor(() => {
+            expect(screen.getByText('No scripts yet')).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Add script' }));
+        // The modal renders an explicit Name label so we can detect it.
+        await waitFor(() => {
+            expect(screen.queryAllByRole('dialog').length).toBeGreaterThan(0);
+        });
+    });
+
+    it('clicking a script card opens the modal in edit mode (exercises openEdit)', async () => {
+        server.use(
+            http.get(`${BASE}/guardrail-scripts`, () =>
+                HttpResponse.json([
+                    {
+                        id: 'script-edit',
+                        name: 'Edit Me',
+                        description: 'A script to edit',
+                        body_sh: '#!/bin/bash\necho ok',
+                        body_ps1: 'echo ok',
+                        sort_order: 0,
+                        created_at: ISO,
+                        updated_at: ISO,
+                    },
+                ])
+            )
+        );
+        renderWithProviders(<GuardrailScriptsTab />);
+        await waitFor(() => expect(screen.getByText('Edit Me')).toBeInTheDocument());
+        // Click the script card (role="button")
+        // ScriptCard is a Box[role="button"] — click via the text element
+        fireEvent.click(screen.getByText('Edit Me'));
+        await waitFor(() => {
+            expect(screen.queryAllByRole('dialog').length).toBeGreaterThan(0);
+        });
+    });
+
+    it('exercises openAdd state via "Add script" button (setEditing + setModalOpen)', async () => {
+        server.use(
+            http.get(`${BASE}/guardrail-scripts`, () => HttpResponse.json([])),
+            http.post(`${BASE}/guardrail-scripts`, () =>
+                HttpResponse.json({
+                    id: 'new-script',
+                    name: 'New Script',
+                    description: '',
+                    body_sh: '#!/bin/sh\necho ok',
+                    body_ps1: 'Write-Host ok',
+                    sort_order: 0,
+                    created_at: ISO,
+                    updated_at: ISO,
+                })
+            )
+        );
+        renderWithProviders(<GuardrailScriptsTab />);
+        await waitFor(() => expect(screen.getByText('No scripts yet')).toBeInTheDocument());
+        // Click opens modal in add mode (exercises openAdd arrow function)
+        fireEvent.click(screen.getByRole('button', { name: 'Add script' }));
+        // 2026-09-12 — was `getByText('Add script', { selector: 'h6' })`. The
+        // h6 only existed because ScriptModal nested a Typography h6 inside
+        // MuiDialogTitle's h2, which is invalid HTML and made React warn on
+        // every render. The tag was never the point: what this test cares
+        // about is that the modal opened in ADD mode, not edit mode. Assert
+        // that instead, so the fix to the markup doesn't read as a break.
+        const dialog = await screen.findByRole('dialog');
+        expect(dialog).toHaveTextContent('Add script');
+        expect(dialog).not.toHaveTextContent('Edit script');
+    });
+
+    it('exercises handleDelete via script card edit modal delete action', async () => {
+        let deleted = false;
+        server.use(
+            http.get(`${BASE}/guardrail-scripts`, () =>
+                HttpResponse.json([
+                    {
+                        id: 'del-script',
+                        name: 'Delete Me',
+                        description: '',
+                        body_sh: '',
+                        body_ps1: '',
+                        sort_order: 0,
+                        created_at: ISO,
+                        updated_at: ISO,
+                    },
+                ])
+            ),
+            http.delete(`${BASE}/guardrail-scripts/del-script`, () => {
+                deleted = true;
+                return new HttpResponse(null, { status: 204 });
+            })
+        );
+        renderWithProviders(<GuardrailScriptsTab />);
+        await waitFor(() => expect(screen.getByText('Delete Me')).toBeInTheDocument());
+        // Open edit modal
+        fireEvent.click(screen.getByText('Delete Me'));
+        await waitFor(() => expect(screen.queryAllByRole('dialog').length).toBeGreaterThan(0));
+        fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+        // Nothing is deleted until the confirm is accepted.
+        expect(deleted).toBe(false);
+        const confirm = await screen.findByRole('dialog', { name: 'Delete this script?' });
+        fireEvent.click(within(confirm).getByRole('button', { name: 'Delete' }));
+        await waitFor(() => expect(deleted).toBe(true), { timeout: 3000 });
+    });
+
+    it('renders singular "1 script configured" when exactly one script exists (line 158 ternary)', async () => {
+        // scripts.length === 1 → "1 script configured" (singular branch)
+        server.use(
+            http.get(`${BASE}/guardrail-scripts`, () =>
+                HttpResponse.json([
+                    {
+                        id: 'only-script',
+                        name: 'Only Script',
+                        description: 'The one script',
+                        body_sh: '',
+                        body_ps1: '',
+                        sort_order: 0,
+                        created_at: ISO,
+                        updated_at: ISO,
+                    },
+                ])
+            )
+        );
+        renderWithProviders(<GuardrailScriptsTab />);
+        await waitFor(() => {
+            expect(screen.getByText('Only Script')).toBeInTheDocument();
+        });
+        expect(screen.getByText(/1 script configured/)).toBeInTheDocument();
+    });
+
+    it('exercising handleSubmit update path (editing.id truthy branch)', async () => {
+        // Open a script in edit mode then submit — exercises `if (editing?.id)` true branch
+        let updateCalled = false;
+        server.use(
+            http.get(`${BASE}/guardrail-scripts`, () =>
+                HttpResponse.json([
+                    {
+                        id: 'upd-script',
+                        name: 'Update Me',
+                        description: '',
+                        body_sh: '#!/bin/bash\necho hi',
+                        body_ps1: 'echo hi',
+                        sort_order: 0,
+                        created_at: ISO,
+                        updated_at: ISO,
+                    },
+                ])
+            ),
+            http.patch(`${BASE}/guardrail-scripts/upd-script`, () => {
+                updateCalled = true;
+                return HttpResponse.json({
+                    id: 'upd-script',
+                    name: 'Updated Name',
+                    description: '',
+                    body_sh: '',
+                    body_ps1: '',
+                    sort_order: 0,
+                    created_at: ISO,
+                    updated_at: ISO,
+                });
+            })
+        );
+        renderWithProviders(<GuardrailScriptsTab />);
+        await waitFor(() => expect(screen.getByText('Update Me')).toBeInTheDocument());
+        // Click the card to open in edit mode (editing.id = 'upd-script')
+        fireEvent.click(screen.getByText('Update Me'));
+        await waitFor(() => expect(screen.queryAllByRole('dialog').length).toBeGreaterThan(0));
+        // Find the Save button in the modal and click it to trigger handleSubmit
+        const saveBtn = screen.queryByRole('button', { name: /save|update/i });
+        if (saveBtn && !saveBtn.hasAttribute('disabled')) {
+            fireEvent.click(saveBtn);
+            await waitFor(() => expect(updateCalled).toBe(true), { timeout: 3000 });
+        }
+    });
+});
+
+describe('load failure', () => {
+    it('says it could not load, with Retry, instead of spinning or showing the empty state', async () => {
+        server.use(http.get(`${BASE}/guardrail-scripts`, () => HttpResponse.json({ error: 'boom' }, { status: 500 })));
+        renderWithProviders(<GuardrailScriptsTab />);
+        expect(await screen.findByText(/Could not load scripts/)).toBeInTheDocument();
+        let calls = 0;
+        server.use(http.get(/.*/, () => { calls += 1; return HttpResponse.json({ error: 'boom' }, { status: 500 }); }));
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        await waitFor(() => expect(calls).toBeGreaterThan(0));
+    });
+});

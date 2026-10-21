@@ -1,0 +1,419 @@
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useTabParam } from '../hooks/useTabParam.js';
+import Box from '@mui/material/Box';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
+import CircularProgress from '@mui/material/CircularProgress';
+import Typography from '@mui/material/Typography';
+import Button from '@mui/material/Button';
+import { useQueryClient, useIsFetching } from '@tanstack/react-query';
+import { ATLAS_PALETTE } from '../theme/tokens.js';
+import {
+    useAgent,
+    useUpdateAgent,
+    useAgentRuns,
+    useAgents,
+    useAgentMemory,
+} from '../hooks/useAgents.js';
+import { useQueueDepthByAgent } from '../hooks/useQueueDepthByAgent.js';
+import { RefreshButton } from '../components/index.js';
+import { useToast } from '../hooks/useToast.js';
+import { api } from '../api/api.js';
+import { CATEGORY_LABEL, getRuntimeStats, getAgentView } from './agents/agentViewModel.js';
+import { AgentBreadcrumbs } from './agents/AgentBreadcrumbs.js';
+import { AgentHero } from './agents/AgentHero.js';
+import { AgentSidebar } from './agents/AgentSidebar.js';
+import { OverviewTab } from './agents/OverviewTab.js';
+import { MarketplaceUpgradeBanner } from './agents/MarketplaceUpgradeBanner.js';
+import { useSetPageTitle } from '../components/shell/index.js';
+import { lazyNamed } from '../utils/lazyNamed.js';
+
+// Only the default tab (Overview) loads with the page; the other tabs and
+// every dialog load when opened. The Performance tab alone pulled in the
+// charting library (94 KB), and the page couldn't start its own API calls
+// until it had arrived (ADR 0030).
+const PromptTab = lazyNamed(() => import('./agents/PromptTab.js'), 'PromptTab');
+const RunsTab = lazyNamed(() => import('./agents/RunsTab.js'), 'RunsTab');
+const MemoryTab = lazyNamed(() => import('./agents/MemoryTab.js'), 'MemoryTab');
+const RunNowDialog = lazyNamed(() => import('./agents/RunNowDialog.js'), 'RunNowDialog');
+const DuplicateAgentModal = lazyNamed(
+    () => import('./agents/DuplicateAgentModal.js'),
+    'DuplicateAgentModal'
+);
+const EditAgentColorModal = lazyNamed(
+    () => import('./agents/EditAgentColorModal.js'),
+    'EditAgentColorModal'
+);
+const GlyphPickerModal = lazyNamed(
+    () => import('./agents/GlyphPickerModal.js'),
+    'GlyphPickerModal'
+);
+const DeleteAgentModal = lazyNamed(
+    () => import('./agents/DeleteAgentModal.js'),
+    'DeleteAgentModal'
+);
+const TestsTabContent = lazyNamed(() => import('./agents/TestsTabContent.js'), 'TestsTabContent');
+// Its module also exports helpers, which lazyNamed's component-only type
+// doesn't allow, so it goes through React.lazy directly.
+const PerformanceTabContent = lazy(() =>
+    import('./agents/PerformanceTabContent.js').then((m) => ({ default: m.PerformanceTabContent }))
+);
+
+const TAB_KEYS = ['overview', 'prompt', 'tests', 'performance', 'runs', 'memory'] as const;
+type TabKey = (typeof TAB_KEYS)[number];
+
+export function AgentDetail() {
+    const { id = '' } = useParams<{ id: string }>();
+    const navigate = useNavigate();
+    const queryClient = useQueryClient();
+    const toast = useToast();
+    const { data: agent, isLoading } = useAgent(id);
+    const updateAgent = useUpdateAgent();
+    const { data: runs } = useAgentRuns(id);
+    const queueDepth = useQueueDepthByAgent().get(id) ?? 0;
+    const [duplicateOpen, setDuplicateOpen] = useState(false);
+    const [runNowOpen, setRunNowOpen] = useState(false);
+    const [colorOpen, setColorOpen] = useState(false);
+    const [glyphOpen, setGlyphOpen] = useState(false);
+    const [deleteOpen, setDeleteOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+
+    // Local-state-first tab via useTabParam: click → useState update → render in
+    // a single React pass. URL sync happens in a useEffect after the swap, so
+    // it never appears in the click-to-paint hot path.
+    const [tab, setTab] = useTabParam<TabKey>(TAB_KEYS, 'overview');
+
+    // Defer secondary queries until the Owner actually opens the consumer.
+    // DuplicateAgentModal needs the full agent list for collision detection;
+    // MemoryTab needs the agent's memory body. Neither is on the critical
+    // overview path, so they're gated by their own open / tab state.
+    const { data: allAgents = [] } = useAgents({ enabled: duplicateOpen });
+    const { data: memory } = useAgentMemory(id, { enabled: tab === 'memory' });
+
+    // Aggregate fetch indicator — used only to drive the RefreshButton's
+    // spinning icon in the breadcrumb row. The previous LinearProgress under
+    // the tab strip was removed (felt like a glitch on tab clicks).
+    const fetchingCount = useIsFetching({ queryKey: ['agents', id] });
+
+    const view = useMemo(() => (agent ? getAgentView(agent) : null), [agent]);
+    const stats = useMemo(() => getRuntimeStats(runs), [runs]);
+
+    useSetPageTitle(agent?.name ?? 'Agent', agent ? CATEGORY_LABEL[agent.category] : undefined);
+
+    // Hooks below must stay above any early return — Rules of Hooks. `agent`
+    // can be undefined on first paint; the handlers tolerate that with a guard.
+    const isPaused = agent?.status === 'inactive';
+
+    const handlePauseToggle = useCallback(() => {
+        if (!agent) return;
+        updateAgent.mutate(
+            { id: agent.id, data: { status: isPaused ? 'active' : 'inactive' } },
+            {
+                onSuccess: () =>
+                    toast.show({
+                        message: isPaused ? `${agent.name} resumed` : `${agent.name} paused`,
+                    }),
+            }
+        );
+    }, [agent, isPaused, updateAgent, toast]);
+
+    const handleRunNow = useCallback(() => setRunNowOpen(true), []);
+    const handleDuplicate = useCallback(() => setDuplicateOpen(true), []);
+    const handleDelete = useCallback(() => setDeleteOpen(true), []);
+    const handleEditColor = useCallback(() => setColorOpen(true), []);
+    const handleReplaceGlyph = useCallback(() => setGlyphOpen(true), []);
+    const handleRefresh = useCallback(() => {
+        void queryClient.invalidateQueries({ queryKey: ['agents', id] });
+    }, [queryClient, id]);
+
+    // Stable object identity so AgentHero (memo'd) doesn't tear down on every
+    // parent re-render. handlePauseToggle is the only non-trivial dep.
+    const handleExport = useCallback(() => {
+        if (!agent) return;
+        window.location.href = api.agents.exportZipUrl(agent.id);
+    }, [agent]);
+
+    const menuActions = useMemo(
+        () => ({
+            onDuplicate: handleDuplicate,
+            onPause: handlePauseToggle,
+            onDelete: handleDelete,
+            onExport: handleExport,
+        }),
+        [handleDuplicate, handlePauseToggle, handleDelete, handleExport]
+    );
+
+    if (isLoading) {
+        return (
+            <Box sx={{ p: 8, display: 'flex', justifyContent: 'center' }}>
+                <CircularProgress size={32} sx={{ color: ATLAS_PALETTE.brandBlue }} />
+            </Box>
+        );
+    }
+
+    if (!agent || !view) {
+        return (
+            <Box sx={{ px: { xs: 3, md: 8 }, py: 4, textAlign: 'center' }}>
+                <Typography sx={{ color: ATLAS_PALETTE.slate40, mb: 3 }}>
+                    Agent not found
+                </Typography>
+                <Button onClick={() => navigate('/agents')}>Back to Agents</Button>
+            </Box>
+        );
+    }
+
+    function confirmDelete() {
+        if (!agent) return;
+        setDeleting(true);
+        void api.agents
+            .delete(agent.id)
+            .then(() => {
+                void queryClient.invalidateQueries({ queryKey: ['agents'] });
+                toast.show({ message: `${agent.name} deleted` });
+                setDeleteOpen(false);
+                navigate('/agents');
+            })
+            .catch((e: Error) => {
+                toast.show({ message: 'Could not delete agent', detail: e.message });
+            })
+            .finally(() => setDeleting(false));
+    }
+
+    return (
+        <Box sx={{ px: { xs: 3, md: 8 }, py: 4 }}>
+            <Box
+                sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    mb: 1,
+                }}
+            >
+                <AgentBreadcrumbs
+                    category={CATEGORY_LABEL[agent.category]}
+                    agentName={agent.name}
+                />
+                <RefreshButton
+                    onRefresh={handleRefresh}
+                    isFetching={fetchingCount > 0}
+                    tooltipLabel="Refresh agent data"
+                />
+            </Box>
+
+            <AgentHero
+                agent={agent}
+                view={view}
+                stats={stats}
+                queueDepth={queueDepth}
+                onRunNow={handleRunNow}
+                onPauseToggle={handlePauseToggle}
+                menuActions={menuActions}
+            />
+
+            <MarketplaceUpgradeBanner agent={agent} />
+
+            <Box
+                sx={{
+                    display: 'grid',
+                    gridTemplateColumns: {
+                        xs: 'minmax(0, 1fr)',
+                        md: 'minmax(0, 1fr) 300px',
+                    },
+                    gap: 4,
+                    alignItems: 'flex-start',
+                }}
+            >
+                <Box>
+                    <Box sx={{ borderBottom: `1px solid ${ATLAS_PALETTE.slate10}`, mb: 4 }}>
+                        <Tabs
+                            value={tab}
+                            onChange={(_, v: TabKey) => setTab(v)}
+                            variant="scrollable"
+                            scrollButtons={false}
+                            allowScrollButtonsMobile
+                            sx={{
+                                minHeight: 42,
+                                '& .MuiTabs-indicator': {
+                                    backgroundColor: ATLAS_PALETTE.brandBlue,
+                                    height: 2,
+                                },
+                                '& .MuiTab-root': {
+                                    minHeight: 42,
+                                    textTransform: 'none',
+                                    fontWeight: 500,
+                                    fontSize: 13.5,
+                                    color: ATLAS_PALETTE.slate60,
+                                    px: 2,
+                                    '&.Mui-selected': {
+                                        color: ATLAS_PALETTE.brandBlue,
+                                        fontWeight: 600,
+                                    },
+                                },
+                            }}
+                        >
+                            <Tab
+                                value="overview"
+                                label="Overview"
+                                icon={
+                                    <Box
+                                        component="span"
+                                        className="material-symbols-rounded"
+                                        aria-hidden="true"
+                                        sx={{ fontSize: 16 }}
+                                    >
+                                        info
+                                    </Box>
+                                }
+                                iconPosition="start"
+                            />
+                            <Tab
+                                value="prompt"
+                                label="Prompt"
+                                icon={
+                                    <Box
+                                        component="span"
+                                        className="material-symbols-rounded"
+                                        aria-hidden="true"
+                                        sx={{ fontSize: 16 }}
+                                    >
+                                        article
+                                    </Box>
+                                }
+                                iconPosition="start"
+                            />
+                            <Tab
+                                value="tests"
+                                label="Tests"
+                                icon={
+                                    <Box
+                                        component="span"
+                                        className="material-symbols-rounded"
+                                        aria-hidden="true"
+                                        sx={{ fontSize: 16 }}
+                                    >
+                                        fact_check
+                                    </Box>
+                                }
+                                iconPosition="start"
+                            />
+                            <Tab
+                                value="performance"
+                                label="Performance"
+                                icon={
+                                    <Box
+                                        component="span"
+                                        className="material-symbols-rounded"
+                                        aria-hidden="true"
+                                        sx={{ fontSize: 16 }}
+                                    >
+                                        monitoring
+                                    </Box>
+                                }
+                                iconPosition="start"
+                            />
+                            <Tab
+                                value="runs"
+                                label="Runs"
+                                icon={
+                                    <Box
+                                        component="span"
+                                        className="material-symbols-rounded"
+                                        aria-hidden="true"
+                                        sx={{ fontSize: 16 }}
+                                    >
+                                        history
+                                    </Box>
+                                }
+                                iconPosition="start"
+                            />
+                            <Tab
+                                value="memory"
+                                label="Memory"
+                                icon={
+                                    <Box
+                                        component="span"
+                                        className="material-symbols-rounded"
+                                        aria-hidden="true"
+                                        sx={{ fontSize: 16 }}
+                                    >
+                                        psychology
+                                    </Box>
+                                }
+                                iconPosition="start"
+                            />
+                        </Tabs>
+                    </Box>
+
+                    {tab === 'overview' && <OverviewTab agent={agent} view={view} />}
+                    <Suspense
+                        fallback={
+                            <Box sx={{ py: 8, display: 'flex', justifyContent: 'center' }}>
+                                <CircularProgress size={24} />
+                            </Box>
+                        }
+                    >
+                        {tab === 'prompt' && <PromptTab agent={agent} />}
+                        {tab === 'tests' && <TestsTabContent agent={agent} />}
+                        {tab === 'performance' && <PerformanceTabContent agent={agent} />}
+                        {tab === 'runs' && <RunsTab agent={agent} runs={runs ?? []} />}
+                        {tab === 'memory' && <MemoryTab agent={agent} memory={memory} />}
+                    </Suspense>
+                </Box>
+
+                <Box sx={{ position: { xs: 'static', md: 'sticky' }, top: 24 }}>
+                    <AgentSidebar
+                        agent={agent}
+                        stats={stats}
+                        onEditColor={handleEditColor}
+                        onReplaceGlyph={handleReplaceGlyph}
+                    />
+                </Box>
+            </Box>
+
+            {/* Conditionally mount modals so their internal hooks
+                (DuplicateAgentModal needs the full agent list) don't fire until
+                the Owner actually opens them. Each modal still gets its
+                expected `open` prop in case React Query needs it for warmup.
+                Their code loads on first open too (null fallback: a dialog
+                appearing a beat later beats a spinner flash). */}
+            <Suspense fallback={null}>
+                {duplicateOpen && (
+                    <DuplicateAgentModal
+                        open
+                        agent={agent}
+                        existingIds={allAgents.map((w) => w.id)}
+                        onClose={() => setDuplicateOpen(false)}
+                    />
+                )}
+
+                {runNowOpen && (
+                    <RunNowDialog open agent={agent} onClose={() => setRunNowOpen(false)} />
+                )}
+
+                {colorOpen && (
+                    <EditAgentColorModal open agent={agent} onClose={() => setColorOpen(false)} />
+                )}
+
+                {glyphOpen && (
+                    <GlyphPickerModal
+                        open
+                        agent={agent}
+                        currentGlyph={view.glyph}
+                        onClose={() => setGlyphOpen(false)}
+                    />
+                )}
+
+                {deleteOpen && (
+                    <DeleteAgentModal
+                        open
+                        agent={agent}
+                        busy={deleting}
+                        onConfirm={confirmDelete}
+                        onClose={() => setDeleteOpen(false)}
+                    />
+                )}
+            </Suspense>
+        </Box>
+    );
+}

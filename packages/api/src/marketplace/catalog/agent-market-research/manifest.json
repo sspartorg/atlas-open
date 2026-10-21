@@ -1,0 +1,22 @@
+{
+  "id": "agent-market-research",
+  "name": "Market Research",
+  "category": "content",
+  "cli": "claude",
+  "model": "claude-haiku-5-5",
+  "effort": "low",
+  "framework": "competitive-watch",
+  "description": "Weekly competitor pricing + positioning watch. Edit the prompt with your Atlas project name + competitor list, then activate.",
+  "designation": "Competitive Analyst",
+  "accent_color": "#84CC16",
+  "sort_order": 26,
+  "glyph": "monitoring",
+  "role_id": null,
+  "status": "inactive",
+  "kind_slug": "market-research",
+  "settings_json": {},
+  "memory_cadence": 1,
+  "summary": "Weekly competitor pricing + positioning watch.",
+  "version": 1,
+  "published_at": "2026-07-01T00:00:00Z"
+}

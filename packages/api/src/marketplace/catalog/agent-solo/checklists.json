@@ -1,0 +1,17 @@
+[
+  {
+    "label": "Every acceptance criterion is covered by a test that passes",
+    "sort_order": 0,
+    "required": true
+  },
+  {
+    "label": "The project's own typecheck, lint and test scripts that exist were run and are green",
+    "sort_order": 1,
+    "required": true
+  },
+  {
+    "label": "The diff contains only changes the Task needs",
+    "sort_order": 2,
+    "required": true
+  }
+]

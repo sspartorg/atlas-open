@@ -1,0 +1,282 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import Button from '@mui/material/Button';
+import Skeleton from '@mui/material/Skeleton';
+import Switch from '@mui/material/Switch';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import {
+    TaskFiltersBar,
+    TaskTable,
+    ViewModeToggle,
+    WorkItemKanban,
+    loadViewMode,
+    saveViewMode,
+    type TaskFilterKey,
+    type ViewMode,
+    type KanbanItem,
+} from '../components/index.js';
+import { useTasks, useTransitionTask } from '../hooks/useTasks.js';
+import { useProjects } from '../hooks/useProjects.js';
+import { useAgents } from '../hooks/useAgents.js';
+import { useSettings } from '../hooks/useSettings.js';
+import { ATLAS_PALETTE } from '../theme/tokens.js';
+import type { IssueStatus, ITaskListItem } from '@atlas/shared';
+import { PageFab, useSetPageTitle } from '../components/shell/index.js';
+import { useIsMobile } from '../hooks/useIsMobile.js';
+import { PageHeader } from '../components/PageHeader.js';
+import { RetryAlert } from '../components/ApiErrorAlert.js';
+
+// Search matches the id too, so "ETM-1" finds the Task (as the link picker does).
+function matchesSearch(t: ITaskListItem, q: string): boolean {
+    const needle = q.toLowerCase();
+    return [t.id, t.title, t.description].some((v) => v.toLowerCase().includes(needle));
+}
+
+export function Tasks() {
+    useSetPageTitle('Tasks');
+    const navigate = useNavigate();
+    const isMobile = useIsMobile();
+    const qc = useQueryClient();
+    const [params, setParams] = useSearchParams();
+    const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode('tasks'));
+    const transitionTask = useTransitionTask();
+
+    useEffect(() => {
+        saveViewMode('tasks', viewMode);
+    }, [viewMode]);
+
+    const projectSlug = params.get('project');
+    const statusFilter = params.get('status');
+    const filterKey = (params.get('filter') as TaskFilterKey | null) ?? 'all';
+    const searchQuery = params.get('q') ?? '';
+    const showArchived = params.get('include_archived') === 'true';
+
+    const { data: projects = [], error: projectsError, refetch: refetchProjects } = useProjects();
+    const { data: agents = [] } = useAgents();
+    const { data: settings } = useSettings();
+
+    // `?project=` holds the name (links from Project Detail); an id works too.
+    const project = projectSlug
+        ? projects.find((p) => p.name === projectSlug || p.id === projectSlug)
+        : undefined;
+    const projectId = project?.id;
+
+    const {
+        data: scopedTasks = [],
+        isLoading,
+        error: tasksError,
+        refetch: refetchTasks,
+    } = useTasks(projectId, showArchived);
+
+    const ownerName = settings?.owner_name ?? 'Owner';
+    const ownerAccent = settings?.accent_color ?? ATLAS_PALETTE.slate;
+
+    const filtered = useMemo(() => {
+        return scopedTasks.filter((e) => {
+            if (filterKey === 'mine' && e.assignee_agent_id !== null) return false;
+            if (filterKey === 'ai' && e.assignee_agent_id === null) return false;
+            if (statusFilter && e.status !== statusFilter) return false;
+            if (searchQuery && !matchesSearch(e, searchQuery)) return false;
+            return true;
+        });
+    }, [scopedTasks, filterKey, statusFilter, searchQuery]);
+
+    const counts = useMemo<Record<TaskFilterKey, number>>(() => {
+        const base = scopedTasks.filter((e) => {
+            if (statusFilter && e.status !== statusFilter) return false;
+            if (searchQuery && !matchesSearch(e, searchQuery)) return false;
+            return true;
+        });
+        return {
+            all: base.length,
+            mine: base.filter((e) => e.assignee_agent_id === null).length,
+            ai: base.filter((e) => e.assignee_agent_id !== null).length,
+        };
+    }, [scopedTasks, statusFilter, searchQuery]);
+
+    function setParam(key: string, value: string | null) {
+        const next = new URLSearchParams(params);
+        if (value === null || value === '') next.delete(key);
+        else next.set(key, value);
+        setParams(next, { replace: true });
+    }
+
+    // Counts the rows on screen, so it follows every filter and hides
+    // archived Tasks unless they are shown.
+    const readyCount = filtered.filter((t) => t.status === 'ready').length;
+
+    return (
+        <Box sx={{ px: { xs: 3, md: 8 }, py: 4 }}>
+            <PageHeader
+                icon="flag"
+                title="Tasks"
+                subtitle={
+                    <>
+                        {filtered.length} {filtered.length === 1 ? 'task' : 'tasks'}
+                        {project ? ` · ${project.name}` : ''}
+                        {readyCount > 0 ? ` · ${readyCount} ready` : ''}
+                    </>
+                }
+                actions={
+                    <>
+                        <FormControlLabel
+                            control={
+                                <Switch
+                                    size="small"
+                                    checked={showArchived}
+                                    onChange={(e) =>
+                                        setParam(
+                                            'include_archived',
+                                            e.target.checked ? 'true' : null
+                                        )
+                                    }
+                                />
+                            }
+                            label={
+                                <Typography sx={{ fontSize: 13, color: ATLAS_PALETTE.slate60 }}>
+                                    Show archived
+                                </Typography>
+                            }
+                        />
+                        {/* Phones: no Kanban, and the FAB creates. */}
+                        {!isMobile && <ViewModeToggle value={viewMode} onChange={setViewMode} />}
+                        {!isMobile && (
+                            <Button
+                                variant="contained"
+                                startIcon={
+                                    <Box
+                                        component="span"
+                                        className="material-symbols-rounded"
+                                        aria-hidden="true"
+                                        sx={{ fontSize: 18 }}
+                                    >
+                                        add
+                                    </Box>
+                                }
+                                onClick={() => navigate('/tasks/new')}
+                                disabled={projects.length === 0}
+                            >
+                                New task
+                            </Button>
+                        )}
+                    </>
+                }
+            />
+
+            <TaskFiltersBar
+                filterKey={filterKey}
+                onFilterChange={(k) => setParam('filter', k === 'all' ? null : k)}
+                counts={counts}
+                projects={projects}
+                projectFilter={projectId ?? null}
+                onProjectChange={(pid) => {
+                    if (!pid) return setParam('project', null);
+                    const p = projects.find((pr) => pr.id === pid);
+                    setParam('project', p?.name ?? null);
+                }}
+                statusFilter={statusFilter}
+                onStatusChange={(s) => setParam('status', s)}
+                search={searchQuery}
+                onSearchChange={(v) => setParam('q', v)}
+            />
+
+            {isLoading ? (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {[1, 2, 3, 4, 5].map((i) => (
+                        <Skeleton
+                            key={i}
+                            variant="rectangular"
+                            height={60}
+                            sx={{ borderRadius: '8px' }}
+                        />
+                    ))}
+                </Box>
+            ) : projectsError || (tasksError && scopedTasks.length === 0) ? (
+                // A failed load is not an empty list.
+                <RetryAlert
+                    error={projectsError ?? tasksError}
+                    label={projectsError ? 'Could not load projects' : 'Could not load tasks'}
+                    onRetry={() => void (projectsError ? refetchProjects() : refetchTasks())}
+                />
+            ) : projects.length === 0 ? (
+                <Box
+                    sx={{
+                        textAlign: 'center',
+                        py: 16,
+                        background: ATLAS_PALETTE.white,
+                        border: `1px solid ${ATLAS_PALETTE.slate10}`,
+                        borderRadius: '12px',
+                    }}
+                >
+                    <Box
+                        component="span"
+                        className="material-symbols-rounded"
+                        aria-hidden="true"
+                        sx={{
+                            fontSize: 48,
+                            color: ATLAS_PALETTE.slate40,
+                            display: 'block',
+                            mb: 3,
+                        }}
+                    >
+                        flag
+                    </Box>
+                    <Typography
+                        sx={{ fontSize: 16, fontWeight: 600, color: ATLAS_PALETTE.slate60, mb: 2 }}
+                    >
+                        No projects yet
+                    </Typography>
+                    <Typography sx={{ fontSize: 13, color: ATLAS_PALETTE.slate40, mb: 5 }}>
+                        Create a project first, then add tasks.
+                    </Typography>
+                    <Button variant="outlined" onClick={() => navigate('/projects')}>
+                        Go to Projects
+                    </Button>
+                </Box>
+            ) : viewMode === 'kanban' && !isMobile ? (
+                <WorkItemKanban
+                    items={
+                        filtered.map((e) => ({
+                            id: e.id,
+                            kind: 'task',
+                            shortId: e.id,
+                            title: e.title,
+                            status: e.status,
+                            assignee_agent_id: e.assignee_agent_id,
+                        })) satisfies KanbanItem[]
+                    }
+                    agents={agents}
+                    ownerName={ownerName}
+                    ownerAccent={ownerAccent}
+                    onTransition={async (item, nextStatus: IssueStatus, override) => {
+                        try {
+                            await transitionTask.mutateAsync({
+                                id: item.id,
+                                status: nextStatus,
+                                override,
+                            });
+                        } catch {
+                            // useTransitionTask toasts the refusal (one toast,
+                            // with the API's reason); the card snaps back below.
+                        }
+                        await qc.invalidateQueries({ queryKey: ['tasks'] });
+                    }}
+                    onOpen={(item) => navigate(`/tasks/${item.id}`)}
+                />
+            ) : (
+                <TaskTable
+                    rows={filtered}
+                    projects={projects}
+                    agents={agents}
+                    ownerName={ownerName}
+                    ownerAccent={ownerAccent}
+                    onCreate={() => navigate('/tasks/new')}
+                />
+            )}
+            <PageFab onClick={() => navigate('/tasks/new')} label="New task" />
+        </Box>
+    );
+}

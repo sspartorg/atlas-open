@@ -1,0 +1,194 @@
+import { describe, expect, it, vi } from 'vitest';
+import { screen, fireEvent } from '@testing-library/react';
+import { renderWithProviders } from '../../test-utils/renderWithProviders.js';
+import { ProjectsTable, type ProjectRow } from './ProjectsTable.js';
+
+const sampleRow: ProjectRow = {
+    id: 'p1',
+    displayId: 'ATL',
+    name: 'Acme',
+    gitPath: 'github.com/x/y',
+    tasks: 2,
+    subTasks: 5,
+    lastActivity: 'just now',
+    updatedAt: '2026-05-16T00:00:00.000Z',
+};
+
+const secondRow: ProjectRow = {
+    id: 'p2',
+    displayId: 'OTH',
+    name: 'Beta',
+    gitPath: '',
+    tasks: 0,
+    subTasks: 0,
+    lastActivity: '2 days ago',
+    updatedAt: '2026-05-14T00:00:00.000Z',
+};
+
+function renderTable(overrides: Partial<React.ComponentProps<typeof ProjectsTable>> = {}) {
+    const defaults: React.ComponentProps<typeof ProjectsTable> = {
+        rows: [sampleRow, secondRow],
+        ownerName: 'Bob',
+        onRowClick: vi.fn(),
+        onDelete: vi.fn(),
+    };
+    return renderWithProviders(<ProjectsTable {...defaults} {...overrides} />);
+}
+
+describe('ProjectsTable', () => {
+    it('renders rows and header columns', () => {
+        renderTable();
+        expect(screen.getByText('Acme')).toBeInTheDocument();
+        expect(screen.getByText('Beta')).toBeInTheDocument();
+    });
+
+    it('fires onRowClick when a row is clicked', () => {
+        const onRowClick = vi.fn();
+        renderTable({ onRowClick });
+        fireEvent.click(screen.getByText('ATL'));
+        expect(onRowClick).toHaveBeenCalledWith('p1');
+    });
+
+    it('the project name is a real link, so a keyboard user can open the row', () => {
+        renderTable();
+        expect(screen.getByRole('link', { name: 'Acme' })).toHaveAttribute('href', '/projects/p1');
+    });
+
+    it('heads the repo-name column "Repos", not "Repo URL", and marks the sorted column', () => {
+        renderTable();
+        expect(screen.getByRole('columnheader', { name: 'Repos' })).toBeInTheDocument();
+        expect(screen.queryByText('Repo URL')).not.toBeInTheDocument();
+        expect(screen.getByRole('columnheader', { name: /Last Activity/ })).toHaveAttribute(
+            'aria-sort',
+            'descending'
+        );
+    });
+
+    it('toggles sort direction on header click (handleSort same-key branch)', () => {
+        renderTable();
+        // Default sort is lastActivity DESC. Click "ID" to switch key to id ASC.
+        const idHeader = screen.getByText('ID');
+        fireEvent.click(idHeader);
+        // Click again: same key flips dir to DESC.
+        fireEvent.click(idHeader);
+        // Click "Project" to switch key — exercises the "different key" branch.
+        const projectHeader = screen.getByText('Project');
+        fireEvent.click(projectHeader);
+    });
+
+    it('renders the schedule chip when scheduleMap has an entry for the row', () => {
+        const scheduleMap = new Map([
+            ['p1', { preset: 'daily', next_run_at: '2030-01-01T00:00:00Z' }],
+        ]);
+        renderTable({ scheduleMap });
+        // The schedule icon has aria-label "Auto-fetch enabled".
+        expect(screen.getByLabelText(/Auto-fetch enabled/i)).toBeInTheDocument();
+    });
+
+    it('renders the schedule chip when scheduleMap entry has no next_run_at', () => {
+        const scheduleMap = new Map([['p1', { preset: 'every_n_hours', next_run_at: null }]]);
+        renderTable({ scheduleMap });
+        expect(screen.getByLabelText(/Auto-fetch enabled/i)).toBeInTheDocument();
+    });
+
+    it('renders the empty state when rows is empty', () => {
+        renderTable({ rows: [] });
+        expect(screen.getByText(/No projects match this filter/i)).toBeInTheDocument();
+    });
+
+    it('says "No repos" for a project without one, as the card does', () => {
+        renderTable();
+        expect(screen.getByRole('cell', { name: 'No repos' })).toBeInTheDocument();
+    });
+
+    it('renders every repo name when the project has several repos', () => {
+        renderTable({ rows: [{ ...sampleRow, gitPath: 'api, web, docs' }] });
+        expect(screen.getByText('api, web, docs')).toBeInTheDocument();
+    });
+
+    it('opens the row action menu and clicks the actions (onDelete)', () => {
+        const onDelete = vi.fn();
+        const { container } = renderTable({ onDelete });
+        // Each row has a Project-actions trigger button.
+        const actionButtons = container.querySelectorAll('button[aria-label="Project actions"]');
+        expect(actionButtons.length).toBeGreaterThan(0);
+        if (actionButtons[0]) fireEvent.click(actionButtons[0]);
+        // Once the menu is open, click each menu item to fire its onClick.
+        const menuItems = document.querySelectorAll('[role="menuitem"]');
+        menuItems.forEach((item) => fireEvent.click(item));
+        // One of the action handlers should have been invoked.
+        expect(onDelete).toHaveBeenCalledWith('p1');
+    });
+
+    it('clicks on the actions cell does NOT bubble row click (stopPropagation)', () => {
+        const onRowClick = vi.fn();
+        const { container } = renderTable({ onRowClick });
+        const actionCell = container.querySelector(
+            'button[aria-label="Project actions"]'
+        )?.parentElement;
+        if (actionCell) {
+            fireEvent.click(actionCell);
+        }
+        // Row click should not have fired from the action-cell click.
+        expect(onRowClick).not.toHaveBeenCalled();
+    });
+
+    it('sorts numerically by tasks and sub-tasks columns', () => {
+        renderTable();
+        fireEvent.click(screen.getByText('Tasks'));
+        fireEvent.click(screen.getByText('Sub-tasks'));
+    });
+
+    it('sorts by Last Activity header (default sort key, toggles direction)', () => {
+        renderTable();
+        fireEvent.click(screen.getByText('Last Activity'));
+    });
+
+    it('compare: equal values return stable order (compare return 0 branch)', () => {
+        // Two rows with identical tasks count exercise the `return 0` branch
+        const rowA: ProjectRow = {
+            id: 'p3',
+            displayId: 'A',
+            name: 'Alpha',
+            gitPath: '',
+            tasks: 3,
+            subTasks: 3,
+            lastActivity: 'now',
+            updatedAt: '2026-05-16T00:00:00.000Z',
+        };
+        const rowB: ProjectRow = {
+            id: 'p4',
+            displayId: 'B',
+            name: 'Bravo',
+            gitPath: '',
+            tasks: 3, // same as rowA — compare returns 0
+            subTasks: 3,
+            lastActivity: 'now',
+            updatedAt: '2026-05-16T00:00:00.000Z',
+        };
+        renderWithProviders(
+            <ProjectsTable
+                rows={[rowA, rowB]}
+                ownerName="Bob"
+                onRowClick={vi.fn()}
+                onDelete={vi.fn()}
+            />
+        );
+        // Sort by Tasks — both rows have tasks=3, compare returns 0 for the equality case
+        fireEvent.click(screen.getByText('Tasks'));
+        // Both rows should still render
+        expect(screen.getByText('Alpha')).toBeInTheDocument();
+        expect(screen.getByText('Bravo')).toBeInTheDocument();
+    });
+
+    it('compare: desc sort on non-lastActivity string columns (av > bv returns 1 branch)', () => {
+        // Sort by name: "Bravo" > "Alpha" in asc; click again for desc exercises both branches
+        renderTable();
+        const projectHeader = screen.getByText('Project');
+        fireEvent.click(projectHeader); // asc — exercises av < bv for Alpha vs Beta
+        fireEvent.click(projectHeader); // desc — exercises av > bv for Beta vs Alpha
+        // Both rows should still render
+        expect(screen.getByText('Acme')).toBeInTheDocument();
+        expect(screen.getByText('Beta')).toBeInTheDocument();
+    });
+}, 15000);

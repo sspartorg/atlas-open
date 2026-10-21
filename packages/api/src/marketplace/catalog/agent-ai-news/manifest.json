@@ -1,0 +1,22 @@
+{
+  "id": "agent-ai-news",
+  "name": "AI News Scout",
+  "category": "content",
+  "cli": "claude",
+  "model": "claude-haiku-5-5",
+  "effort": "low",
+  "framework": "scout",
+  "description": "24-hour AI-tooling digest delivered as an external notification. Scrapes via Playwright MCP. Edit the prompt with your curated sources, then run it from its page.",
+  "designation": "Daily AI News Scout",
+  "accent_color": "#FACC15",
+  "sort_order": 25,
+  "glyph": "newspaper",
+  "role_id": null,
+  "status": "inactive",
+  "kind_slug": "ai-news",
+  "settings_json": {},
+  "memory_cadence": 1,
+  "summary": "24-hour AI-tooling digest delivered as an external notification.",
+  "version": 1,
+  "published_at": "2026-07-01T00:00:00Z"
+}

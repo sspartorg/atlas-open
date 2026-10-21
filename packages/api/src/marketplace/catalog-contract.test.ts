@@ -1,0 +1,425 @@
+// Catalog contract — the free tier of the agent eval harness.
+//
+// Everything Atlas ships to a customer install comes from this directory and
+// from `./workflows/*.json`, and until now almost none of it was checked before
+// it reached a database:
+//
+//   - `catalog-loader.ts:87` JSON-parses each manifest, deletes the legacy keys
+//     and casts. A malformed manifest surfaces as an opaque insert failure at
+//     seed time, or as a composite-FK 500 at install time.
+//   - `agents.model` carries a composite FK into `cli_models(cli, model_name)`
+//     with ON DELETE RESTRICT. A manifest naming a model that is not registered
+//     cannot be installed at all — this is exactly how marketplace install
+//     broke once before (see `packages/api/AGENTS.md`).
+//   - `agents.role_id` is an FK into `roles`, and five `SdlcRole` slugs are
+//     type-level only with no seeded row (`.agents/role-catalog.md`).
+//   - A workflow template naming an agent that is not in the catalog installs a
+//     graph whose node can never resolve; the run parks on first dispatch.
+//
+// These are shape assertions, not behaviour assertions. What an agent DOES is
+// measured by the live golden set (`evals/`); what it IS has to be true before
+// the run starts.
+//
+// On the prompt budget: it is a BLOAT GUARD, not a cost lever. The PR1 baseline
+// measured 18.25M cache-read tokens against 550 uncached input tokens across 38
+// dispatches — roughly 480K cached tokens per dispatch, almost all of it the
+// repository being pulled into context. A 1,500-token prompt is ~0.3% of one
+// dispatch. Trimming well-tuned prompts would buy a rounding error and cost
+// real instruction quality; the budgets below exist to catch a prompt that
+// balloons, not to squeeze the ones that work.
+
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { AgentEffortSchema } from '@atlas/shared';
+import { loadCatalog } from './catalog-loader.js';
+import { AgentBundleManifestSchema } from '../services/agent-bundle.js';
+import { closeTestDb, testDb, truncateAll } from '../../tests/_pg-db.js';
+import { catalogLockEntries, readCatalogLock } from './catalog-lock.js';
+
+const catalog = loadCatalog();
+const catalogIds = new Set(catalog.map((e) => e.manifest.id));
+
+/** `cli` and `model_name` are both slugs, so a plain separator is unambiguous. */
+function modelKey(cli: string, model: string): string {
+    return `${cli}::${model}`;
+}
+
+/**
+ * Prompt budgets, in estimated tokens. Routed SDLC agents run inside the
+ * delivery chain and their prompt is read on every dispatch; the autonomous
+ * scouts run standalone and one of them (AI Readiness) legitimately enumerates
+ * the 8-12 documents it scaffolds.
+ *
+ * Headroom is deliberate — see the header. These catch a prompt doubling, not a
+ * prompt that is 200 tokens over.
+ */
+const PROMPT_BUDGET_ROUTED = 1_800;
+const PROMPT_BUDGET_AUTONOMOUS = 7_000;
+
+// Per-agent carve-outs. A budget raised to make a check pass is the exact move
+// `agent-fix-reviewer` exists to catch, so each entry names what bought the
+// room — and the default stays where it is, so nothing else drifts.
+//
+// agent-po-writer: the Owner's brief requires it to read the codebase and
+// establish whether the functionality already exists before it asks anything,
+// and to ask without a question cap. Both are steps, not prose; the prompt was
+// trimmed twice before this number moved. Cheap in context too — the PR1
+// baseline measured ~480K cache-read tokens per dispatch, next to which a 2K
+// prompt is a rounding error.
+const PROMPT_BUDGET_OVERRIDE: Record<string, number> = {};
+
+/** Same 4-chars-per-token heuristic `services/context-budget.ts` uses. */
+function estimateTokens(text: string): number {
+    return Math.ceil(text.length / 4);
+}
+
+let registry: Set<string>;
+let roleIds: Set<string>;
+
+beforeAll(async () => {
+    // `truncateAll()` is what RESTORES the reference registry — two test files
+    // deliberately empty `cli_models` to assert on an empty one, and nothing
+    // else puts it back. Without this call the contract test reads whatever
+    // registry the previously-run file happened to leave behind, which made it
+    // pass or fail depending on suite order.
+    await truncateAll();
+    const models = await testDb.selectFrom('cli_models').select(['cli', 'model_name']).execute();
+    registry = new Set(models.map((m) => modelKey(m.cli, m.model_name)));
+    const roles = await testDb.selectFrom('roles').select('id').execute();
+    roleIds = new Set(roles.map((r) => r.id));
+    // `truncateAll()` does not restore guardrail_scripts, so read the seeds the
+    // way production does rather than the table.
+});
+
+afterAll(async () => {
+    await closeTestDb();
+});
+
+describe('catalog contract', () => {
+    it('loads every bundle on disk', () => {
+        // An empty catalog would make every per-entry case below vacuous.
+        expect(catalog.length).toBeGreaterThanOrEqual(7);
+    });
+
+    it('has no duplicate sort_order', () => {
+        const orders = catalog.map((e) => e.manifest.sort_order);
+        expect(new Set(orders).size).toBe(orders.length);
+    });
+
+    for (const entry of catalog) {
+        const { manifest } = entry;
+
+        describe(manifest.id, () => {
+            it('validates against the bundle manifest schema', () => {
+                const parsed = AgentBundleManifestSchema.safeParse(manifest);
+                if (!parsed.success) {
+                    throw new Error(
+                        `${manifest.id}/manifest.json is invalid: ` +
+                            parsed.error.issues
+                                .map((i) => `${i.path.join('.')}: ${i.message}`)
+                                .join('; '),
+                    );
+                }
+                expect(parsed.success).toBe(true);
+            });
+
+            it('id matches its directory', () => {
+                expect(catalogIds.has(manifest.id)).toBe(true);
+            });
+
+            it('names a (cli, model) pair that is in the registry', () => {
+                const key = modelKey(manifest.cli, manifest.model);
+                if (!registry.has(key)) {
+                    throw new Error(
+                        `${manifest.id} names model '${manifest.model}' for cli '${manifest.cli}', ` +
+                            `which is not in cli_models — install would fail on the composite FK.`,
+                    );
+                }
+                expect(registry.has(key)).toBe(true);
+            });
+
+            it('names a role that exists in the catalog, or none at all', () => {
+                // null is legal and means "autonomous, outside the SDLC chain".
+                if (!manifest.role_id) return;
+                if (!roleIds.has(manifest.role_id)) {
+                    throw new Error(
+                        `${manifest.id} claims role '${manifest.role_id}', which has no row in ` +
+                            `\`roles\` — agentsService.create would return 400 ROLE_NOT_IN_CATALOG. ` +
+                            `See .agents/role-catalog.md.`,
+                    );
+                }
+                expect(roleIds.has(manifest.role_id)).toBe(true);
+            });
+
+            it('ships a non-empty prompt that reaches the outcome contract', () => {
+                expect(entry.prompt_md.trim().length).toBeGreaterThan(0);
+                // Every workflow-routed agent must reach `.atlas/outcome.md`; the
+                // engine parks a run whose step emitted no `atlas-outcome` block
+                // (agent-runner-outcome-routing.ts). Autonomous agents are not
+                // routed by a graph, so they are exempt.
+                if (manifest.role_id) {
+                    expect(entry.prompt_md).toMatch(/atlas-outcome|outcome\.md/);
+                }
+            });
+
+            it('ships at least one REQUIRED checklist row', () => {
+                // `agent-runner-outcome-routing.ts` returns apply_on_pass the
+                // moment the required list is empty, so an agent with none is
+                // believed unconditionally when it says `done`. That is
+                // campaign finding F-012, and `reviewer-checklists.test.ts`
+                // only ever globbed `*-reviewer` — which is how agent-architect
+                // and agent-automation, the two steps that decide what
+                // everyone downstream builds, shipped able to self-certify.
+                const required = entry.checklists.filter((c) => c.required);
+                if (required.length === 0) {
+                    throw new Error(
+                        `${manifest.id} has no required checklist rows, so its \`done\` is an ` +
+                            `automatic pass (agent-runner-outcome-routing.ts). See F-012.`,
+                    );
+                }
+                expect(required.length).toBeGreaterThan(0);
+            });
+
+            it('checklist rows are well-formed and uniquely ordered', () => {
+                const orders = entry.checklists.map((c) => c.sort_order);
+                expect(new Set(orders).size).toBe(entry.checklists.length);
+                for (const c of entry.checklists) {
+                    expect(c.label.trim().length).toBeGreaterThan(0);
+                    expect(typeof c.required).toBe('boolean');
+                }
+            });
+
+            it('uses a six-digit hex accent colour', () => {
+                expect(manifest.accent_color).toMatch(/^#[0-9A-Fa-f]{6}$/);
+            });
+
+            it('sets effort explicitly rather than inheriting the column default', () => {
+                // `effort` is passed straight through to the CLI as `--effort`
+                // and is the single dial that moves how many turns an agent
+                // takes. Every manifest omitted it until PR2, so the whole
+                // fleet silently ran at the `'medium'` DB default and nobody
+                // had ever chosen it. An unset value is not a neutral default,
+                // it is an unmade decision.
+                if (!manifest.effort) {
+                    throw new Error(
+                        `${manifest.id} does not set \`effort\`, so it inherits the DB default ` +
+                            `'medium'. Choose one deliberately and record why.`,
+                    );
+                }
+                expect(AgentEffortSchema.options).toContain(manifest.effort);
+            });
+
+            it('keeps its prompt inside the budget for its kind', () => {
+                const budget =
+                    PROMPT_BUDGET_OVERRIDE[manifest.id] ??
+                    (manifest.role_id ? PROMPT_BUDGET_ROUTED : PROMPT_BUDGET_AUTONOMOUS);
+                const size = estimateTokens(entry.prompt_md);
+                if (size > budget) {
+                    throw new Error(
+                        `${manifest.id}/prompt.md is ~${size} tokens, over the ${budget} budget for a ` +
+                            `${manifest.role_id ? 'routed' : 'autonomous'} agent. This budget is a bloat guard: ` +
+                            `if the prompt genuinely needs the room, raise the constant and say why.`,
+                    );
+                }
+                expect(size).toBeLessThanOrEqual(budget);
+            });
+        });
+    }
+});
+
+describe('starter tests', () => {
+    // Every expectation the evaluator understands. A typo'd key asserts
+    // nothing and passes — campaign finding F-012, one level up — so the list
+    // is repeated here rather than inferred. It duplicates the Zod schema in
+    // `routes/agents.ts`, which is the cheaper half of the trade: ten lines in
+    // a test against a shipped fixture that silently checks nothing.
+    const AGENT_EXPECTATION_KEYS = new Set([
+        'outcome_kind',
+        'required_checklist_all_passed',
+        'summary_contains',
+        'summary_omits',
+        'max_cost_usd',
+        'max_duration_s',
+        'tools_required',
+        'tools_forbidden',
+        'max_turns',
+        'max_tool_calls',
+        'files_touched',
+        'files_untouched',
+        'reply_must_match',
+        'reply_must_not_match',
+        'commands_forbidden',
+        'no_code_changes',
+        'files_changed_only',
+        'script',
+        'judge_criteria',
+    ]);
+    // Set on a workflow fixture, meaningless on an agent one: `evaluateAgentTest`
+    // returns `errored` for these, so a shipped test carrying one can never pass.
+    const WORKFLOW_ONLY_KEYS = ['terminal_status', 'min_sub_tasks', 'requires_pr', 'gate_verdicts_all_pass'];
+    /**
+     * Evidence the judge cannot see: it gets the summary, the reason, the
+     * trace, the final reply and the shell commands, and nothing else. Word-bounded, because "different" contains
+     * "diff" and a substring match would fail honest criteria.
+     */
+    const UNJUDGEABLE = [/\bthe diff\b/, /\bcompiles?\b/, /\bscreenshots?\b/, /\bline numbers?\b/, /\bcoverage report\b/];
+    const CEILING: Record<string, number> = { job: 3.0, contract: 1.0, trace: 2.5 };
+
+    for (const { manifest, tests } of catalog) {
+        describe(manifest.id, () => {
+            // The floor the Owner asked for, and the reason it is a gate: eight
+            // agents shipping one fixture each looked, from every agent page,
+            // exactly like no testing at all.
+            it('ships three tests — one job, one contract, one trace', () => {
+                expect(tests.length, `${manifest.id} ships ${tests.length} tests, not 3`).toBe(3);
+                expect(tests.map((t) => t.kind).sort()).toEqual(['contract', 'job', 'trace']);
+            });
+
+            it('gives every test an id, a name and something to act on', () => {
+                for (const t of tests) {
+                    expect(t.id, `${manifest.id}: every test needs an id`).toMatch(/^[a-z0-9-]+$/);
+                    expect(t.name.length, `${t.id}: needs a name`).toBeGreaterThan(0);
+                    expect(t.item_template.title.length, `${t.id}: needs an item to act on`).toBeGreaterThan(0);
+                    expect(['task', 'sub_task']).toContain(t.item_template.issue_type);
+                }
+            });
+
+            it('has unique ids', () => {
+                expect(new Set(tests.map((t) => t.id)).size).toBe(tests.length);
+            });
+
+            // A test that asserts nothing passes vacuously — the shape of
+            // campaign finding F-012, one level up.
+            it('asserts at least one thing per test', () => {
+                for (const t of tests) {
+                    expect(Object.keys(t.expectations).length, `${t.id} asserts nothing`).toBeGreaterThan(0);
+                }
+            });
+
+            it('only uses expectations the evaluator understands', () => {
+                for (const t of tests) {
+                    for (const key of Object.keys(t.expectations)) {
+                        expect(AGENT_EXPECTATION_KEYS.has(key), `${t.id}: unknown expectation \`${key}\``).toBe(true);
+                    }
+                    for (const key of WORKFLOW_ONLY_KEYS) {
+                        expect(key in t.expectations, `${t.id}: \`${key}\` only means something on a workflow fixture`).toBe(false);
+                    }
+                    // A catalog fixture binds to whatever repo the Owner picked,
+                    // so a path that must CHANGE only holds in one repo.
+                    // `files_untouched` is fine: "leave package.json alone" is
+                    // true everywhere.
+                    expect('files_touched' in t.expectations, `${t.id}: files_touched cannot hold across repos`).toBe(false);
+                }
+            });
+
+            // One run of an agent is cents, but a shipped test that can run
+            // away is not shippable: the Owner pressed a button, not a blank
+            // cheque. The per-kind ceilings keep a refusal case from costing
+            // what a delivery case does.
+            it('puts a cost ceiling on every test, sized to its kind', () => {
+                for (const t of tests) {
+                    const max = t.expectations['max_cost_usd'];
+                    expect(max, `${t.id} has no max_cost_usd`).toBeTypeOf('number');
+                    expect(max as number, `${t.id} (${t.kind}) exceeds its ceiling`).toBeLessThanOrEqual(
+                        CEILING[t.kind] as number,
+                    );
+                }
+            });
+
+            // The three kinds answer three different questions, and a fleet of
+            // one kind answers only that one. Before this, every shipped
+            // fixture asserted what the agent must NOT do — not one asserted
+            // that it does its job.
+            it('asks the right shape of question per kind', () => {
+                const job = tests.find((t) => t.kind === 'job')!;
+                expect((job.expectations['judge_criteria'] as string[] | undefined)?.length ?? 0).toBeGreaterThan(0);
+
+                const contract = tests.find((t) => t.kind === 'contract')!;
+                const outcome = contract.expectations['outcome_kind'];
+                expect(['asked_question', 'rejected', 'done'], `${contract.id}: a contract case needs an outcome`).toContain(outcome);
+
+                const trace = tests.find((t) => t.kind === 'trace')!;
+                const traceKeys = ['tools_forbidden', 'files_untouched', 'max_turns', 'max_tool_calls'];
+                expect(
+                    traceKeys.some((k) => k in trace.expectations),
+                    `${trace.id}: a trace case must assert on what the run DID`,
+                ).toBe(true);
+                expect('judge_criteria' in trace.expectations, `${trace.id}: a trace case is answered by the trace, not a judge`).toBe(false);
+            });
+
+            // The judge sees the summary, the reason and the trace. A criterion
+            // about anything else cannot be answered, and an unanswerable
+            // criterion is a coin flip dressed as a check.
+            it('writes judge criteria the judge can actually answer', () => {
+                for (const t of tests) {
+                    const criteria = (t.expectations['judge_criteria'] as string[] | undefined) ?? [];
+                    expect(criteria.length, `${t.id}: at most 3 criteria`).toBeLessThanOrEqual(3);
+                    for (const c of criteria) {
+                        expect(c.length, `${t.id}: "${c}" is too vague to be binary`).toBeGreaterThan(24);
+                        expect(c.length, `${t.id}: "${c}" is too long for one question`).toBeLessThanOrEqual(200);
+                        for (const re of UNJUDGEABLE) {
+                            expect(re.test(c.toLowerCase()), `${t.id}: the judge cannot see that — "${c}"`).toBe(false);
+                        }
+                    }
+                }
+            });
+
+            // What a test catches is the part that teaches. Without it a red
+            // verdict is a puzzle rather than a finding — and with too much of
+            // it, the card it renders on becomes an essay.
+            it('says what each test catches, in a caption', () => {
+                for (const t of tests) {
+                    expect(t.notes.length, `${t.id} does not say what it catches`).toBeGreaterThan(40);
+                    expect(t.notes.length, `${t.id}: notes too long to render`).toBeLessThanOrEqual(400);
+                }
+            });
+        });
+    }
+
+    // ADR 0023: "`asked_question` as a pass matters as much as `done`." A
+    // starter set that can only express success cannot say that an agent
+    // which asked rather than inventing a feature has SUCCEEDED — which is
+    // the single most valuable thing these tests exist to check.
+    it('ships at least one test where asking or refusing is the pass', () => {
+        const kinds = catalog.flatMap((e) => e.tests.map((t) => t.expectations['outcome_kind']));
+        expect(kinds).toContain('asked_question');
+    });
+
+    // The worst case of pressing Run on everything, printed so it cannot drift
+    // upward one fixture at a time. Actual spend is far lower — the ceilings
+    // are guards, and the cheapest read-only agents come in around $0.20 a
+    // dispatch — but the guard is what the Owner is exposed to.
+    it('keeps the whole fleet affordable to run once', () => {
+        const total = catalog.reduce(
+            (sum, e) => sum + e.tests.reduce((n, t) => n + ((t.expectations['max_cost_usd'] as number) ?? 0), 0),
+            0,
+        );
+        const fixtures = catalog.reduce((n, e) => n + e.tests.length, 0);
+        expect(total, `${fixtures} fixtures, worst case $${total.toFixed(2)}`).toBeLessThanOrEqual(150);
+    });
+});
+
+describe('catalog lock', () => {
+    const onDisk = catalogLockEntries();
+    const locked = readCatalogLock();
+
+    it('locks every shipped bundle', () => {
+        expect(Object.keys(onDisk).sort()).toEqual(Object.keys(locked).sort());
+    });
+
+    for (const [id, now] of Object.entries(onDisk)) {
+        it(`${id} bumped its version if its content changed`, () => {
+            const was = locked[id];
+            expect(was, `${id} is not in catalog.lock.json — run \`pnpm -F @atlas/api catalog:lock\``).toBeDefined();
+            if (was!.hash === now.hash) {
+                expect(now.version, `${id} content is unchanged but its version moved`).toBe(was!.version);
+                return;
+            }
+            expect(
+                now.version,
+                `${id} content changed but version is still ${now.version}. ` +
+                    `Every existing install is frozen at v${was!.version} and will never receive this. ` +
+                    `Bump the manifest version, then run \`pnpm -F @atlas/api catalog:lock\`.`,
+            ).toBeGreaterThan(was!.version);
+        });
+    }
+});

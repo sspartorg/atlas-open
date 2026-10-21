@@ -1,0 +1,214 @@
+import { memo } from 'react';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import { Link as RouterLink } from 'react-router-dom';
+import { InfoPanel, InfoRow, AgentChip } from '../../components/index.js';
+import { ATLAS_PALETTE } from '../../theme/tokens.js';
+import { useProjectHealth } from '../../hooks/useProjects.js';
+import { useActiveRuns } from '../../hooks/useActiveRuns.js';
+import { formatSpan } from '../../utils/time.js';
+import type { AgentSummary } from '../../api/types.js';
+
+interface Props {
+    projectId: string;
+    activeAgents: AgentSummary[];
+    /** Titles of the project's enabled guard-rail rules. */
+    activeRuleTitles: string[];
+    onEditGuardrails?: () => void;
+}
+
+const MONO = '"JetBrains Mono", monospace';
+
+function MonoValue({ children }: { children: React.ReactNode }) {
+    return (
+        <Typography
+            sx={{
+                fontSize: 12.5,
+                color: ATLAS_PALETTE.slate,
+                fontFamily: MONO,
+                fontWeight: 500,
+            }}
+        >
+            {children}
+        </Typography>
+    );
+}
+
+/** "3 of 5", or a dash when there is nothing to count yet. */
+function ofTotal(part: number, total: number): string {
+    return total === 0 ? '—' : `${part} of ${total}`;
+}
+
+// The same delivery maths as the fleet page (`agent-scorecard.ts`), scoped to
+// this project over 30 days. Counts carry their denominators and nothing is a
+// percentage: a spec the Architect Reviewer sent back is the reviewer doing
+// its job (ADR 0023), not a failure to rank.
+function HealthPanel({ projectId }: { projectId: string }) {
+    const { data, isLoading, error } = useProjectHealth(projectId);
+    const caption = error
+        ? `Could not load: ${error.message}`
+        : !data
+          ? ''
+          : data.runs === 0
+            ? 'No Task runs in the last 30 days.'
+            : `From ${data.runs} Task run${data.runs === 1 ? '' : 's'} started in the last 30 days.`;
+    const value = (text: string) => <MonoValue>{isLoading || !data ? '—' : text}</MonoValue>;
+
+    return (
+        <InfoPanel label="Health · 30 d">
+            <InfoRow label="PRs merged">
+                {value(ofTotal(data?.prs_merged ?? 0, data?.prs_opened ?? 0))}
+            </InfoRow>
+            <InfoRow label="Specs accepted first try">
+                {value(ofTotal(data?.specs.accepted_first_try ?? 0, data?.specs.reviewed ?? 0))}
+            </InfoRow>
+            <InfoRow label="Median time to PR">
+                {value(formatSpan(data?.median_s_to_pr ?? null))}
+            </InfoRow>
+            <InfoRow label="Tasks that needed you">
+                {value(
+                    data?.escalations.since === null ? '—' : String(data?.escalations.items ?? 0)
+                )}
+            </InfoRow>
+            {caption && (
+                <Typography
+                    sx={{ fontSize: 11, color: ATLAS_PALETTE.slate40, mt: 1.5, lineHeight: 1.5 }}
+                >
+                    {caption}
+                </Typography>
+            )}
+        </InfoPanel>
+    );
+}
+
+export const ProjectRightRail = memo(function ProjectRightRail({
+    projectId,
+    activeAgents,
+    activeRuleTitles,
+    onEditGuardrails,
+}: Props) {
+    const joined = activeRuleTitles.join(' · ');
+    const preview = joined.length > 140 ? `${joined.slice(0, 140)}…` : joined;
+    const { agentIds: runningAgentIds } = useActiveRuns();
+
+    return (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <HealthPanel projectId={projectId} />
+
+            <InfoPanel
+                label="Active agents"
+                headerRight={
+                    <Box
+                        component={RouterLink}
+                        to="/agents"
+                        sx={{
+                            fontSize: 12,
+                            color: ATLAS_PALETTE.brandBlue,
+                            textDecoration: 'none',
+                            '&:hover': { textDecoration: 'underline' },
+                        }}
+                    >
+                        All →
+                    </Box>
+                }
+            >
+                {activeAgents.length === 0 ? (
+                    <Typography sx={{ fontSize: 12.5, color: ATLAS_PALETTE.slate40 }}>
+                        No agents assigned to this project yet.
+                    </Typography>
+                ) : (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {activeAgents.map((w) => (
+                            <Box
+                                key={w.id}
+                                sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 2,
+                                    // minWidth: 0 lets the AgentChip's inner
+                                    // ellipsis fire when name + designation
+                                    // would otherwise push the row past the
+                                    // rail. Without this, the chip's
+                                    // intrinsic content width wins and the
+                                    // panel scrolls horizontally.
+                                    minWidth: 0,
+                                }}
+                            >
+                                <Box sx={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                                    <AgentChip agent={w} size="sm" showName layout="stacked" />
+                                </Box>
+                                <Typography
+                                    sx={{
+                                        fontSize: 11,
+                                        color: runningAgentIds.has(w.id)
+                                            ? ATLAS_PALETTE.successFg
+                                            : ATLAS_PALETTE.slate40,
+                                        fontFamily: MONO,
+                                        flexShrink: 0,
+                                    }}
+                                >
+                                    {runningAgentIds.has(w.id) ? 'running' : 'idle'}
+                                </Typography>
+                            </Box>
+                        ))}
+                    </Box>
+                )}
+            </InfoPanel>
+
+            <InfoPanel
+                label="Guard-rails"
+                headerRight={
+                    <Box
+                        component="button"
+                        type="button"
+                        onClick={onEditGuardrails}
+                        sx={{
+                            fontSize: 12,
+                            color: ATLAS_PALETTE.brandBlue,
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            cursor: 'pointer',
+                            fontFamily: 'inherit',
+                            '&:hover': { textDecoration: 'underline' },
+                            '&:focus-visible': {
+                                outline: `2px solid ${ATLAS_PALETTE.brandBlue}`,
+                                outlineOffset: 2,
+                            },
+                        }}
+                    >
+                        Edit →
+                    </Box>
+                }
+            >
+                <Typography
+                    sx={{ fontSize: 12.5, color: ATLAS_PALETTE.slate80, lineHeight: 1.6, mb: 1.5 }}
+                >
+                    Rules every agent must respect inside this project.
+                </Typography>
+                {activeRuleTitles.length === 0 ? (
+                    <Typography
+                        sx={{ fontSize: 12, color: ATLAS_PALETTE.slate40, fontStyle: 'italic' }}
+                    >
+                        No active rules.
+                    </Typography>
+                ) : (
+                    <Typography
+                        sx={{
+                            fontSize: 11.5,
+                            color: ATLAS_PALETTE.slate60,
+                            fontFamily: MONO,
+                            background: ATLAS_PALETTE.slate06,
+                            borderRadius: '6px',
+                            p: 2,
+                            whiteSpace: 'pre-wrap',
+                            lineHeight: 1.6,
+                        }}
+                    >
+                        {preview}
+                    </Typography>
+                )}
+            </InfoPanel>
+        </Box>
+    );
+});

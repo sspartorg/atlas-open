@@ -1,0 +1,22 @@
+{
+  "id": "agent-jira-to-epic",
+  "name": "Jira Importer",
+  "category": "software-dev",
+  "cli": "claude",
+  "model": "claude-haiku-5-5",
+  "effort": "low",
+  "framework": "importer",
+  "description": "Pulls your Jira-assigned items into Atlas as draft Tasks. Edit the prompt with your Atlas project name, then run it from its page.",
+  "designation": "Jira Importer",
+  "accent_color": "#3B82F6",
+  "sort_order": 23,
+  "glyph": "sync_alt",
+  "role_id": null,
+  "status": "inactive",
+  "kind_slug": "jira-to-epic",
+  "settings_json": {},
+  "memory_cadence": 1,
+  "summary": "Pulls your Jira-assigned items into Atlas as draft Tasks.",
+  "version": 1,
+  "published_at": "2026-07-01T00:00:00Z"
+}

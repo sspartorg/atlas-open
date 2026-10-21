@@ -1,0 +1,378 @@
+import type { ReactNode } from 'react';
+import Box from '@mui/material/Box';
+import Skeleton from '@mui/material/Skeleton';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
+import type { IAgent } from '@atlas/shared';
+
+import { useAgentPerformance } from '../../hooks/useAgentTests.js';
+import type { AgentPerformance, FirstPass, TrendBucket } from '../../api/types.js';
+import { EmptyState } from '../../components/EmptyState.js';
+import { InfoPanel } from '../../components/InfoPanel.js';
+import { TrendSparkline } from '../../components/TrendSparkline.js';
+import { ATLAS_PALETTE, TYPOGRAPHY } from '../../theme/tokens.js';
+import { formatCostUsd } from '../../utils/formatCost.js';
+
+// Agent performance (ADR 0023 phase 2, ATL-140).
+//
+// 515 `agent_runs` rows have carried cli, model, effort, token counts, cost and
+// outcome since ADR 0014 — snapshotted explicitly so agent configurations could
+// be compared — and the only thing that ever read them was a CLI script writing
+// markdown into a gitignored directory.
+//
+// **The page shows no pass rate.** ADR 0023 is explicit: on the v4 golden set
+// `agent-release-reviewer` scored 64% *because it rejected four times*, and
+// those rejections were the most valuable thing in the run, including an
+// unescaped value reaching rendered HTML that the Architect's spec had ruled
+// out of scope. A page that ranked agents on that number would recommend
+// culling the best reviewer in the fleet.
+//
+// The plan for this page said to label rejections from `agents.role_id` —
+// "Caught" for a reviewer, "Rejected" for a performer. The data says that does
+// not work: `agent-coder` and `agent-release-reviewer` are BOTH `engineer`, and
+// every reviewer shares a role with the writer it reviews. So nothing is
+// classified. The three outcomes are shown side by side, named for what they
+// are, and **a rejection is never drawn in the failure colour** — which is the
+// substance of the warning rather than its wording.
+
+// Exported: the fleet page draws the same three outcomes in the same colours,
+// so an agent reads the same in the table as on its own tab.
+export const OUTCOMES = [
+    {
+        key: 'applied' as const,
+        label: 'Applied',
+        color: ATLAS_PALETTE.success,
+        hint: 'Routed onward first time.',
+    },
+    {
+        key: 'rejected' as const,
+        label: 'Sent back',
+        // Deliberately not the error colour. A reviewer's rejections are its
+        // product; on a delivery they are the defect it stopped.
+        color: ATLAS_PALETTE.brandBlue,
+        hint: 'Sent the work back on the first attempt.',
+    },
+    {
+        key: 'parked' as const,
+        label: 'Asked you',
+        color: ATLAS_PALETTE.warning,
+        hint: 'Stopped and asked, or produced no readable outcome.',
+    },
+];
+
+function total(fp: FirstPass): number {
+    return fp.applied + fp.rejected + fp.parked;
+}
+
+/** The three outcomes as one thin bar, no counts. For rows, where space is short. */
+export function OutcomeBar({ fp, height = 6 }: { fp: FirstPass; height?: number }) {
+    const n = total(fp);
+    return (
+        <Box
+            role="img"
+            aria-label={OUTCOMES.map((o) => `${o.label} ${fp[o.key]}`).join(', ')}
+            sx={{ display: 'flex', height, borderRadius: `${height / 2}px`, overflow: 'hidden', background: ATLAS_PALETTE.slate10 }}
+        >
+            {OUTCOMES.map((o) =>
+                fp[o.key] === 0 ? null : (
+                    <Box key={o.key} data-outcome={o.key} sx={{ width: `${(fp[o.key] / n) * 100}%`, background: o.color }} />
+                ),
+            )}
+        </Box>
+    );
+}
+
+/**
+ * Each week's first attempts as one 100%-stacked column: the mix, not the
+ * volume (the steps line beside it carries that). Same colours as the bar
+ * above, so a rejection is never the failure colour here either.
+ */
+function WeeklyOutcomes({ trend }: { trend: TrendBucket[] }) {
+    return (
+        <Box
+            role="img"
+            aria-label={`First attempt by week: ${trend
+                .map((b) => `${b.bucket} ${OUTCOMES.map((o) => `${o.label} ${b.first_pass[o.key]}`).join(' ')}`)
+                .join('; ')}`}
+            sx={{ display: 'flex', gap: '2px', height: 24, alignItems: 'stretch' }}
+        >
+            {trend.map((b) => (
+                <Box key={b.bucket} sx={{ width: 6, display: 'flex', flexDirection: 'column-reverse', borderRadius: '2px', overflow: 'hidden' }}>
+                    {OUTCOMES.map((o) =>
+                        b.first_pass[o.key] === 0 ? null : (
+                            <Box key={o.key} sx={{ height: `${(b.first_pass[o.key] / total(b.first_pass)) * 100}%`, background: o.color }} />
+                        ),
+                    )}
+                </Box>
+            ))}
+        </Box>
+    );
+}
+
+function TrendCell({ label, children }: { label: string; children: ReactNode }) {
+    return (
+        <Box sx={{ display: 'grid', gap: 0.75, alignContent: 'start' }}>
+            <Typography sx={{ fontSize: 11, color: ATLAS_PALETTE.slate60, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                {label}
+            </Typography>
+            {children}
+        </Box>
+    );
+}
+
+/** The weekly series the scorecard always computed and nothing drew. */
+function WeeklyTrend({ trend }: { trend: TrendBucket[] }) {
+    if (trend.length < 2) {
+        return (
+            <Typography sx={{ fontSize: 12, color: ATLAS_PALETTE.slate60 }}>
+                Only one week in this window so far. A trend needs at least two.
+            </Typography>
+        );
+    }
+    return (
+        <>
+            <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, max-content)' } }}>
+                <TrendCell label="steps">
+                    <TrendSparkline label="Steps by week" values={trend.map((b) => b.steps)} />
+                </TrendCell>
+                <TrendCell label="first attempt">
+                    <WeeklyOutcomes trend={trend} />
+                </TrendCell>
+                <TrendCell label="cost">
+                    <TrendSparkline label="Cost by week, USD" values={trend.map((b) => b.cost_usd)} />
+                </TrendCell>
+                <TrendCell label="p95">
+                    <TrendSparkline label="p95 seconds by week" values={trend.map((b) => b.p95_s)} />
+                </TrendCell>
+            </Box>
+            <Typography sx={{ fontSize: 11, color: ATLAS_PALETTE.slate60, mt: 1.5, fontFamily: TYPOGRAPHY.fontFamilyMono }}>
+                {trend.length} weeks · {trend[0]?.bucket} to {trend.at(-1)?.bucket}
+            </Typography>
+        </>
+    );
+}
+
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+    const body = (
+        <Box>
+            <Typography sx={{ fontSize: 20, fontWeight: 600, color: ATLAS_PALETTE.slate, lineHeight: 1.2 }}>
+                {value}
+            </Typography>
+            <Typography
+                sx={{ fontSize: 11, color: ATLAS_PALETTE.slate60, textTransform: 'uppercase', letterSpacing: '.04em' }}
+            >
+                {label}
+            </Typography>
+        </Box>
+    );
+    return hint ? (
+        <Tooltip title={hint}>
+            <Box>{body}</Box>
+        </Tooltip>
+    ) : (
+        body
+    );
+}
+
+/** The three outcomes as one bar, with counts. No percentage anywhere. */
+function FirstPassBar({ fp }: { fp: FirstPass }) {
+    const n = total(fp);
+    if (n === 0) {
+        return <Typography sx={{ fontSize: 12, color: ATLAS_PALETTE.slate60 }}>No steps in this window.</Typography>;
+    }
+    return (
+        <Box>
+            <Box sx={{ display: 'flex', height: 10, borderRadius: '5px', overflow: 'hidden', mb: 1.5 }}>
+                {OUTCOMES.map((o) =>
+                    fp[o.key] === 0 ? null : (
+                        <Tooltip key={o.key} title={`${o.label}: ${fp[o.key]} of ${n}`}>
+                            <Box data-outcome={o.key} sx={{ width: `${(fp[o.key] / n) * 100}%`, background: o.color }} />
+                        </Tooltip>
+                    ),
+                )}
+            </Box>
+            <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                {OUTCOMES.map((o) => (
+                    <Tooltip key={o.key} title={o.hint}>
+                        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75 }}>
+                            <Box sx={{ width: 8, height: 8, borderRadius: '2px', background: o.color }} />
+                            <Typography sx={{ fontSize: 13, fontWeight: 600, color: ATLAS_PALETTE.slate }}>
+                                {fp[o.key]}
+                            </Typography>
+                            <Typography sx={{ fontSize: 12, color: ATLAS_PALETTE.slate60 }}>{o.label}</Typography>
+                        </Box>
+                    </Tooltip>
+                ))}
+            </Box>
+        </Box>
+    );
+}
+
+function secs(v: number | null): string {
+    return v === null ? '—' : v < 60 ? `${Math.round(v)}s` : `${Math.round(v / 60)}m`;
+}
+
+export function PerformanceTabContent({ agent }: { agent: IAgent }) {
+    const { data, isLoading, error } = useAgentPerformance(agent.id);
+
+    if (isLoading) return <Skeleton variant="rounded" height={140} />;
+    if (error) {
+        return (
+            <Typography sx={{ fontSize: 13, color: ATLAS_PALETTE.error }}>
+                {(error as Error).message}
+            </Typography>
+        );
+    }
+    if (!data) return null;
+    const perf: AgentPerformance = data;
+
+    if (perf.quality.dispatches === 0) {
+        return (
+            <EmptyState
+                variant="dashed"
+                icon={
+                    <Box
+                        component="span"
+                        className="material-symbols-rounded"
+                        aria-hidden="true"
+                        sx={{ fontSize: 32 }}
+                    >
+                        monitoring
+                    </Box>
+                }
+                title="Nothing to measure yet"
+                description="No Task runs in the last 90 days. Ad-hoc runs and tests are not counted here."
+            />
+        );
+    }
+
+    return (
+        <Box sx={{ display: 'grid', gap: 2.5 }}>
+            <InfoPanel label="First attempt">
+                <FirstPassBar fp={perf.quality.first_pass} />
+                <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap', mt: 2.5 }}>
+                    <Stat label="steps" value={String(perf.quality.steps)} hint="Distinct Task run steps it ran." />
+                    <Stat
+                        label="loops"
+                        value={String(perf.quality.loops)}
+                        hint="Dispatches beyond the first on the same step."
+                    />
+                    <Stat
+                        label="gate catches"
+                        value={String(perf.quality.gate_catch)}
+                        hint="Times a gate went red after this agent said the work was done."
+                    />
+                </Box>
+            </InfoPanel>
+
+            <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
+                <InfoPanel label="Cost">
+                    <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        <Stat label="total" value={formatCostUsd(perf.cost.total_usd)} />
+                        <Stat
+                            label="per step"
+                            value={perf.cost.per_step_usd === null ? '—' : formatCostUsd(perf.cost.per_step_usd)}
+                        />
+                        <Stat
+                            label="cache hit"
+                            value={perf.cost.cache_hit_pct === null ? '—' : `${Math.round(perf.cost.cache_hit_pct * 100)}%`}
+                            hint="Share of input served from cache."
+                        />
+                    </Box>
+                </InfoPanel>
+                <InfoPanel label="Latency">
+                    <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        <Stat label="median" value={secs(perf.latency.p50_s)} />
+                        <Stat label="p95" value={secs(perf.latency.p95_s)} />
+                        <Stat
+                            label="first token"
+                            value={perf.latency.ttft_p50_ms === null ? '—' : `${(perf.latency.ttft_p50_ms / 1000).toFixed(1)}s`}
+                            hint="Median time from a run starting to the agent's first word. Only from runs with a trace."
+                        />
+                    </Box>
+                </InfoPanel>
+            </Box>
+
+            <InfoPanel label="Weekly trend">
+                <WeeklyTrend trend={perf.trend} />
+            </InfoPanel>
+
+            <InfoPanel label="Tools">
+                {perf.tools.runs_with_trace === 0 ? (
+                    <Typography sx={{ fontSize: 12, color: ATLAS_PALETTE.slate60 }}>
+                        No trace on any of these {perf.tools.runs_total} runs, so there is no tool profile yet.
+                    </Typography>
+                ) : (
+                    <>
+                        <Box sx={{ display: 'grid', gap: 0.75, mb: 1.5 }}>
+                            {perf.tools.top.map((t) => {
+                                const busiest = perf.tools.top[0]?.calls ?? 1;
+                                return (
+                                    <Box key={t.name} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                                        <Typography
+                                            sx={{
+                                                fontSize: 12,
+                                                fontFamily: TYPOGRAPHY.fontFamilyMono,
+                                                color: ATLAS_PALETTE.slate,
+                                                minWidth: 180,
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                                whiteSpace: 'nowrap',
+                                            }}
+                                        >
+                                            {t.name}
+                                        </Typography>
+                                        <Box
+                                            aria-hidden="true"
+                                            sx={{
+                                                height: 6,
+                                                borderRadius: '3px',
+                                                background: ATLAS_PALETTE.brandBlue,
+                                                width: `${Math.max(4, (t.calls / busiest) * 100)}%`,
+                                                maxWidth: 320,
+                                            }}
+                                        />
+                                        <Typography sx={{ fontSize: 12, color: ATLAS_PALETTE.slate60 }}>{t.calls}</Typography>
+                                    </Box>
+                                );
+                            })}
+                        </Box>
+                        {/* The denominator, stated. A percentage over an unstated
+                            one is the dishonest kind of number. */}
+                        <Typography sx={{ fontSize: 11, color: ATLAS_PALETTE.slate60 }}>
+                            From {perf.tools.runs_with_trace} of {perf.tools.runs_total} runs · {perf.tools.avg_turns}{' '}
+                            turns and {perf.tools.avg_tool_calls} tool calls on average
+                        </Typography>
+                    </>
+                )}
+            </InfoPanel>
+
+            {/* ATL-140: the numbers must be attributable to the configuration
+                that produced them, so a model or prompt change reads as a break
+                in the series rather than a smear across it. */}
+            <InfoPanel label="By configuration">
+                <Box sx={{ display: 'grid', gap: 1 }}>
+                    {perf.by_config.map((c) => (
+                        <Box
+                            key={`${c.model}-${c.effort}-${c.cli}-${c.prompt_version}`}
+                            sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}
+                        >
+                            <Typography
+                                sx={{ fontSize: 12, fontFamily: TYPOGRAPHY.fontFamilyMono, color: ATLAS_PALETTE.slate, minWidth: 320 }}
+                            >
+                                {c.model ?? 'unrecorded'} · {c.effort ?? 'unrecorded'} · {c.cli ?? 'unrecorded'} ·{' '}
+                                {c.prompt_version === null ? 'prompt unrecorded' : `prompt v${c.prompt_version}`}
+                            </Typography>
+                            <Typography sx={{ fontSize: 12, color: ATLAS_PALETTE.slate60 }}>
+                                {c.steps} steps · {formatCostUsd(c.cost_usd)}
+                            </Typography>
+                            <Box sx={{ flex: 1, minWidth: 160, maxWidth: 260 }}>
+                                <OutcomeBar fp={c.first_pass} />
+                            </Box>
+                        </Box>
+                    ))}
+                </Box>
+            </InfoPanel>
+        </Box>
+    );
+}

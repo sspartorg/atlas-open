@@ -1,0 +1,809 @@
+// Marketplace service. Reads the marketplace_agents table (seeded by
+// runSeed from the catalog folder), provides search / get-full / diff /
+// install. The catalog folder is touched ONLY by the seed script — at
+// request time the DB is authoritative.
+//
+// Generic-runner discipline ([[feedback_orchestrator_no_agent_specific]]):
+// nothing here matches on specific agent ids or kind_slugs. The
+// marketplace is a generic catalog; agent-specific behavior lives in
+// each agent's prompt.
+
+import { createHash } from 'node:crypto';
+import { db } from '../db/kysely-client.js';
+import { agentsService, assertModelInRegistry } from './agents.js';
+import { packAgentBundle, type AgentBundle } from './agent-bundle.js';
+import { adoptStarterTests } from './agent-starter-tests.js';
+import type {
+    AgentCategory,
+    AgentKindSlug,
+    AgentStatus,
+    AgentCli,
+    IAgent,
+    IAgentBundleManifest,
+    IAgentDependencyReport,
+    IMarketplaceAgent,
+    IMarketplaceAgentChecklist,
+    IMarketplaceAgentFull,
+    IMarketplaceAgentSummary,
+    IMarketplaceUpgradeDiff,
+    MarketplaceUpgradeField,
+    SdlcRole,
+} from '@atlas/shared';
+
+/**
+ * Local agent slug is already taken. The collision is resolved at the UI
+ * layer by asking the Owner for a different slug — the catalog copy is
+ * then installed under that new slug, leaving the existing local agent
+ * (which may be a detached / customized copy) untouched.
+ */
+export class MarketplaceSlugTakenError extends Error {
+    constructor(
+        public readonly conflictingId: string,
+        public readonly suggestedId: string
+    ) {
+        super(`local agent slug '${conflictingId}' is already in use; pick a different slug`);
+        this.name = 'MarketplaceSlugTakenError';
+    }
+}
+
+/** Tiny helper for the modal's "rename" pre-fill. Deterministic per
+ *  process boot would be uglier (no entropy), and the slug doesn't need to
+ *  collide-avoid the entire `agents` table — the modal just shows it as a
+ *  starting point the Owner can edit before submitting. */
+function suggestAlternateSlug(catalogId: string): string {
+    const suffix = Math.random().toString(36).slice(2, 6);
+    return `${catalogId}-${suffix}`;
+}
+
+export class MarketplaceNotFoundError extends Error {
+    constructor(public readonly agentId: string) {
+        super(`marketplace agent '${agentId}' not found`);
+        this.name = 'MarketplaceNotFoundError';
+    }
+}
+
+function toMarketplaceAgent(r: Record<string, unknown>): IMarketplaceAgent {
+    return {
+        id: r['id'] as string,
+        name: r['name'] as string,
+        category: r['category'] as AgentCategory,
+        cli: r['cli'] as AgentCli,
+        model: r['model'] as string,
+        /* v8 ignore next -- effort is NOT NULL DEFAULT 'medium' at the DB level; `??` branch is unreachable defensive code */
+        effort: (r['effort'] as IMarketplaceAgent['effort']) ?? 'medium',
+        framework: r['framework'] as string,
+        prompt_md: r['prompt_md'] as string,
+        description: r['description'] as string,
+        designation: r['designation'] as string,
+        accent_color: r['accent_color'] as string,
+        sort_order: r['sort_order'] as number,
+        glyph: r['glyph'] as string,
+        role_id: (r['role_id'] as SdlcRole | null) ?? null,
+        status: r['status'] as AgentStatus,
+        kind_slug: r['kind_slug'] as AgentKindSlug,
+        /* v8 ignore next -- settings_json is NOT NULL DEFAULT '{}' at the DB level; `??` branch is unreachable defensive code */
+        settings_json: (r['settings_json'] as Record<string, unknown>) ?? {},
+        memory_cadence: r['memory_cadence'] as number,
+        /* v8 ignore next -- memory_template_md is NOT NULL DEFAULT '' at the DB level; `??` branch is unreachable defensive code */
+        memory_template_md: (r['memory_template_md'] as string) ?? '',
+        /* v8 ignore next -- summary is NOT NULL DEFAULT '' at the DB level; `??` branch is unreachable defensive code */
+        summary: (r['summary'] as string) ?? '',
+        version: r['version'] as number,
+        published_at: String(r['published_at']),
+        updated_at: String(r['updated_at']),
+    };
+}
+
+function toManifest(agent: IMarketplaceAgent): IAgentBundleManifest {
+    return {
+        id: agent.id,
+        name: agent.name,
+        category: agent.category,
+        cli: agent.cli,
+        model: agent.model,
+        effort: agent.effort,
+        framework: agent.framework,
+        description: agent.description,
+        designation: agent.designation,
+        accent_color: agent.accent_color,
+        sort_order: agent.sort_order,
+        glyph: agent.glyph,
+        role_id: agent.role_id,
+        status: agent.status,
+        kind_slug: agent.kind_slug,
+        settings_json: agent.settings_json,
+        memory_cadence: agent.memory_cadence,
+        summary: agent.summary,
+        version: agent.version,
+        published_at: agent.published_at,
+    };
+}
+
+function manifestFromLocalAgent(agent: IAgent, summary: string): IAgentBundleManifest {
+    return {
+        id: agent.id,
+        name: agent.name,
+        category: agent.category,
+        cli: agent.cli,
+        model: agent.model,
+        effort: agent.effort,
+        framework: agent.framework,
+        description: agent.description,
+        designation: agent.designation,
+        accent_color: agent.accent_color,
+        sort_order: agent.sort_order,
+        glyph: agent.glyph,
+        role_id: agent.role_id,
+        status: agent.status,
+        kind_slug: agent.kind_slug,
+        settings_json: agent.settings_json,
+        memory_cadence: agent.memory_cadence,
+        summary,
+        // Exported bundle carries a self-version of 1 unless the local
+        // agent has a pinned marketplace_pulled_version (rare for export).
+        version: agent.marketplace_pulled_version ?? 1,
+        published_at: agent.created_at,
+    };
+}
+
+export interface MarketplaceSearchInput {
+    query?: string | undefined;
+    category?: AgentCategory | undefined;
+    kind_slug?: AgentKindSlug | undefined;
+    limit?: number | undefined;
+}
+
+/**
+ * Fingerprint of exactly the three fields `acceptUpgrade` overwrites.
+ *
+ * Deliberately narrow. It must not move when the Owner renames, pauses, or
+ * re-models an agent, because an upgrade does not touch any of those — a hash
+ * over the whole row would block upgrades that were never going to overwrite
+ * anything. Checklists are folded in here because they live in their own table
+ * with no timestamps, so nothing else can see them change.
+ *
+ * Checklist order matters to the agent, so sort by `sort_order` rather than
+ * whatever order the rows came back in, or an unchanged list hashes
+ * differently between reads.
+ */
+function upgradableHash(input: {
+    prompt_md: string;
+    settings_json: unknown;
+    checklists: ReadonlyArray<{ label: string; sort_order: number; required: boolean }>;
+}): string {
+    const canonical = JSON.stringify({
+        prompt_md: input.prompt_md,
+        settings_json: input.settings_json ?? {},
+        checklists: [...input.checklists]
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map((c) => [c.label, c.sort_order, c.required]),
+    });
+    return createHash('sha256').update(canonical).digest('hex');
+}
+
+export const marketplaceService = {
+    async search(input: MarketplaceSearchInput = {}): Promise<IMarketplaceAgentSummary[]> {
+        let q = db.selectFrom('marketplace_agents').selectAll();
+        if (input.category) q = q.where('category', '=', input.category);
+        if (input.kind_slug) q = q.where('kind_slug', '=', input.kind_slug);
+        if (input.query && input.query.trim() !== '') {
+            const needle = `%${input.query.trim().toLowerCase()}%`;
+            q = q.where((eb) =>
+                eb.or([
+                    eb(eb.fn('lower', ['name']), 'like', needle),
+                    eb(eb.fn('lower', ['description']), 'like', needle),
+                    eb(eb.fn('lower', ['summary']), 'like', needle),
+                    eb(eb.fn('lower', ['designation']), 'like', needle),
+                ])
+            );
+        }
+        const limit = Math.max(1, Math.min(input.limit ?? 50, 100));
+        const rows = await q.orderBy('sort_order', 'asc').limit(limit).execute();
+        if (rows.length === 0) return [];
+
+        const ids = rows.map((r) => r['id'] as string);
+        // A catalog entry is "installed" if and only if some local agent
+        // has marketplace_source_id pointing at it. The local agent's own
+        // id is irrelevant — once detached (source_id=NULL), the agent is
+        // gone from the catalog's POV and the marketplace shows Add again.
+        const localRows = await db
+            .selectFrom('agents')
+            .select(['id', 'marketplace_source_id', 'marketplace_pulled_version'])
+            .where('marketplace_source_id', 'in', ids)
+            .execute();
+        const installedByCatalogId = new Map<
+            string,
+            { installed_agent_id: string; installed_version: number | null }
+        >();
+        for (const r of localRows) {
+            const linkId = r['marketplace_source_id'] as string;
+            // First write wins. If the Owner has installed the same catalog
+            // entry under multiple slugs (e.g. original + a fork), we pick
+            // the first one — the marketplace listing carries one summary
+            // per catalog row, so we have to choose.
+            if (!installedByCatalogId.has(linkId)) {
+                installedByCatalogId.set(linkId, {
+                    installed_agent_id: r['id'] as string,
+                    installed_version: (r['marketplace_pulled_version'] as number | null) ?? null,
+                });
+            }
+        }
+
+        return rows.map((r) => {
+            const id = r['id'] as string;
+            const catalogVersion = r['version'] as number;
+            const local = installedByCatalogId.get(id);
+            const installed_version = local?.installed_version ?? null;
+            const isInstalled = local != null;
+            return {
+                id,
+                name: r['name'] as string,
+                cli: r['cli'] as AgentCli,
+                category: r['category'] as AgentCategory,
+                kind_slug: r['kind_slug'] as AgentKindSlug,
+                /* v8 ignore next -- summary is NOT NULL DEFAULT '' at the DB level; `??` branch is unreachable defensive code */
+                summary: (r['summary'] as string) ?? '',
+                accent_color: r['accent_color'] as string,
+                glyph: r['glyph'] as string,
+                version: catalogVersion,
+                is_installed: isInstalled,
+                // is_linked is now equivalent to is_installed; kept on the
+                // shape for one release for back-compat with older clients.
+                is_linked: isInstalled,
+                installed_agent_id: local?.installed_agent_id ?? null,
+                installed_version,
+                upgrade_available:
+                    isInstalled && installed_version != null && installed_version < catalogVersion,
+            };
+        });
+    },
+
+    async getFull(id: string): Promise<IMarketplaceAgentFull | undefined> {
+        const row = await db
+            .selectFrom('marketplace_agents')
+            .selectAll()
+            .where('id', '=', id)
+            .executeTakeFirst();
+        if (!row) return undefined;
+        const agent = toMarketplaceAgent(row);
+        const checklists = await db
+            .selectFrom('marketplace_agent_checklists')
+            .select(['label', 'sort_order', 'required'])
+            .where('marketplace_agent_id', '=', id)
+            .orderBy('sort_order', 'asc')
+            .execute();
+        return {
+            agent,
+            checklists: checklists as unknown as IMarketplaceAgentChecklist[],
+        };
+    },
+
+    async exportCatalogBundle(id: string): Promise<Buffer> {
+        return await packAgentBundle(await this.catalogBundle(id));
+    },
+
+    async exportLocalBundle(agentId: string): Promise<Buffer> {
+        return await packAgentBundle(await this.localBundle(agentId));
+    },
+
+    async catalogBundle(id: string): Promise<AgentBundle> {
+        const full = await this.getFull(id);
+        if (!full) throw new MarketplaceNotFoundError(id);
+        return {
+            manifest: toManifest(full.agent),
+            prompt_md: full.agent.prompt_md,
+            memory_md: full.agent.memory_template_md,
+            checklists: full.checklists,
+        };
+    },
+
+    async localBundle(agentId: string): Promise<AgentBundle> {
+        const agent = await agentsService.get(agentId);
+        if (!agent) throw new MarketplaceNotFoundError(agentId);
+        const [checklists, memory] = await Promise.all([
+            agentsService.getChecklists(agentId),
+            db
+                .selectFrom('agent_memory')
+                .select('body_md')
+                .where('agent_id', '=', agentId)
+                .executeTakeFirst(),
+        ]);
+        // Local agents don't carry the per-row summary the catalog has; we
+        // derive one from the description so the round-trip is meaningful.
+        const summary =
+            agent.description.length > 220
+                ? agent.description.slice(0, 217) + '...'
+                : agent.description;
+        return {
+            manifest: manifestFromLocalAgent(agent, summary),
+            prompt_md: agent.prompt_md,
+            memory_md: memory?.body_md ?? '',
+            checklists: checklists.map((c) => ({
+                label: c.label,
+                sort_order: c.sort_order,
+                required: c.required,
+            })),
+        };
+    },
+
+    async install(
+        catalogId: string,
+        options: { agent_id?: string | undefined } = {}
+    ): Promise<IAgent> {
+        const full = await this.getFull(catalogId);
+        if (!full) throw new MarketplaceNotFoundError(catalogId);
+        const { agent: m, checklists } = full;
+
+        // Target slug for the local row. Defaults to the catalog id; the
+        // Owner can override (via the AddFromMarketplaceModal "rename"
+        // step) when the default is already taken locally.
+        const targetId = (options.agent_id && options.agent_id.trim()) || catalogId;
+        const existing = await agentsService.get(targetId);
+        if (existing) {
+            throw new MarketplaceSlugTakenError(targetId, suggestAlternateSlug(catalogId));
+        }
+        // `agents` carries a composite FK on (cli, model) -> cli_models;
+        // `marketplace_agents` does not. A catalog entry can therefore name a
+        // model the Owner has since pruned from the registry, and without this
+        // check the insert below dies on agents_cli_model_fk as a raw 500.
+        // agentsService.create / update already guard the same way.
+        await assertModelInRegistry(m.cli, m.model);
+
+        const installed = await db.transaction().execute(async (trx) => {
+            await trx
+                .insertInto('agents')
+                .values({
+                    id: targetId,
+                    name: m.name,
+                    category: m.category,
+                    cli: m.cli,
+                    model: m.model,
+                    effort: m.effort,
+                    framework: m.framework,
+                    prompt_md: m.prompt_md,
+                    prompt_version: 1,
+                    status: m.status,
+                    accent_color: m.accent_color,
+                    sort_order: m.sort_order,
+                    description: m.description,
+                    designation: m.designation,
+                    role_id: m.role_id,
+                    glyph: m.glyph,
+                    memory_cadence: m.memory_cadence,
+                    kind_slug: m.kind_slug,
+                    settings_json: m.settings_json,
+                    // marketplace_source_id points at the CATALOG id (m.id),
+                    // not the local slug — that's how upgrades keep flowing
+                    // even after the user installs under a custom slug.
+                    marketplace_source_id: m.id,
+                    marketplace_pulled_version: m.version,
+                    // What was pulled, so a later import can tell whether the
+                    // Owner has since changed any of it.
+                    marketplace_upgradable_hash: upgradableHash({
+                        prompt_md: m.prompt_md,
+                        settings_json: m.settings_json,
+                        checklists: full.checklists,
+                    }),
+                })
+                .execute();
+            await trx
+                .insertInto('agent_prompt_versions')
+                .values({
+                    agent_id: targetId,
+                    version: 1,
+                    body_md: m.prompt_md,
+                    edited_by: 'Owner',
+                })
+                .execute();
+            await trx
+                .insertInto('agent_memory')
+                .values({
+                    agent_id: targetId,
+                    body_md: full.agent.memory_template_md,
+                    version: 1,
+                    source: 'ai-generated' as const,
+                })
+                .execute();
+            if (checklists.length > 0) {
+                await trx
+                    .insertInto('agent_checklists')
+                    .values(
+                        checklists.map((c) => ({
+                            agent_id: targetId,
+                            label: c.label,
+                            sort_order: c.sort_order,
+                            required: c.required,
+                        }))
+                    )
+                    .execute();
+            }
+            const row = await trx
+                .selectFrom('agents')
+                .selectAll()
+                .where('id', '=', targetId)
+                .executeTakeFirstOrThrow();
+            return row as unknown as IAgent;
+        });
+        // Migration 021 — the fixtures this agent ships with become real rows
+        // now, not templates waiting for a click. Outside the transaction: a
+        // fixture that fails to adopt must not roll back the install, and the
+        // boot-time sync adopts it on the next start.
+        await adoptStarterTests(targetId, catalogId);
+        return installed;
+    },
+
+    async diff(catalogId: string, localAgentId: string): Promise<IMarketplaceUpgradeDiff> {
+        const [full, agent, localChecklists] = await Promise.all([
+            this.getFull(catalogId),
+            agentsService.get(localAgentId),
+            agentsService.getChecklists(localAgentId),
+        ]);
+        if (!full) throw new MarketplaceNotFoundError(catalogId);
+        if (!agent) throw new MarketplaceNotFoundError(localAgentId);
+
+        const fromChecklists: IMarketplaceAgentChecklist[] = localChecklists.map((c) => ({
+            label: c.label,
+            sort_order: c.sort_order,
+            required: c.required,
+        }));
+
+        const jsonEqual = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+        return {
+            marketplace_id: catalogId,
+            local_agent_id: localAgentId,
+            marketplace_version: full.agent.version,
+            local_pulled_version: agent.marketplace_pulled_version ?? null,
+            fields: {
+                prompt_md: {
+                    from: agent.prompt_md,
+                    to: full.agent.prompt_md,
+                    changed: agent.prompt_md !== full.agent.prompt_md,
+                },
+                settings_json: {
+                    from: agent.settings_json,
+                    to: full.agent.settings_json,
+                    changed: !jsonEqual(agent.settings_json, full.agent.settings_json),
+                },
+                checklists: {
+                    from: fromChecklists,
+                    to: full.checklists,
+                    changed: !jsonEqual(fromChecklists, full.checklists),
+                },
+            },
+        };
+    },
+
+    async acceptUpgrade(localAgentId: string, fields: MarketplaceUpgradeField[]): Promise<IAgent> {
+        const agent = await agentsService.get(localAgentId);
+        if (!agent) throw new MarketplaceNotFoundError(localAgentId);
+        if (!agent.marketplace_source_id) {
+            throw new Error(`agent '${localAgentId}' is not back-linked to a marketplace source`);
+        }
+        const full = await this.getFull(agent.marketplace_source_id);
+        if (!full) throw new MarketplaceNotFoundError(agent.marketplace_source_id);
+
+        await db.transaction().execute(async (trx) => {
+            if (fields.includes('prompt_md') && full.agent.prompt_md !== agent.prompt_md) {
+                const nextPromptVersion = agent.prompt_version + 1;
+                await trx
+                    .updateTable('agents')
+                    .set({
+                        prompt_md: full.agent.prompt_md,
+                        prompt_version: nextPromptVersion,
+                    })
+                    .where('id', '=', localAgentId)
+                    .execute();
+                await trx
+                    .insertInto('agent_prompt_versions')
+                    .values({
+                        agent_id: localAgentId,
+                        version: nextPromptVersion,
+                        body_md: full.agent.prompt_md,
+                        edited_by: 'Marketplace',
+                    })
+                    .execute();
+            }
+            if (fields.includes('settings_json')) {
+                await trx
+                    .updateTable('agents')
+                    .set({ settings_json: full.agent.settings_json })
+                    .where('id', '=', localAgentId)
+                    .execute();
+            }
+            if (fields.includes('checklists')) {
+                await trx
+                    .deleteFrom('agent_checklists')
+                    .where('agent_id', '=', localAgentId)
+                    .execute();
+                if (full.checklists.length > 0) {
+                    await trx
+                        .insertInto('agent_checklists')
+                        .values(
+                            full.checklists.map((c) => ({
+                                agent_id: localAgentId,
+                                label: c.label,
+                                sort_order: c.sort_order,
+                                required: c.required,
+                            }))
+                        )
+                        .execute();
+                }
+            }
+            // Always bump pulled_version after a successful accept — even if
+            // the user un-checked every field, that's a "Dismiss" decision
+            // which is handled by dismissUpgrade. Reaching acceptUpgrade
+            // means at least one field was applied, so it's safe to advance.
+            await trx
+                .updateTable('agents')
+                .set({
+                    marketplace_pulled_version: full.agent.version,
+                    // Reset the baseline to what this upgrade just wrote, so
+                    // the NEXT one compares against the right thing. An
+                    // upgrade the Owner narrowed to a subset of fields leaves
+                    // the others local, so hash what the row actually holds
+                    // now — not what the catalog says.
+                    marketplace_upgradable_hash: upgradableHash({
+                        prompt_md: fields.includes('prompt_md') ? full.agent.prompt_md : agent.prompt_md,
+                        settings_json: fields.includes('settings_json') ? full.agent.settings_json : agent.settings_json,
+                        checklists: fields.includes('checklists')
+                            ? full.checklists
+                            : await trx.selectFrom('agent_checklists').select(['label', 'sort_order', 'required']).where('agent_id', '=', localAgentId).execute(),
+                    }),
+                })
+                .where('id', '=', localAgentId)
+                .execute();
+        });
+        // An upgrade that added or reworded a fixture lands it now rather than
+        // at the next boot. Untouched rows follow the bundle; edited ones do
+        // not (`adoptStarterTests`).
+        await adoptStarterTests(localAgentId, agent.marketplace_source_id);
+        const refreshed = await agentsService.get(localAgentId);
+        return refreshed!;
+    },
+
+    async dismissUpgrade(localAgentId: string): Promise<IAgent> {
+        const agent = await agentsService.get(localAgentId);
+        if (!agent) throw new MarketplaceNotFoundError(localAgentId);
+        if (!agent.marketplace_source_id) {
+            throw new Error(`agent '${localAgentId}' is not back-linked to a marketplace source`);
+        }
+        const m = await db
+            .selectFrom('marketplace_agents')
+            .select(['version'])
+            .where('id', '=', agent.marketplace_source_id)
+            .executeTakeFirst();
+        if (!m) throw new MarketplaceNotFoundError(agent.marketplace_source_id);
+        await db
+            .updateTable('agents')
+            .set({ marketplace_pulled_version: m.version })
+            .where('id', '=', localAgentId)
+            .execute();
+        const refreshed = await agentsService.get(localAgentId);
+        return refreshed!;
+    },
+
+    // Imports an agent bundle (uploaded zip) as a new LOCAL agent. The
+    // imported agent is intentionally NOT back-linked to the marketplace:
+    // bundles come from "somewhere else" (a colleague, an export file)
+    // and should not trigger catalog-upgrade prompts. If the Owner wants
+    // upgrade tracking, they should Add from the marketplace instead.
+    async importBundle(
+        bundle: AgentBundle,
+        options: { agent_id?: string | undefined } = {}
+    ): Promise<IAgent> {
+        const m = bundle.manifest;
+        const id = (options.agent_id && options.agent_id.trim()) || m.id;
+        const existing = await agentsService.get(id);
+        if (existing) {
+            throw new MarketplaceSlugTakenError(id, suggestAlternateSlug(m.id));
+        }
+        await assertModelInRegistry(m.cli, m.model);
+        return await db.transaction().execute(async (trx) => {
+            await trx
+                .insertInto('agents')
+                .values({
+                    id,
+                    name: m.name,
+                    category: m.category,
+                    cli: m.cli,
+                    model: m.model,
+                    effort: m.effort,
+                    framework: m.framework,
+                    prompt_md: bundle.prompt_md,
+                    prompt_version: 1,
+                    status: m.status,
+                    accent_color: m.accent_color,
+                    sort_order: m.sort_order,
+                    description: m.description,
+                    designation: m.designation,
+                    role_id: m.role_id,
+                    glyph: m.glyph,
+                    memory_cadence: m.memory_cadence,
+                    kind_slug: m.kind_slug,
+                    settings_json: m.settings_json,
+                    marketplace_source_id: null,
+                    marketplace_pulled_version: null,
+                })
+                .execute();
+            await trx
+                .insertInto('agent_prompt_versions')
+                .values({
+                    agent_id: id,
+                    version: 1,
+                    body_md: bundle.prompt_md,
+                    edited_by: 'Import',
+                })
+                .execute();
+            await trx
+                .insertInto('agent_memory')
+                .values({
+                    agent_id: id,
+                    body_md: bundle.memory_md,
+                    version: 1,
+                    source: 'manual-edit' as const,
+                })
+                .execute();
+            if (bundle.checklists.length > 0) {
+                await trx
+                    .insertInto('agent_checklists')
+                    .values(
+                        bundle.checklists.map((c) => ({
+                            agent_id: id,
+                            label: c.label,
+                            sort_order: c.sort_order,
+                            required: c.required,
+                        }))
+                    )
+                    .execute();
+            }
+            const row = await trx
+                .selectFrom('agents')
+                .selectAll()
+                .where('id', '=', id)
+                .executeTakeFirstOrThrow();
+            return row as unknown as IAgent;
+        });
+    },
+
+    async detach(localAgentId: string): Promise<IAgent> {
+        const agent = await agentsService.get(localAgentId);
+        if (!agent) throw new MarketplaceNotFoundError(localAgentId);
+        await db
+            .updateTable('agents')
+            .set({ marketplace_source_id: null, marketplace_pulled_version: null })
+            .where('id', '=', localAgentId)
+            .execute();
+        const refreshed = await agentsService.get(localAgentId);
+        return refreshed!;
+    },
+
+    /**
+     * Has the Owner edited this agent's prompt since it was installed?
+     *
+     * `install` seeds `agent_prompt_versions` v1 with `edited_by: 'Owner'`, and
+     * `acceptUpgrade` writes its rows as `'Marketplace'`, so the question is
+     * exactly "is there an Owner row past v1". No content comparison and no new
+     * column — and it stays correct across any number of upgrades, which a
+     * `prompt_version === 1` check would not.
+     *
+     * Known limit: it sees prompt edits only. An Owner who changed nothing but
+     * a checklist reads as untouched. Closing that would need an edit marker on
+     * `agent_checklists`; the trade is deliberate, and `resolveAgentDependencies`
+     * reports every agent it upgraded so the change is never silent.
+     */
+    async hasOwnerEdit(localAgentId: string): Promise<boolean> {
+        const row = await db
+            .selectFrom('agent_prompt_versions')
+            .select('id')
+            .where('agent_id', '=', localAgentId)
+            .where('edited_by', '=', 'Owner')
+            .where('version', '>', 1)
+            .executeTakeFirst();
+        if (row != null) return true;
+
+        // The prompt is only ONE of the three fields an upgrade overwrites.
+        // `settings_json` and the checklists leave no prompt-version row, and a
+        // checklist does not even live on this table — so both used to read as
+        // untouched and get silently overwritten. The hash (migration 009)
+        // covers all three at once, and nothing else: renaming or pausing an
+        // agent must not block a content upgrade.
+        const agent = await db
+            .selectFrom('agents')
+            .select(['prompt_md', 'settings_json', 'marketplace_upgradable_hash'])
+            .where('id', '=', localAgentId)
+            .executeTakeFirst();
+        if (!agent) return false;
+        // Installed before the column existed, so we cannot prove it is safe to
+        // overwrite. Decline, and let the Owner accept in the Marketplace where
+        // they can see what changes. See migration 009.
+        if (!agent.marketplace_upgradable_hash) return true;
+
+        const checklists = await db
+            .selectFrom('agent_checklists')
+            .select(['label', 'sort_order', 'required'])
+            .where('agent_id', '=', localAgentId)
+            .execute();
+        return (
+            upgradableHash({
+                prompt_md: agent.prompt_md,
+                settings_json: agent.settings_json,
+                checklists,
+            }) !== agent.marketplace_upgradable_hash
+        );
+    },
+
+    /**
+     * Make every agent in `agentIds` present and current, and say what happened.
+     *
+     * Shared by both dependency-resolving paths — `createFromTemplate` and
+     * `importWorkflowBundle` — because they had drifted apart: both merely
+     * skipped an agent that already existed, whatever version it was, so a
+     * workflow could import "successfully" onto agents that no longer matched
+     * the graph it shipped with.
+     *
+     * Upgrades are applied only to agents the Owner has not edited. A tuned
+     * prompt is work the Owner did deliberately; an import is not permission to
+     * throw it away, so those are left alone and reported instead — the
+     * existing upgrade UI still offers them, because the pointer is untouched.
+     */
+    async resolveAgentDependencies(
+        agentIds: readonly string[],
+        opts: {
+            /**
+             * How to bring in an agent that isn't here yet. Defaults to
+             * installing the catalog entry, which is right for templates
+             * (their agent nodes reference catalog ids by construction). An
+             * uploaded bundle passes its own installer instead: those agents
+             * may not exist in the catalog at all, and `install` would 404.
+             */
+            install?: (agentId: string) => Promise<void>;
+            /**
+             * Whether an already-present agent may be upgraded. Off for
+             * uploaded bundles, which are deliberately not catalog-linked.
+             */
+            link?: boolean;
+        } = {}
+    ): Promise<IAgentDependencyReport> {
+        const report: IAgentDependencyReport = { installed: [], upgraded: [], skipped_edited: [], unchanged: [], paused: [] };
+        for (const agentId of agentIds) {
+            const local = await agentsService.get(agentId);
+            if (!local) {
+                await (opts.install ? opts.install(agentId) : this.install(agentId));
+                // Some catalog manifests still ship `inactive` (a leftover from
+                // per-agent schedules) and `install` copies the manifest's
+                // status, so a workflow made from a template would park on an
+                // agent the Owner never even saw. Nobody paused this one — it
+                // was created a line ago — so activating it overrides no
+                // decision. Contrast the `paused` branch below.
+                await db.updateTable('agents').set({ status: 'active' }).where('id', '=', agentId).where('status', '!=', 'active').execute();
+                report.installed.push(agentId);
+                continue;
+            }
+            // An agent that was already here and is paused stays paused. This
+            // used to be a blanket "activate everything the graph names", which
+            // silently undid a deliberate pause; the builder shows the warning
+            // on the step instead.
+            if (local.status !== 'active') report.paused.push(agentId);
+            // Only a back-linked agent can be upgraded: without a source id
+            // there is nothing to compare against, and `acceptUpgrade` throws.
+            const sourceId = local.marketplace_source_id;
+            if (!opts.link || !sourceId || local.marketplace_pulled_version == null) {
+                report.unchanged.push(agentId);
+                continue;
+            }
+            const catalog = await this.getFull(sourceId);
+            if (!catalog || local.marketplace_pulled_version >= catalog.agent.version) {
+                report.unchanged.push(agentId);
+                continue;
+            }
+            if (await this.hasOwnerEdit(agentId)) {
+                report.skipped_edited.push(agentId);
+                continue;
+            }
+            await this.acceptUpgrade(agentId, ['prompt_md', 'settings_json', 'checklists']);
+            report.upgraded.push(agentId);
+        }
+        return report;
+    },
+};

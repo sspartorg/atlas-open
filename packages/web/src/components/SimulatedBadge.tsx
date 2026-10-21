@@ -1,0 +1,54 @@
+import Tooltip from '@mui/material/Tooltip';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import { ATLAS_PALETTE } from '../theme/tokens.js';
+
+interface Props {
+    size?: 'sm' | 'md';
+}
+
+export function SimulatedBadge({ size = 'md' }: Props) {
+    const isSmall = size === 'sm';
+    const tip =
+        "This output came from simulated mode. Set ATLAS_AI_ENABLED=true in the repo's root .env (or .env.prod for `pnpm run prod`) and restart the API to use the real CLI.";
+    return (
+        <Tooltip title={tip} arrow placement="top">
+            <Box
+                role="img"
+                aria-label="Simulated mode"
+                sx={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 0.5,
+                    px: isSmall ? 0.75 : 1.25,
+                    py: isSmall ? 0.25 : 0.5,
+                    borderRadius: '9999px',
+                    bgcolor: 'rgba(243, 182, 90, 0.12)',
+                    border: '1px solid rgba(243, 182, 90, 0.4)',
+                    // Light mode: a darker amber — the palette orange is 4.1:1
+                    // on this tint, under WCAG AA's 4.5:1 for small text.
+                    color: (t) => (t.palette.mode === 'dark' ? ATLAS_PALETTE.orange : '#7F4F14'),
+                    fontSize: isSmall ? 10 : 11,
+                    fontWeight: 600,
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    lineHeight: 1,
+                    cursor: 'help',
+                    whiteSpace: 'nowrap',
+                }}
+            >
+                <Box
+                    component="span"
+                    className="material-symbols-rounded"
+                    aria-hidden="true"
+                    sx={{ fontSize: isSmall ? 12 : 14 }}
+                >
+                    science
+                </Box>
+                <Typography component="span" sx={{ fontSize: isSmall ? 10 : 11, fontWeight: 600 }}>
+                    Simulated
+                </Typography>
+            </Box>
+        </Tooltip>
+    );
+}

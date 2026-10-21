@@ -1,0 +1,40 @@
+{
+    "$schema": "https://unpkg.com/knip@latest/schema.json",
+    "workspaces": {
+        "packages/api": {
+            "entry": [
+                "src/scripts/*.ts",
+                "src/db/migrations/*.ts",
+                "vitest.powershell.config.ts"
+            ],
+            "ignore": [
+                "src/db/types.ts"
+            ]
+        },
+        "packages/mcp": {
+            "entry": [
+                "scripts/*.mjs"
+            ]
+        },
+        "packages/web": {
+            "ignore": [
+                "public/sw.js",
+                "scripts/seed-visual-baselines.mjs"
+            ]
+        }
+    },
+    "ignore": [
+        "e2e/fixtures/**"
+    ],
+    "ignoreDependencies": [
+        "@secretlint/secretlint-rule-preset-recommend"
+    ],
+    "rules": {
+        "duplicates": "off"
+    },
+    "ignoreBinaries": [
+        "where.exe",
+        "reg",
+        "icacls"
+    ]
+}

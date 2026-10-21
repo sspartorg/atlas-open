@@ -1,0 +1,94 @@
+# Agents
+
+**Route:** `/agents` • **Component:** `packages/web/src/pages/Agents.tsx` • **Slug:** `agents`
+
+## Purpose
+Grid of all agent cards, grouped by category. Per-card actions: open, edit, pause/resume, disable, duplicate, delete, favorite. Header **Add Agent** dialog creates a new agent.
+
+## States
+- **Loading**: 6-card skeleton grid (lines 277-320)
+- **Error**: `AgentsErrorBanner` if runs API fails while agents exist (lines 269-275)
+- **Empty (no agents)**: hero with **Browse the Marketplace** CTA
+- **No matches**: filter empty state (lines 355-369)
+- **Populated**: grouped category sections (lines 371-417)
+
+## UI elements
+**Header**
+- **Fleet performance** (outlined, operational tier, `AgentListHeader`) → `/agents/performance` ([Fleet performance](36-fleet-performance.md)); visible at every width
+- **Add Agent** button (line 256) → opens Add-Agent dialog (lines 426-531)
+
+**Filters (`AgentFilterChips`)**
+- Category chips: software-dev / marketing / content / design + Favorites
+- **Role dropdown** (A08) — narrows to one of the 10 SDLC roles (PO / Spec Writer / Engineer / QA / Architect / Tester / Automation / DevOps / Security / Designer) on top of the category filter. Selecting a specific role excludes autonomous agents (`role_id` NULL) entirely; `All roles` keeps them visible. Per-role counts are computed client-side from `useAgents()` data — no separate fetch.
+- Sort dropdown: last-run / queue-depth / category-role. Queue-depth sorts by the same item-based count the card shows.
+
+**Card grid (`AgentCategorySection` → `AgentCard`)**
+- Spec box: **CLI**, **Model**, **Effort** (the agent's reasoning-effort setting).
+- Agent accent dot + name + `designation · category` sub-label. A08 — when `designation` is empty, `agentSubtitle()` in `agentViewModel.ts` now falls back to the SDLC role label (via `SDLC_ROLE_LABELS[role_id]`) before dropping to category alone. Autonomous agents (`role_id` NULL) still render category alone when designation is empty.
+- Star toggle (line 383) → `favorites.toggle(w.id)` (localStorage)
+- **Status label** — `Paused` / `Failed` / `Running` / `Queued` / `Idle`, from `resolveAgentStatusLabel()` in `pages/agents/agentViewModel.ts`. That is the ONE definition, shared with the Agent Detail hero. Until 2026-09-12 `AgentCard` and `AgentHero` each derived it from `getRuntimeStats().queueDepth`, which counts `queued` AND `in_progress` together, so the labels were inverted: every active-but-idle agent showed **Running** with a pulsing `LiveDot`, an agent with a genuinely in-flight run showed **Queued**, and `AgentCard` called a paused agent **Idle** — the word for active-and-not-running. `getRuntimeStats` now also returns `runningCount`, `queuedCount` and `lastRunErrored`; the `runtimeError` prop still means "the runs query failed to load" and no longer feeds the label.
+- **Queued when items wait** — the queued count fed to the label is `queuedCount + queueDepth`, so an active agent with Ready items but no run yet reads **Queued** (it used to read **Idle** next to "queue 1"). Dot + label colour come from `agentStatusColor()` in `agentViewModel.ts`: Paused slate, Failed `error`, Queued `warning`, Running/Idle `success`.
+- **CLI missing** chip — next to the name when `GET /api/cli/availability` reports the agent's CLI binary unavailable; the tooltip carries the full "`<binary>` is not installed on this machine — runs will fail until it is, or switch the agent to `<available cli>`." copy. The page calls `useCliAvailability()` once and passes `cliWarning` to each card.
+- **queue N** caption — ready + in-progress items assigned to the agent, passed in as the `queueDepth` prop from `useQueueDepthByAgent()` (same count as the Agent Detail hero). Previously run-based (`getRuntimeStats().queueDepth`, now removed).
+- Card click → `/agents/:id`
+- ⋯ Card menu (`AgentCardMenu`):
+  - Open / Edit → `/agents/:id`
+  - Duplicate → opens `DuplicateAgentModal`
+  - Pause/Resume → toggles `status` (PATCH /agents/:id)
+  - Disable/Enable → toggles `status` (PATCH /agents/:id)
+  - Delete → confirmation, then `DELETE /agents/:id`
+
+**Browse the Marketplace** button (empty state) → navigates to `/agents/marketplace`. The marketplace is the only install path; each install creates an `agents` row with `marketplace_source_id` set so the catalog's upgrade / detach / reinstall affordances stay accurate. The prior "Install the Default Agents" button (and the `POST /api/agents/restore-defaults` server endpoint behind it) was removed on 2026-06-04 — it bulk-installed all `AGENT_SEEDS` entries without marketplace back-links, duplicating the same "graveyard" anti-pattern boot-time auto-install had.
+
+## Why these affordances exist
+- **Add Agent (header)** — Creating agents is part of day-to-day work ("I need a marketing agent now"), not a one-time setup; header-pin keeps it close.
+- **Category grouping** — Prevents mixing "code agents" with "content agents" in a single scan.
+- **Star (favorites)** — The Owner reuses 2-3 agents constantly; favoriting pulls them into a dedicated chip filter.
+- **Pause/Resume per agent** — Pause-without-delete preserves config so the Owner can resume after fixing the prompt instead of re-creating.
+- **Duplicate** — Fastest way to specialize a prompt (e.g., "Coder, but for Python"); from-scratch creation re-types the prompt body.
+- **Browse the Marketplace (empty state)** — When the Agents list is empty (fresh install or after deletes), the CTA points the Owner at the marketplace rather than offering a bulk re-install. Every agent install is an explicit per-entry choice, which keeps the agents list curated and the marketplace's `is_installed` / `upgrade_available` flags meaningful.
+
+## Modals / drawers
+- `DuplicateAgentModal` (line 419) — opens with `duplicateAgent` state; on confirm calls `POST /agents/:id/duplicate`.
+- **Add Agent dialog** (lines 426-531) — fields: name, category, CLI, model, accent_color; calls `POST /agents` (line 158).
+
+## Hooks used
+- `useAgents()` — `GET /agents`
+- `useUpdateAgent()`
+- `useRoles()` — `GET /roles`. A08. Infinite cache (the catalog changes only via migration). Surfaces labels for the Role dropdown; the dropdown itself only needs the slug list from `SDLC_ROLES` so a network failure on this hook doesn't break filtering.
+- `useAgentFavorites()` — localStorage
+- `useCliAvailability()` — `GET /cli/availability`, `staleTime` 60s; drives the per-card **CLI missing** chip
+- `useQuery(['runs', 'agents-page'])` — no polling. Invalidated via SSE `run_queued` / `agent_status` / `run_completed`.
+
+## API endpoints touched
+- `GET /api/agents`
+- `GET /api/roles` (A08 — Role dropdown labels + counts)
+- `GET /api/run?limit=500`
+- `GET /api/cli/availability` (CLI missing chips)
+- `POST /api/agents`
+- `PATCH /api/agents/:id`
+- `DELETE /api/agents/:id`
+- `POST /api/agents/:id/duplicate`
+
+## Permissions / guards
+- Post-onboarding only.
+
+## Edge cases / quirks
+- Runs query is event-driven (SSE). Sort-by-last-run may still re-order when a run finishes, but no longer at a fixed 5s cadence.
+- Favorites are persisted in localStorage only — they don't sync across machines.
+- Add-Agent dialog's CLI / model dropdowns are populated from the `cli_models` registry; if Settings → Model Registry is empty, the model dropdown will be empty.
+
+## Connectivity
+- **Pages**: [Agent Detail](16-agent-detail.md) — card click target; [Settings → Model Registry](19-settings.md) — populates the Add Agent dialog's model dropdown.
+- **Routes**: `POST /agents/:id/duplicate` — separate from POST/create because duplicating preserves the prompt body and checklists in one transaction; doing this client-side would re-issue several calls.
+- **Entities**: `agent`, `agent_checklist_item`, `cli_model` (for the model picker).
+
+## Coming soon on this page
+None.
+
+## Previously undocumented controls
+
+- **Import from zip** (`Agents.tsx:613`) — opens `ImportAgentZipModal`.
+- **`PageFab`** (`:622`) — the mobile add-agent affordance.
+
+*(added 2026-09-20 — campaign task-21.)*

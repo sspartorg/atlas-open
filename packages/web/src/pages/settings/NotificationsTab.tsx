@@ -1,0 +1,869 @@
+import { useEffect, useMemo, useState } from 'react';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import Button from '@mui/material/Button';
+import TextField from '@mui/material/TextField';
+import IconButton from '@mui/material/IconButton';
+import InputAdornment from '@mui/material/InputAdornment';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
+import Switch from '@mui/material/Switch';
+import VisibilityOutlined from '@mui/icons-material/VisibilityOutlined';
+import VisibilityOffOutlined from '@mui/icons-material/VisibilityOffOutlined';
+import SendRounded from '@mui/icons-material/SendRounded';
+import {
+    EXTERNAL_NOTIFICATION_EVENT_KEYS,
+    EXTERNAL_NOTIFICATION_EVENT_LABELS,
+    type ExternalNotificationEventKey,
+    type ExternalNotificationProvider,
+} from '@atlas/shared';
+import {
+    useSettings,
+    useUpdateExternalNotification,
+    useUpdateNotifications,
+} from '../../hooks/useSettings.js';
+import { useToast } from '../../hooks/useToast.js';
+import { useQueryClient } from '@tanstack/react-query';
+import { api } from '../../api/api.js';
+import { ATLAS_PALETTE } from '../../theme/tokens.js';
+import { SettingsSection } from './SettingsSection.js';
+import { WebPushRow } from './WebPushRow.js';
+
+const MONO = '"JetBrains Mono", monospace';
+
+function parseToggles(json: string): Record<string, boolean> {
+    try {
+        return JSON.parse(json) as Record<string, boolean>;
+    } catch {
+        return {};
+    }
+}
+
+export function NotificationsTab() {
+    const { data: settings } = useSettings();
+    const updateExternal = useUpdateExternalNotification();
+    const updateNotifications = useUpdateNotifications();
+    const toast = useToast();
+
+    const qc = useQueryClient();
+    const [provider, setProvider] = useState<ExternalNotificationProvider>(
+        settings?.external_notification_provider ?? 'telegram'
+    );
+    const [token, setToken] = useState(settings?.external_notification_token ?? '');
+    const [chatId, setChatId] = useState(settings?.external_notification_chat_id ?? '');
+    const [webhookUrl, setWebhookUrl] = useState(settings?.external_notification_webhook_url ?? '');
+    const [showToken, setShowToken] = useState(false);
+    const [showWebhook, setShowWebhook] = useState(false);
+    const [testing, setTesting] = useState(false);
+    // Batch-9 audit (enterprise-secrets read model): GET /api/settings
+    // returns `external_notification_token` and `_webhook_url` as null
+    // regardless of storage state. The `_set` booleans tell the UI
+    // whether a value is stored; these transient state slots hold the
+    // one-shot reveal returned by the dedicated reveal endpoints. Both
+    // clear after 30s (see the effect below).
+    const [revealedToken, setRevealedToken] = useState<string | null>(null);
+    const [revealedWebhook, setRevealedWebhook] = useState<string | null>(null);
+    const tokenIsStored = Boolean(
+        (settings as unknown as { external_notification_token_set?: boolean } | undefined)
+            ?.external_notification_token_set
+    );
+    const webhookIsStored = Boolean(
+        (settings as unknown as { external_notification_webhook_url_set?: boolean } | undefined)
+            ?.external_notification_webhook_url_set
+    );
+
+    useEffect(() => {
+        if (revealedToken === null) return;
+        const t = setTimeout(() => setRevealedToken(null), 30_000);
+        return () => clearTimeout(t);
+    }, [revealedToken]);
+    useEffect(() => {
+        if (revealedWebhook === null) return;
+        const t = setTimeout(() => setRevealedWebhook(null), 30_000);
+        return () => clearTimeout(t);
+    }, [revealedWebhook]);
+
+    async function handleRevealToken(): Promise<void> {
+        try {
+            const res = await api.settings.revealExternalNotificationToken();
+            setRevealedToken(res.value);
+        } catch (err) {
+            toast.show({
+                message: 'Could not reveal token',
+                detail: err instanceof Error ? err.message : String(err),
+            });
+        }
+    }
+    async function handleRevealWebhook(): Promise<void> {
+        try {
+            const res = await api.settings.revealExternalNotificationWebhookUrl();
+            setRevealedWebhook(res.value);
+        } catch (err) {
+            toast.show({
+                message: 'Could not reveal webhook URL',
+                detail: err instanceof Error ? err.message : String(err),
+            });
+        }
+    }
+
+    // Pill state is derived from settings — survives reload, resets to "Untested"
+    // whenever the user edits the token or chat ID (cleared in the service).
+    const lastTestOk = settings?.external_notification_last_test_ok;
+    const endpointLabel = settings?.external_notification_endpoint_label ?? null;
+    const connection: 'unknown' | 'ok' | 'bad' =
+        lastTestOk === 1 ? 'ok' : lastTestOk === 0 ? 'bad' : 'unknown';
+    const connectionDetail =
+        connection === 'ok'
+            ? endpointLabel
+                ? `Connected · ${endpointLabel}`
+                : 'Connected · message delivered'
+            : '';
+
+    // Follow each saved value only when THAT value changes. Re-seeding every
+    // field on any settings refetch wiped whatever was being typed when an
+    // unrelated save (provider switch, token blur) came back. Token and
+    // webhook never round-trip (redacted), so they clear on their own save.
+    const savedProvider = settings?.external_notification_provider ?? 'telegram';
+    const savedChatId = settings?.external_notification_chat_id ?? '';
+    useEffect(() => {
+        setProvider(savedProvider);
+    }, [savedProvider]);
+    useEffect(() => {
+        setChatId(savedChatId);
+    }, [savedChatId]);
+
+    function commitProvider(next: ExternalNotificationProvider) {
+        if (next === (settings?.external_notification_provider ?? 'telegram')) return;
+        setProvider(next);
+        updateExternal.mutate(
+            { external_notification_provider: next },
+            { onSuccess: () => toast.show({ message: `Provider set to ${providerLabel(next)}` }) }
+        );
+    }
+
+    function commitWebhookUrl() {
+        // Batch-9 enterprise-secrets read model: settings.external_notification_webhook_url
+        // is ALWAYS null from the wire, so local `webhookUrl` seeded via
+        // the useEffect below is ALSO always ''. Sending null when the
+        // user hasn't typed a new value would DESTROY the stored ciphertext.
+        // Only fire the write when the Owner has actually typed a new URL.
+        const trimmed = webhookUrl.trim();
+        if (trimmed.length === 0) return;
+        updateExternal.mutate(
+            { external_notification_webhook_url: trimmed },
+            {
+                onSuccess: () => {
+                    setWebhookUrl('');
+                    toast.show({ message: 'Webhook URL saved' });
+                },
+            }
+        );
+    }
+
+    // Button is enabled when there is anything to test — either the user
+    // just typed a value in the input (local state) OR the server has one
+    // stored (the `_set` booleans exposed by the Batch-9 read-model). The
+    // local-state slots for `token` and `webhookUrl` are always empty on
+    // page load because GET /api/settings redacts those two fields; without
+    // the OR-on-stored fallback, the button stayed disabled forever after
+    // the audit landed even when a value was actually saved.
+    // `chatId` is not a secret, so it round-trips normally on GET.
+    const canTest =
+        provider === 'telegram'
+            ? (!!token.trim() || tokenIsStored) && !!chatId.trim()
+            : !!webhookUrl.trim() || webhookIsStored;
+
+    const toggles = useMemo(
+        () => parseToggles(settings?.external_notification_event_toggles ?? '{}'),
+        [settings?.external_notification_event_toggles]
+    );
+
+    function isToggled(key: ExternalNotificationEventKey): boolean {
+        // Most events default ON unless the Owner explicitly toggled off.
+        // `terminal.waiting_for_input` defaults OFF (high-volume opt-in)
+        // and requires an explicit `true` in the toggles map. Mirrors
+        // shouldSendForEvent in api/services/external-notifications.ts.
+        if (key === 'terminal.waiting_for_input') return toggles[key] === true;
+        return toggles[key] !== false;
+    }
+
+    function setToggle(key: ExternalNotificationEventKey, value: boolean) {
+        const next = { ...toggles, [key]: value };
+        updateNotifications.mutate(
+            { external_notification_event_toggles: next },
+            { onSuccess: () => toast.show({ message: 'Notification preferences saved' }) }
+        );
+    }
+
+    function commitConnection() {
+        // Batch-9 enterprise-secrets read model: settings.external_notification_token
+        // is ALWAYS null from the wire, so local `token` is either '' (never
+        // typed / cleared after save via the useEffect above) or contains a
+        // new value the user is trying to store. Sending null for a blank
+        // token would DESTROY the stored ciphertext — that fires every time
+        // the user commits a chat-ID edit with an untouched token field.
+        // Fix: only include a field in the batch when the user has actually
+        // changed it. To clear the token, the Owner must delete-and-save
+        // the credential itself (a future explicit affordance).
+        const trimmedToken = token.trim();
+        const trimmedChatId = chatId.trim();
+        const currentChatId = settings?.external_notification_chat_id ?? '';
+        const patch: {
+            external_notification_token?: string;
+            external_notification_chat_id?: string | null;
+        } = {};
+        if (trimmedToken.length > 0) patch.external_notification_token = trimmedToken;
+        if (trimmedChatId !== currentChatId) {
+            patch.external_notification_chat_id = trimmedChatId || null;
+        }
+        if (Object.keys(patch).length === 0) return;
+        updateExternal.mutate(patch, {
+            onSuccess: () => {
+                if (patch.external_notification_token) setToken('');
+                toast.show({ message: 'Notification channel saved' });
+            },
+        });
+    }
+
+    async function handleTest() {
+        setTesting(true);
+        try {
+            const r = await api.settings.testExternalNotification();
+            if (r.ok) {
+                toast.show({ message: 'Test message sent' });
+            } else {
+                toast.show(
+                    r.error
+                        ? { message: 'Test failed', detail: r.error }
+                        : { message: 'Test failed' }
+                );
+            }
+        } catch (err) {
+            // A failed send comes back as HTTP 400, which the client throws.
+            toast.show({
+                message: 'Test failed',
+                detail: err instanceof Error ? err.message : String(err),
+            });
+        } finally {
+            // The API persisted last_test_ok / endpoint_label either way;
+            // refetch so the pill shows Connected or Not connected.
+            await qc.invalidateQueries({ queryKey: ['settings'] });
+            setTesting(false);
+        }
+    }
+
+    const detectedTimezone = useMemo(
+        () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+        []
+    );
+
+    // Auto-save timezone the first time the tab loads if not yet set, so the
+    // quiet-hours math has a sensible default.
+    useEffect(() => {
+        if (settings && !settings.quiet_hours_timezone) {
+            updateNotifications.mutate({ quiet_hours_timezone: detectedTimezone });
+        }
+    }, [settings?.id]);
+
+    // Quiet hours, reminders' daily / weekly / cron schedules and every time
+    // the Reminders page shows run in this zone.
+    const savedZone = settings?.quiet_hours_timezone ?? detectedTimezone;
+    const [quietFrom, setQuietFrom] = useState(settings?.quiet_hours_from ?? '22:00');
+    const [quietTo, setQuietTo] = useState(settings?.quiet_hours_to ?? '08:00');
+    const quietEnabled = settings?.quiet_hours_enabled === 1;
+
+    useEffect(() => {
+        if (settings?.quiet_hours_from) setQuietFrom(settings.quiet_hours_from);
+    }, [settings?.quiet_hours_from]);
+    useEffect(() => {
+        if (settings?.quiet_hours_to) setQuietTo(settings.quiet_hours_to);
+    }, [settings?.quiet_hours_to]);
+
+    // Terminal idle threshold (minutes). Server stores seconds; UI prefers
+    // minutes because the practical range is 1-60.
+    const idleMinutesFromSettings = Math.round(
+        (settings?.terminal_idle_notify_seconds ?? 300) / 60
+    );
+    const [idleMinutes, setIdleMinutes] = useState(idleMinutesFromSettings);
+    useEffect(() => {
+        setIdleMinutes(idleMinutesFromSettings);
+    }, [idleMinutesFromSettings]);
+
+    function commitIdleMinutes() {
+        if (idleMinutes === idleMinutesFromSettings) return;
+        if (!Number.isFinite(idleMinutes) || idleMinutes < 1 || idleMinutes > 60) {
+            setIdleMinutes(idleMinutesFromSettings); // revert invalid input
+            return;
+        }
+        updateNotifications.mutate(
+            { terminal_idle_notify_seconds: idleMinutes * 60 },
+            { onSuccess: () => toast.show({ message: 'Idle threshold saved' }) }
+        );
+    }
+
+    function commitQuiet() {
+        // Skip writes when the feature is off — the inputs are disabled in
+        // that state, but onBlur can still fire if the toggle flips off
+        // while a field is focused.
+        if (!quietEnabled) return;
+        const fromOk = /^([01]\d|2[0-3]):[0-5]\d$/.test(quietFrom);
+        const toOk = /^([01]\d|2[0-3]):[0-5]\d$/.test(quietTo);
+        if (!fromOk || !toOk) {
+            // Don't leave an unsaved value looking saved: snap back and say why.
+            setQuietFrom(settings?.quiet_hours_from ?? '22:00');
+            setQuietTo(settings?.quiet_hours_to ?? '08:00');
+            toast.show({
+                message: 'Quiet hours not saved',
+                detail: 'Use 24-hour HH:MM, e.g. 22:00.',
+            });
+            return;
+        }
+        if (quietFrom === settings?.quiet_hours_from && quietTo === settings?.quiet_hours_to) {
+            return;
+        }
+        updateNotifications.mutate(
+            {
+                quiet_hours_from: quietFrom,
+                quiet_hours_to: quietTo,
+                quiet_hours_timezone: settings?.quiet_hours_timezone ?? detectedTimezone,
+            },
+            { onSuccess: () => toast.show({ message: 'Quiet hours saved' }) }
+        );
+    }
+
+    function setQuietHoursEnabled(value: boolean) {
+        // Flipping ON for the first time: also seed from/to/timezone in case
+        // the row was created without them so the window applies immediately.
+        const patch: {
+            quiet_hours_enabled: number;
+            quiet_hours_from?: string;
+            quiet_hours_to?: string;
+            quiet_hours_timezone?: string;
+        } = { quiet_hours_enabled: value ? 1 : 0 };
+        if (value) {
+            if (!settings?.quiet_hours_from) patch.quiet_hours_from = quietFrom;
+            if (!settings?.quiet_hours_to) patch.quiet_hours_to = quietTo;
+            if (!settings?.quiet_hours_timezone) patch.quiet_hours_timezone = detectedTimezone;
+        }
+        updateNotifications.mutate(patch, {
+            onSuccess: () =>
+                toast.show({
+                    message: value ? 'Quiet hours enabled' : 'Quiet hours disabled',
+                }),
+        });
+    }
+
+    return (
+        <Box>
+            <SettingsSection
+                title="External Notification Channel"
+                subtitle="Delivered via the outbound provider you configure below. Switch provider to change the transport."
+            >
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                    <Row label="Provider">
+                        <Select
+                            size="small"
+                            value={provider}
+                            inputProps={{ 'aria-label': 'Notification provider' }}
+                            onChange={(e) =>
+                                commitProvider(e.target.value as ExternalNotificationProvider)
+                            }
+                            sx={{ minWidth: 240 }}
+                        >
+                            <MenuItem value="telegram">Telegram</MenuItem>
+                            <MenuItem value="teams">Microsoft Teams</MenuItem>
+                        </Select>
+                    </Row>
+                    <Divider />
+                    {provider === 'telegram' && (
+                        <>
+                            <Row label="Bot Token *">
+                                <TextField
+                                    fullWidth
+                                    size="small"
+                                    type={showToken || revealedToken !== null ? 'text' : 'password'}
+                                    value={revealedToken ?? token}
+                                    onChange={(e) => {
+                                        // Editing clears any active reveal.
+                                        setRevealedToken(null);
+                                        setToken(e.target.value);
+                                    }}
+                                    onBlur={commitConnection}
+                                    placeholder={
+                                        tokenIsStored && !token
+                                            ? '••••  Stored — use the eye to reveal, or type to replace'
+                                            : '123456789:ABC-def…'
+                                    }
+                                    // Mono font for the visible token, system font when
+                                    // masked — mono's bullets are wide and look chunky
+                                    // on iOS where the input is forced to 16 px.
+                                    inputProps={{
+                                        'aria-label': 'Telegram bot token',
+                                        style: {
+                                            fontFamily: showToken ? MONO : 'inherit',
+                                            fontSize: 13,
+                                            letterSpacing: showToken ? 'normal' : '0.05em',
+                                        },
+                                    }}
+                                    slotProps={{
+                                        input: {
+                                            // If a revealed value is displayed, prevent
+                                            // accidental edits — Owner explicitly
+                                            // hides or waits for auto-mask. This MUST
+                                            // live in `slotProps.input`: MUI v7 ignores
+                                            // the deprecated `InputProps` entirely once
+                                            // `slotProps.input` is present, so the
+                                            // read-only guard silently did nothing here
+                                            // and one stray keystroke on a revealed
+                                            // token committed a mangled value on blur.
+                                            readOnly: revealedToken !== null,
+                                            endAdornment: (
+                                                <InputAdornment position="end">
+                                                    <IconButton
+                                                        size="small"
+                                                        // Keep focus in the field: a blur
+                                                        // saves, so clicking the eye to check
+                                                        // a typed value would commit it.
+                                                        onMouseDown={(e) => e.preventDefault()}
+                                                        onClick={() => {
+                                                            // Enterprise read model:
+                                                            //   - Empty typed + stored value → fetch reveal
+                                                            //   - Otherwise → toggle local show
+                                                            if (tokenIsStored && !token) {
+                                                                if (revealedToken !== null) {
+                                                                    setRevealedToken(null);
+                                                                } else {
+                                                                    void handleRevealToken();
+                                                                }
+                                                            } else {
+                                                                setShowToken((v) => !v);
+                                                            }
+                                                        }}
+                                                        aria-label={
+                                                            showToken || revealedToken !== null
+                                                                ? 'Hide token'
+                                                                : 'Reveal token'
+                                                        }
+                                                        sx={{ color: ATLAS_PALETTE.slate60 }}
+                                                    >
+                                                        {showToken || revealedToken !== null ? (
+                                                            <VisibilityOffOutlined
+                                                                sx={{ fontSize: 18 }}
+                                                            />
+                                                        ) : (
+                                                            <VisibilityOutlined
+                                                                sx={{ fontSize: 18 }}
+                                                            />
+                                                        )}
+                                                    </IconButton>
+                                                </InputAdornment>
+                                            ),
+                                        },
+                                    }}
+                                />
+                            </Row>
+                            <Divider />
+                            <Row label="Chat ID *">
+                                <TextField
+                                    fullWidth
+                                    size="small"
+                                    value={chatId}
+                                    onChange={(e) => setChatId(e.target.value)}
+                                    onBlur={commitConnection}
+                                    placeholder="-100123456789"
+                                    inputProps={{
+                                        'aria-label': 'Telegram chat ID',
+                                        style: { fontFamily: MONO, fontSize: 13 },
+                                    }}
+                                />
+                            </Row>
+                            <Divider />
+                        </>
+                    )}
+                    {provider === 'teams' && (
+                        <>
+                            <Row label="Webhook URL *">
+                                <TextField
+                                    fullWidth
+                                    size="small"
+                                    type={
+                                        showWebhook || revealedWebhook !== null
+                                            ? 'text'
+                                            : 'password'
+                                    }
+                                    value={revealedWebhook ?? webhookUrl}
+                                    onChange={(e) => {
+                                        setRevealedWebhook(null);
+                                        setWebhookUrl(e.target.value);
+                                    }}
+                                    onBlur={commitWebhookUrl}
+                                    placeholder={
+                                        webhookIsStored && !webhookUrl
+                                            ? '••••  Stored — use the eye to reveal, or type to replace'
+                                            : 'https://…powerautomate.com/…/triggers/manual/paths/invoke?…sig=…'
+                                    }
+                                    inputProps={{
+                                        'aria-label': 'Teams webhook URL',
+                                        style: {
+                                            fontFamily:
+                                                showWebhook || revealedWebhook !== null
+                                                    ? MONO
+                                                    : 'inherit',
+                                            fontSize: 13,
+                                            letterSpacing:
+                                                showWebhook || revealedWebhook !== null
+                                                    ? 'normal'
+                                                    : '0.05em',
+                                        },
+                                    }}
+                                    slotProps={{
+                                        input: {
+                                            // Same as the token field above: `readOnly`
+                                            // has to be here, not on `InputProps`, or
+                                            // MUI v7 drops it.
+                                            readOnly: revealedWebhook !== null,
+                                            endAdornment: (
+                                                <InputAdornment position="end">
+                                                    <IconButton
+                                                        size="small"
+                                                        // Keep focus in the field: a blur
+                                                        // saves, so clicking the eye to check
+                                                        // a typed value would commit it.
+                                                        onMouseDown={(e) => e.preventDefault()}
+                                                        onClick={() => {
+                                                            if (webhookIsStored && !webhookUrl) {
+                                                                if (revealedWebhook !== null) {
+                                                                    setRevealedWebhook(null);
+                                                                } else {
+                                                                    void handleRevealWebhook();
+                                                                }
+                                                            } else {
+                                                                setShowWebhook((v) => !v);
+                                                            }
+                                                        }}
+                                                        aria-label={
+                                                            showWebhook || revealedWebhook !== null
+                                                                ? 'Hide webhook URL'
+                                                                : 'Reveal webhook URL'
+                                                        }
+                                                        sx={{ color: ATLAS_PALETTE.slate60 }}
+                                                    >
+                                                        {showWebhook || revealedWebhook !== null ? (
+                                                            <VisibilityOffOutlined
+                                                                sx={{ fontSize: 18 }}
+                                                            />
+                                                        ) : (
+                                                            <VisibilityOutlined
+                                                                sx={{ fontSize: 18 }}
+                                                            />
+                                                        )}
+                                                    </IconButton>
+                                                </InputAdornment>
+                                            ),
+                                        },
+                                    }}
+                                />
+                            </Row>
+                            <Divider />
+                        </>
+                    )}
+                    <Row label="Connection">
+                        <Box
+                            sx={{
+                                display: 'flex',
+                                flexDirection: { xs: 'column', sm: 'row' },
+                                alignItems: { xs: 'flex-start', sm: 'center' },
+                                gap: 2,
+                                flexWrap: 'wrap',
+                            }}
+                        >
+                            <Box
+                                sx={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 1,
+                                    bgcolor:
+                                        connection === 'ok'
+                                            ? 'rgba(49,171,70,.12)'
+                                            : connection === 'bad'
+                                              ? 'rgba(220,38,38,.10)'
+                                              : ATLAS_PALETTE.slate08,
+                                    color:
+                                        connection === 'ok'
+                                            ? ATLAS_PALETTE.success
+                                            : connection === 'bad'
+                                              ? ATLAS_PALETTE.error
+                                              : ATLAS_PALETTE.slate60,
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    px: 2,
+                                    py: 0.5,
+                                    borderRadius: '9999px',
+                                }}
+                            >
+                                <Box
+                                    sx={{
+                                        width: 6,
+                                        height: 6,
+                                        borderRadius: '50%',
+                                        bgcolor:
+                                            connection === 'ok'
+                                                ? ATLAS_PALETTE.success
+                                                : connection === 'bad'
+                                                  ? ATLAS_PALETTE.error
+                                                  : ATLAS_PALETTE.slate40,
+                                    }}
+                                />
+                                {connection === 'ok'
+                                    ? connectionDetail
+                                    : connection === 'bad'
+                                      ? 'Not connected'
+                                      : 'Untested'}
+                            </Box>
+                            <Button
+                                variant="outlined"
+                                startIcon={<SendRounded sx={{ fontSize: 14 }} />}
+                                onClick={() => void handleTest()}
+                                disabled={!canTest || testing}
+                                sx={{ textTransform: 'none' }}
+                            >
+                                {testing ? 'Sending…' : 'Send Test Message'}
+                            </Button>
+                        </Box>
+                    </Row>
+                </Box>
+            </SettingsSection>
+
+            <SettingsSection
+                title="Browser Push"
+                subtitle="Get a native browser notification for Atlas events on this device. It follows the same per-event switches and quiet hours as Telegram and Teams."
+            >
+                <WebPushRow />
+            </SettingsSection>
+
+            <SettingsSection
+                title="Per-Event Notifications"
+                subtitle="Each switch controls Telegram / Teams and browser push for that event. In-app notifications are always created; a send skipped here shows as Skipped in the Notification Log."
+            >
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                    {EXTERNAL_NOTIFICATION_EVENT_KEYS.map((key, i) => {
+                        const meta = EXTERNAL_NOTIFICATION_EVENT_LABELS[key];
+                        return (
+                            <Box
+                                key={key}
+                                sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: 3,
+                                    py: 2,
+                                    borderTop:
+                                        i === 0 ? 'none' : `1px solid ${ATLAS_PALETTE.slate06}`,
+                                }}
+                            >
+                                <Box>
+                                    <Typography
+                                        sx={{
+                                            fontSize: 13,
+                                            fontWeight: 500,
+                                            color: ATLAS_PALETTE.slate,
+                                        }}
+                                    >
+                                        {meta.title}
+                                    </Typography>
+                                    <Typography
+                                        sx={{
+                                            fontFamily: MONO,
+                                            fontSize: 11,
+                                            color: ATLAS_PALETTE.slate60,
+                                            mt: 0.25,
+                                        }}
+                                    >
+                                        {meta.sub}
+                                    </Typography>
+                                </Box>
+                                <Switch
+                                    checked={isToggled(key)}
+                                    onChange={(_, v) => setToggle(key, v)}
+                                    color="success"
+                                    slotProps={{ input: { 'aria-label': meta.title } }}
+                                />
+                            </Box>
+                        );
+                    })}
+                </Box>
+            </SettingsSection>
+
+            <SettingsSection
+                title="Quiet Hours"
+                subtitle="During quiet hours, Telegram and Teams messages and browser push are held and sent when the window ends, marked with the time they were raised. In-app notifications still arrive right away. Set From and To to the same time to turn the window off."
+            >
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                    <Row label="Enable">
+                        <Box
+                            sx={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: 3,
+                            }}
+                        >
+                            <Typography sx={{ fontSize: 12, color: ATLAS_PALETTE.slate60 }}>
+                                {!quietEnabled
+                                    ? 'Off — external notifications deliver at any hour.'
+                                    : quietFrom === quietTo
+                                      ? 'From and To are the same, so there is no quiet window.'
+                                      : 'External notifications are held between the times below.'}
+                            </Typography>
+                            <Switch
+                                checked={quietEnabled}
+                                onChange={(_, v) => setQuietHoursEnabled(v)}
+                                color="success"
+                                slotProps={{ input: { 'aria-label': 'Quiet hours' } }}
+                            />
+                        </Box>
+                    </Row>
+                    <Divider />
+                    <Row label="From">
+                        <TextField
+                            size="small"
+                            value={quietFrom}
+                            onChange={(e) => setQuietFrom(e.target.value)}
+                            onBlur={commitQuiet}
+                            placeholder="22:00"
+                            disabled={!quietEnabled}
+                            inputProps={{
+                                'aria-label': 'Quiet hours from',
+                                style: { fontFamily: MONO, fontSize: 13, maxWidth: 120 },
+                            }}
+                            sx={{ maxWidth: 160 }}
+                        />
+                    </Row>
+                    <Divider />
+                    <Row label="To">
+                        <TextField
+                            size="small"
+                            value={quietTo}
+                            onChange={(e) => setQuietTo(e.target.value)}
+                            onBlur={commitQuiet}
+                            placeholder="08:00"
+                            disabled={!quietEnabled}
+                            inputProps={{
+                                'aria-label': 'Quiet hours to',
+                                style: { fontFamily: MONO, fontSize: 13, maxWidth: 120 },
+                            }}
+                            sx={{ maxWidth: 160 }}
+                        />
+                    </Row>
+                    <Divider />
+                    <Row label="Time Zone">
+                        <Box
+                            sx={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                flexWrap: 'wrap',
+                                gap: 2,
+                            }}
+                        >
+                            <Typography
+                                data-testid="owner-timezone"
+                                sx={{ fontFamily: MONO, fontSize: 13, color: ATLAS_PALETTE.slate }}
+                            >
+                                {savedZone}
+                            </Typography>
+                            {savedZone === detectedTimezone ? (
+                                <Typography sx={{ fontSize: 11, color: ATLAS_PALETTE.slate60 }}>
+                                    (this device&apos;s zone)
+                                </Typography>
+                            ) : (
+                                <>
+                                    <Typography sx={{ fontSize: 11, color: ATLAS_PALETTE.slate60 }}>
+                                        (this device is in {detectedTimezone})
+                                    </Typography>
+                                    <Button
+                                        size="small"
+                                        variant="outlined"
+                                        onClick={() =>
+                                            updateNotifications.mutate(
+                                                { quiet_hours_timezone: detectedTimezone },
+                                                {
+                                                    onSuccess: () =>
+                                                        toast.show({ message: `Time zone set to ${detectedTimezone}` }),
+                                                },
+                                            )
+                                        }
+                                        sx={{ textTransform: 'none' }}
+                                    >
+                                        Use {detectedTimezone}
+                                    </Button>
+                                </>
+                            )}
+                        </Box>
+                    </Row>
+                </Box>
+            </SettingsSection>
+
+            <SettingsSection
+                title="Terminal Idle Notifications"
+                subtitle="When a Terminal session sees no PTY output and no keystrokes for this many minutes, Atlas fires a 'needs you' notification (in-app + web push). Lower = faster reminders, higher = fewer false alarms during long-running commands."
+            >
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                    <Row label="Threshold (minutes)">
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                            <TextField
+                                size="small"
+                                type="number"
+                                value={idleMinutes}
+                                onChange={(e) => setIdleMinutes(Number(e.target.value))}
+                                onBlur={commitIdleMinutes}
+                                inputProps={{
+                                    'aria-label': 'Terminal idle threshold in minutes',
+                                    min: 1,
+                                    max: 60,
+                                    step: 1,
+                                }}
+                                sx={{ width: 90 }}
+                            />
+                            <Typography sx={{ fontSize: 12, color: ATLAS_PALETTE.slate60 }}>
+                                Valid range 1&ndash;60 min. Default 5 min.
+                            </Typography>
+                        </Box>
+                    </Row>
+                </Box>
+            </SettingsSection>
+        </Box>
+    );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+    return (
+        <Box
+            sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', md: '180px 1fr' },
+                gap: { xs: 1, md: 4 },
+                alignItems: { xs: 'stretch', md: 'center' },
+                py: 2,
+            }}
+        >
+            <Typography
+                sx={{
+                    fontSize: 13,
+                    color: ATLAS_PALETTE.slate60,
+                    fontWeight: 500,
+                }}
+            >
+                {label}
+            </Typography>
+            <Box sx={{ minWidth: 0 }}>{children}</Box>
+        </Box>
+    );
+}
+
+function Divider() {
+    return <Box sx={{ borderTop: `1px solid ${ATLAS_PALETTE.slate06}` }} />;
+}
+
+function providerLabel(p: ExternalNotificationProvider): string {
+    return p === 'teams' ? 'Microsoft Teams' : 'Telegram';
+}

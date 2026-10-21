@@ -1,0 +1,152 @@
+# Agent Detail
+
+**Route:** `/agents/:id` • **Component:** `packages/web/src/pages/AgentDetail.tsx` • **Slug:** `agents`
+
+## Purpose
+Edit an agent's configuration, prompt, quality checklist, procedural memory, and inspect its tests, measured performance and runs. 6 tabs via `?tab=` query param. Agents carry no schedules, handoff rules, round caps or git-delivery flags: a Task's run handles worktree, commit, push and PR. Per-agent Allowed Tools picker was removed by B14 (`d3cc9bf`) — spawned CLIs inherit Owner's user-level MCP config; the constitution carries `FORBIDDEN_TOOLS_SECTION` as the safety net.
+
+## States
+- **Loading**: centered spinner
+- **Not found**: message
+- **Populated**: Breadcrumbs + `AgentHero` + tabs + `AgentSidebar`
+
+## Hero (`AgentHero`)
+- Inline-editable name (click → text field; Enter / blur saves via `PATCH /agents/:id { name }`); a `designation · category` subtitle line below (category alone when designation is empty, via `agentSubtitle()` in `agentViewModel.ts`).
+- **Run now** → opens `RunNowDialog` — a project-level run with **no item** (item-attached ad-hoc runs were removed; a Task runs by being assigned to the agent). Two actions:
+  - **Run now** → `POST /api/run` `{ agent_id, issue_type: null, issue_id: null }` → navigates to `/agents/:id/runs/:runId`.
+  - **Preview prompt** → `POST /api/agents/:id/compile-prompt` with no item → opens `PromptPreviewDialog` showing the exact markdown that would be piped to the CLI on Run; offers **Copy** + **Download .md**. No spawn, no DB write — for inspection before committing to a real run.
+- **Queue: N items** — ready + in-progress Tasks and sub-tasks assigned to this agent, (`useQueueDepthByAgent()` → `GET /api/counts/queue-by-agent`, counted in SQL; until 2026-09-28 the page downloaded every Task and sub-task to count them — 3.5 MB on a large workspace). Until 2026-09-14 it counted only `queued` / `in_progress` agent runs, so an agent with Ready items but no runs showed "Queue: 0 items".
+- **Status label + dot** — same `resolveAgentStatusLabel()` as the Agents card, fed `queuedCount + queueDepth` so Ready items with no run read **Queued**, not **Idle**. Colour from `agentStatusColor()`: a **Failed** label now has an `error` dot (it was green).
+- **CLI not installed** warning — `CliUnavailableAlert` (MUI `Alert severity="warning"`) spans the hero when `GET /api/cli/availability` says the agent's CLI binary is missing: "`<binary>` is not installed on this machine — runs will fail until it is, or switch the agent to `<available cli>`." Renders nothing while availability is loading/unknown.
+- **Pause/Resume** → `handlePauseToggle()` → `PATCH /agents/:id`
+- `AgentCardMenu` (more actions) — Duplicate (opens modal), Delete (mutation)
+
+## Why these affordances exist
+- **6 tabs (Overview / Prompt / Tests / Performance / Runs / Memory)** — Each tab is a distinct authoring lifecycle (config vs. prompt vs. qualification vs. measurement vs. observability vs. self-corrections); tabs let each own its full width. The Handoffs tab was removed; an agent hands nothing on — it runs its Task end to end. The Test Run tab was removed with the agent-qualification work: it fired an ad-hoc CLI ping and kept nothing, which is the gap the Tests tab exists to close.
+- **Memory tab** — Procedural memory captures "what went wrong last time" without polluting the prompt body. Splitting it out means the Owner can correct a regression in seconds (edit one paragraph in memory.md) instead of bumping the prompt version. Server-side storage means the corrections survive across machines, unlike the localStorage-only prompt history.
+- **Run now dialog** — Starts a no-item run straight from the agent page; the success navigation drops directly into the run detail. The dialog's **Preview prompt** sibling answers "what is the agent actually being told?" without burning a real run — the same `buildPrompt()` call the runner makes, rendered + downloadable as `.md`.
+- **Pause/Resume in hero** — Pausing without leaving the page prevents wasted runs while the prompt is being re-drafted.
+- **Prompt version history** — Prompt edits regress agent behavior often; a localStorage trail is the cheapest "undo" pathway, with "Make active" for one-click revert.
+- **Quality checklist** — The agent reports each check in its `atlas-outcome`; a failed required check parks the Task's run on the Owner, whose reply re-runs the agent, so the Owner decides what failure means before runs hit it.
+
+## Marketplace upgrade banner
+
+When the agent has a marketplace source and a newer version is available, `MarketplaceUpgradeBanner` (`AgentDetail.tsx:30`) renders above the tabs with an "Upgrade now" CTA that opens a diff modal showing the marketplace catalog version's prompt vs the installed version. Owner-only — silent for agents installed without a marketplace source.
+
+## Tabs
+
+Tab switching is plain `useTabParam(tabSlug)`. (The legacy `LinearProgress` mid-flight indicator + `useTransition` wrapper were removed — `AgentDetail.tsx:70-73` carries the inline removal note.) A `RefreshButton` sits in the breadcrumb row to manually re-fetch when the SSE channel is missed.
+
+### Overview (`OverviewTab`)
+- **Edit description** → inline edit; Save calls `PATCH /agents/:id` with `{ description }`; the local toast confirms server persistence.
+- **CLI** dropdown — `claude` / `copilot` / `ollama` (full-width, matches Model). Switching CLI auto-selects the new CLI's registry default (first `cli_models` row by `sort_order`, then name — `modelsForCli()` in `ModelSelect.tsx`); switching back restores the saved model. Walkthrough: copilot→claude used to leave "claude-sonnet-4.6 (not in registry)".
+- A `CliUnavailableAlert` sits at the top of **Configuration** for the *draft* CLI, so picking an uninstalled CLI warns before Save.
+- **Model** dropdown — backed by `cli_models`
+- **Effort** dropdown — `none` … `max`.
+- **Save changes** → `handleSaveConfig()` → `PATCH /agents/:id` with `{ cli, model, effort }`; `isDirty` tracks those three fields.
+- **Discard** → revert local state
+- **Role section** — Designation, Memory cadence; **Save role** → `PATCH /agents/:id` `{ designation, memory_cadence }`.
+- **Quality checklist** card (`QualityChecklistCard`, between Role and Commit discipline) — loads `GET /agents/:id/checklists`; rows are editable labels with a delete icon (opens a confirm dialog, local until saved); **Add check**; **Save checklist** → `PUT /agents/:id/checklists` `{ items: [{ label, sort_order, required }] }`. Copy: "The agent reports each check in its outcome. A failed required check stops the work from being delivered." (the run parks on the Owner). (Moved here from the removed Handoffs tab; formerly "Pre-handoff checklist".)
+- **Commit discipline** tile — last 10 commit verifications as coloured dots.
+- Removed: Schedule presets / cron / Next pass preview, Concurrent runs, Max rounds, Item required, Requires worktree, Push code, Raises PR.
+
+### Prompt (`PromptTab`)
+- Guardrails-style **Edit / Split / Preview** view-mode toggle on the editor card. The editor pane is a plain `<textarea>` (mono font); the preview pane renders via the shared `MarkdownPreview` component. Header shows `Active prompt · v{n}` and the slugified file name; footer shows saved-status + line count + Save / Discard.
+- Save calls `PATCH /agents/:id` with `{ prompt_md }`. The service increments `prompt_version` and inserts a row into `agent_prompt_versions` in the same transaction.
+- **No reviewer prompt editor.** The two-persona model (`reviewer_prompt_md`, `submit_review`) was removed; a reviewer, if you want one, is a separate agent with its own Prompt tab. (2026-09-14 doc correction.)
+- **One version history table.** `GET /agents/:id/prompt-versions` and `POST /agents/:id/prompt-versions/:version/revert` — the client has **no `kind` parameter** (`api/api.ts:423-429`). The two-persona split was removed with the reviewer persona. *(corrected 2026-09-20 — campaign task-21.)*
+- **Version history table** below the editor reads from `GET /agents/:id/prompt-versions`. The list is scrollable (`max-height: 360px`); the page never expands beyond the card. Rows show version / created / edited-by / status / action.
+- **Revert** action per non-active row → `POST /agents/:id/prompt-versions/:version/revert`. The server appends a new active version whose body equals the source and whose `reverted_from` points back. The active row shows `current` (italic) instead of an action.
+
+### Tests (`TestsTabContent`) — ADR 0023 phase 1
+
+**A test is not a monitored run.** It owns a realistic input item, asserts something about the outcome, and keeps its history — which is why the ad-hoc Test Run tab that kept nothing was deleted rather than kept alongside it.
+
+**Layout (2026-09-28, perf PR 2).** Same card-and-grid pattern as the Runs tab: the header row (**Tests · N**, **Run in**, **New test**), the **Qualification** panel (verdict chip + four stats + **Run all**), the create/edit form when open (its own component, `TestForm.tsx`, grouped into *What it acts on* / *Where it runs* / *Checks*), then one card with a grid table — **Test / Verdict / Samples / Last run / Cost** and per row an outlined **Run** plus a **⋮** menu. On a phone the verdict and the actions share a second line under the name. The list is **one request**: `GET /api/agents/:id/tests` carries each test's `latest_batch`, and a row's history is fetched only when the row is opened.
+
+**Why a test carries an item rather than a prompt.** An agent works an item (a Task with a repo, maybe sub-tasks and a spec), not a bare prompt; a test has to give it one to exercise the real path.
+
+- **Ships with this agent** — the catalog bundle's `tests.json` (`GET /api/agents/:id/starter-tests`). Each row names what it **asserts** (`ends asked_question · under $1.50`, from `expectationSummary`), with the bundle's `notes` as the hover title: a caption is not the place for a paragraph. **Add** prefills the create form rather than creating blind, because a test needs a project to make its throwaway item in and a repo for the agent to work in, neither of which a bundle can know. Every assertion the shipped test made is carried across, not just the outcome the form can show. The strip disappears once all of them have been adopted.
+- **New test** → `POST /api/agents/:id/tests`: a name, an item template (`issue_type`, title, description, acceptance criteria, labels), a project, a repo (the picker only appears when the project has more than one), and expectations.
+- **Checks** (create/edit form, ADR 0023 amendment): *Read-only agent* toggle (forbids `Edit`/`Write`/`MultiEdit`/`NotebookEdit` and sets `no_code_changes`; turning it off removes only what it added), *Reply must match* / *Reply must not match* / *Forbidden shell commands* (one case-insensitive regex per line), *Judge questions* (one per line), *Check script (bash)* (runs over `reply.txt`, `commands.txt`, `tool_calls.json`, `files_changed.txt`, `diff.patch`, `outcome.json`; exit 0 passes). The card's `Checks:` line lists them (`reply avoids /president/`, `changes no code`, `passes your script`, …); failures appear verbatim in the history, script ones prefixed `script:`.
+- **Edit** (row **⋮** menu) → `PATCH /api/agent-tests/:testId`: reopens the same form prefilled (name, project, repo, item, expected outcome) and saves as **Save changes**. Expectations are **merged**, never replaced — a `tools_forbidden` or cost ceiling the form does not show survives the save; "Any outcome" clears `outcome_kind`. The patch now also writes `project_id` (it used to be accepted and dropped).
+- **Expectations**: outcome kind (`done` / `rejected` / `asked_question`), every required checklist row passed, summary contains / omits given text, cost and duration ceilings. `asked_question` is a **passing** expectation, not a fallback — an agent that asks rather than inventing a feature from an unanswerable Task has succeeded.
+- **Run** → `POST /api/agent-tests/:testId/run` (202). The row's **Run** takes one sample; the **⋮** menu offers **Run 3× / 5× / 10×**, each with its total cost. **Delete** is in the same menu. Each sample materialises a **fresh throwaway item** from the template — a test pointing at a live item gives a different answer whenever the repo moves under it, and a second dispatch against an item the first already changed measures something else. Items are flagged `is_test` and **shown** everywhere (tagged "Test" — the old hiding was reversed in migration 002), and they go when the test does.
+- **A real checkout** (migration 003): an agent-only test runs in a detached checkout of its Task's repo — the sandbox's `atlas-test-sample` by default — so a Coder test has code to edit. What it changed (files + diff) is kept on the run as evidence; the checkout is deleted when the run finishes.
+- **The verdict is the batch's, not a sample's.** An agent is stochastic, so a single run printed whichever of "passed" and "failed" the Owner happened to press. The headline reads `2/3 passed · flaky`, over a strip with one segment per sample in the order taken, and the history lists *which* expectation was unstable and in how many runs. A dispatch that never started is reported beside the score (`· 1 could not run`) rather than inside it.
+- **Cost before the click**: the button and each menu entry show the **total** for that sample count (`Run 5× · ~$1.54` at $0.31), from `GET /api/agents/:id/cost-estimate?n=`. `null` (no history) renders as a plain `Run`, not as free.
+- **History** (click a row, press Enter on it, or **⋮ → History**): `GET /api/agent-tests/:testId/batches?limit=20`, mounted only while open. The list polls every 5s while any row's `latest_batch` is running; `agent_test_judged` (SSE) usually refreshes it first. A verdict is `passed` / `failed` / `errored`, with the failing expectations listed verbatim. **`errored` is not `failed`** — a dispatch that never started is a broken environment, not a failing agent.
+- **Run in** (header): defaults to **Tests sandbox (default)** — runs send `sandbox: true` and land in the auto-created Tests project (prefix `TST`) with its local sample repo, so a test never spends a real project's issue key unless the Owner picks that project here. The choice is remembered per browser. The create/edit form's **Project** also defaults to the sandbox (the test is left unpinned).
+- **Suite header** (`GET /api/agent-qualification?agent_id=`): `RUNNING…` while any fixture's latest batch has a sample in flight — polled every 5s until it lands, so "Run all" never flashes `FAILING` before the answer is in. "Run all" also refreshes the fleet badges on `/agents`.
+- Evaluation happens at run completion (`evaluateAgentTestRun`). A run the hook missed is judged **in the background** on the next read — never inside the request — and at most once at a time.
+
+### Performance (`PerformanceTabContent`) — ADR 0023 phase 2 / ATL-140
+
+What this agent's runs already prove. Every `agent_runs` row carries cli, model, effort, token counts, cost and outcome — snapshotted explicitly so configurations can be compared.
+
+- **First attempt** — `applied` / `sent back` / `asked you`, as one bar with counts. **No pass rate appears anywhere on this page.** A rejection or a question can be the run's most valuable output; a page that ranked on a pass rate would recommend culling the agents that push back. A rejection is never drawn in the error colour.
+- Beside it: **steps**, **loops** (dispatches beyond the first on the same step), and **gate catches** ("Times a gate went red after this agent said the work was done"; Atlas Open runs have no gate steps, so it stays 0).
+- **Cost** (total, per step, cache hit) and **Latency** (median, p95, time to first token).
+- **Tools** — the tool profile from migration 017 traces, always with the denominator stated (`From 1 of 24 runs`), because a percentage over an unstated one is the dishonest kind of number. Says so plainly when no run has a trace.
+- **Weekly trend** — the scorecard's Monday-keyed `trend` buckets, drawn: sparklines for **steps**, **cost** and **p95** (`TrendSparkline`, fixed-size recharts line, each with a screen-reader label listing every value) and a **first attempt** row of 100%-stacked weekly columns in the same three colours as the bar above. Below two weeks it says "Only one week in this window so far. A trend needs at least two." instead of drawing a dot.
+- **By configuration** — per `(model, effort, cli, prompt_version)` slice (`claude-opus-5 · xhigh · claude · prompt v3`, `unrecorded` / `prompt unrecorded` for runs that never snapshotted one), so a model, CLI or prompt change reads as a break in the series rather than a smear across it (ATL-140's fourth criterion). Each slice's thin bar is the shared `OutcomeBar`.
+- The fleet-wide comparison of every agent lives on [Fleet performance](36-fleet-performance.md); its row click opens this tab.
+- Ad-hoc runs and agent test runs are **not** counted: only a Task run's agent step counts, and neither is one. Test quality lives on the Tests tab.
+
+### Runs (`RunsTab`)
+No-runs hero with **Run now**. Recent 50 runs table (status / issue id / relative time / run id). Rows are clickable — they navigate to `/agents/:id/runs/:runId` for the full run detail (log viewer + Re-run / Copy log / Download log).
+
+### Memory (`MemoryTab`)
+Procedural-memory editor backed by the `agent_memory` table.
+- Info banner explains the model (auto-rewritten after each run; Owner edits kept).
+- Header row: source label (AI-generated vs Manual edit), updated-relative time, last_run_id short, `Regenerate from runs` button.
+- File chip: `{slug}.memory.md` · `version {n}.0` · `AI-GEN` / `MANUAL` badge.
+- Body: `EditableMarkdownCard` (`GET /api/agents/:id/memory` on read; `PUT /api/agents/:id/memory` on Save).
+- Regenerate: `POST /api/agents/:id/memory/regenerate`. Mirrors `agent-runner`'s gating — real CLI when `ATLAS_AI_ENABLED=true`, simulated body otherwise. The simulated body is intentional, not a stub.
+- **Regeneration history** (Theme 08 + A06): list of recent `memory_regenerations` rows, newest first. Each row: trigger badge (manual / cadence / high_signal / mcp_update), an amber **BOUNDARY** chip when `boundary_flags.length > 0` (tooltip lists the detected flag slugs), version delta `vN → vM`, char-diff (`+added`, `−removed`), relative time. The chip is informational — the row's body still persisted (soft filter). See `detectBoundaryViolations()` in `services/agent-memory.ts` for the heuristic.
+
+## Sidebar (`AgentSidebar`)
+- **Identity** panel — Role, Color (clickable → `EditAgentColorModal`), Glyph (clickable → `GlyphPickerModal`). Slug is intentionally hidden (internal identifier).
+- **Telemetry · 30 d** panel — Total runs. (p50 duration was removed; we don't have the calculation pipeline yet.)
+
+## Modals / drawers
+- `DuplicateAgentModal` — open/close at page level.
+- `RunNowDialog` — opens from the hero "Run now" button. No pickers: Cancel / Preview prompt / Run now for a no-item run → `POST /api/run` → navigates to the new run's detail page. Shows the same `CliUnavailableAlert` as the hero.
+- `EditAgentColorModal` — opens from the sidebar Color row. Wraps the shared `AccentColorPicker` and saves via `PATCH /agents/:id` with `{ accent_color }`.
+- `GlyphPickerModal` — opens from the sidebar Glyph row. 16-icon Material Symbols grid; saves via `PATCH /agents/:id` with `{ glyph }`.
+- `DeleteAgentModal` — opens from the ⋯ menu's Delete. Custom MUI Dialog (replaces the old `window.confirm`); calls `DELETE /agents/:id` on confirm.
+
+## Hooks used
+- `useAgent(id)`, `useUpdateAgent`
+- `useAgentMemory(id)`, `useSetAgentMemory`, `useRegenerateAgentMemory` (Memory tab)
+- `useAgentChecklists(id)` (Quality checklist card)
+- `useCliAvailability` / `useMissingCli` (hero, Configuration, RunNowDialog warnings), `useCliModels` (CLI switch → default model)
+- `useQuery(['runs', agentId])` and per-tab hooks
+
+## API endpoints touched
+- `GET /api/agents/:id`, `PATCH /api/agents/:id`
+- `GET /api/agents/:id/checklists`, `PUT /api/agents/:id/checklists` (Quality checklist card)
+- `GET /api/agents/:id/memory`, `PUT /api/agents/:id/memory`, `POST /api/agents/:id/memory/regenerate`
+- `GET /api/run?agent_id=…`, `POST /api/run` (Run now dialog)
+- `GET /api/cli/availability` (CLI not-installed warnings)
+- `POST /api/agents/:id/compile-prompt` (Run now dialog — Preview prompt button)
+- `GET /api/agents/:id/tests`, `POST /api/agents/:id/tests` (Tests tab)
+- `GET /api/agents/:id/performance` (Performance tab)
+- `GET /api/agents/:id/cost-estimate` (Tests tab — spend before the click)
+- `GET /api/agent-tests/:testId/batches?limit=20` (an opened row), `POST /api/agent-tests/:testId/run`, `PATCH`/`DELETE /api/agent-tests/:testId`
+- `POST /api/agents/:id/duplicate`, `DELETE /api/agents/:id`
+
+## Permissions / guards
+- Post-onboarding only.
+
+## Edge cases / quirks
+- Prompt version history is **localStorage only** today; reloading on a different machine loses history.
+- Description save is local-only.
+
+## Connectivity
+- **Pages**: [Agents](15-agents.md) — list / card entry.
+- **Routes**: `PUT /agents/:id/checklists` — replaces the whole checklist because rows are read and ordered together.
+- **Entities**: `agent`, `agent_checklist_item`, `agent_run`, `cli_model`.
+
+## Coming soon on this page
+- Save as run, formatting toolbar wiring — see [coming-soon.md](../coming-soon.md).

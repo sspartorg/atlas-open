@@ -1,0 +1,496 @@
+import { db } from '../db/kysely-client.js';
+import { sql, type Transaction } from 'kysely';
+import type { DB } from '../db/types.js';
+import type {
+    AgentCli,
+    IAgent,
+    IAgentRun,
+    IAgentChecklistItem,
+    IAgentPromptVersion,
+    IssueType,
+    AgentKindSlug,
+    SdlcRole,
+} from '@atlas/shared';
+import { randomUUID } from 'crypto';
+import { broadcastSSE } from '../routes/events.js';
+
+// Workstream #4 — Validation guard that rejects (cli, model) pairs not in
+// `cli_models`. Throws a tagged Error the route layer recognises and
+// converts to a 400; the composite FK from migration 061 catches anything
+// that slips past, but this gives a clean message naming valid models.
+export class ModelNotInRegistryError extends Error {
+    public readonly code = 'MODEL_NOT_IN_REGISTRY';
+    constructor(message: string) {
+        super(message);
+        this.name = 'ModelNotInRegistryError';
+    }
+}
+
+// `agents.role_id` is an FK into `roles`, but the Zod schemas validate
+// against the `SdlcRole` UNION in @atlas/shared, which declares 10 slugs
+// while the shipped baseline seeds only 5 (po, architect, engineer, qa,
+// automation). Assigning one of the other five produced a raw
+// `agents_role_id_fkey` 500. Same shape as ModelNotInRegistryError: the FK
+// gives correctness, this gives an actionable 400.
+export class RoleNotInCatalogError extends Error {
+    public readonly code = 'ROLE_NOT_IN_CATALOG';
+    constructor(message: string) {
+        super(message);
+        this.name = 'RoleNotInCatalogError';
+    }
+}
+
+async function assertRoleInCatalog(roleId: string | null | undefined): Promise<void> {
+    // null is valid — autonomous agents sit outside the SDLC chain.
+    if (!roleId) return;
+    const row = await db
+        .selectFrom('roles')
+        .select('id')
+        .where('id', '=', roleId)
+        .executeTakeFirst();
+    if (row) return;
+    const available = await db
+        .selectFrom('roles')
+        .select('id')
+        .orderBy('sort_order', 'asc')
+        .execute();
+    const names = available.map((r) => String(r['id'])).join(', ') || '(empty)';
+    throw new RoleNotInCatalogError(
+        `role '${roleId}' is not in the roles catalog — pick from: ${names}`,
+    );
+}
+
+export async function assertModelInRegistry(
+    cli: string | undefined | null,
+    model: string | undefined | null,
+): Promise<void> {
+    if (!cli || !model) return;
+    // Kysely's typed `cli` column narrows to `AgentCli`. The checked input is
+    // an unvalidated application-level string; cast so the query type-checks
+    // even when an Owner passes a value the CHECK constraint / FK will then
+    // reject downstream (the lookup simply finds no row and we throw below).
+    const cliCast = cli as AgentCli;
+    const row = await db
+        .selectFrom('cli_models')
+        .select('id')
+        .where('cli', '=', cliCast)
+        .where('model_name', '=', model)
+        .executeTakeFirst();
+    if (row) return;
+    const available = await db
+        .selectFrom('cli_models')
+        .select('model_name')
+        .where('cli', '=', cliCast)
+        .orderBy('sort_order', 'asc')
+        .execute();
+    const names = available.map((r) => String(r['model_name'])).join(', ') || '(empty)';
+    throw new ModelNotInRegistryError(
+        `model '${model}' is not in the cli_models registry for cli '${cli}' — pick from: ${names}`,
+    );
+}
+
+export function asAgentRun(r: Record<string, unknown>, issueType: IssueType): IAgentRun {
+    return {
+        id: r['id'] as string,
+        agent_id: r['agent_id'] as string,
+        issue_type: issueType,
+        issue_id: (r['item_id'] as string) ?? '',
+        project_id: (r['project_id'] as string | null) ?? null,
+        status: r['status'] as IAgentRun['status'],
+        prompt_snapshot: (r['prompt_snapshot'] as string | null) ?? null,
+        output_text: (r['output_text'] as string | null) ?? null,
+        started_at: (r['started_at'] as string | null) ?? null,
+        completed_at: (r['completed_at'] as string | null) ?? null,
+        parent_run_id: (r['parent_run_id'] as string | null) ?? null,
+        setup_output_text: (r['setup_output_text'] as string | null) ?? null,
+        outcome_kind: (r['outcome_kind'] as IAgentRun['outcome_kind']) ?? null,
+        outcome_summary: (r['outcome_summary'] as string | null) ?? null,
+        outcome_reason: (r['outcome_reason'] as string | null) ?? null,
+        outcome_checklist: (r['outcome_checklist'] as IAgentRun['outcome_checklist']) ?? null,
+        created_at: r['created_at'] as string,
+        input_tokens: (r['input_tokens'] as number | null) ?? null,
+        output_tokens: (r['output_tokens'] as number | null) ?? null,
+        cache_creation_tokens: (r['cache_creation_tokens'] as number | null) ?? null,
+        cache_read_tokens: (r['cache_read_tokens'] as number | null) ?? null,
+        total_cost_usd: (r['total_cost_usd'] as number | null) ?? null,
+        credits: (r['credits'] as number | null) ?? null,
+        // Joined from items.title — populated whenever the route query
+        // pulls `i.title as item_title`. NULL on freedom-mode runs and
+        // on rows whose item has been deleted.
+        item_title: (r['item_title'] as string | null) ?? null,
+        workflow_run_id: (r['workflow_run_id'] as string | null) ?? null,
+        node_id: (r['node_id'] as string | null) ?? null,
+        // Migration 017. Null on every run that finished before it shipped —
+        // which the UI must render as "—", not as a run that did nothing.
+        trace_summary: (r['trace_summary'] as IAgentRun['trace_summary']) ?? null,
+    };
+}
+
+export interface IChecklistInput {
+    label: string;
+    sort_order?: number;
+    required?: boolean;
+}
+
+// All optional fields explicitly carry `| undefined` so callers parsed via Zod
+// (whose output types use `?: T | undefined`) satisfy `exactOptionalPropertyTypes`.
+export interface IAgentCreateInput {
+    id?: string | undefined;
+    name: string;
+    category: IAgent['category'];
+    cli: IAgent['cli'];
+    model: string;
+    effort?: IAgent['effort'] | undefined;
+    framework?: string | undefined;
+    prompt_md?: string | undefined;
+    status?: IAgent['status'] | undefined;
+    accent_color: string;
+    sort_order?: number | undefined;
+    description?: string | undefined;
+    designation?: string | undefined;
+    // A08 — FK into the SDLC role catalog. null = autonomous, no role.
+    role_id?: SdlcRole | null | undefined;
+    glyph?: string | undefined;
+    memory_cadence?: number | undefined;
+    // Theme 09 — autonomous-agent metadata.
+    kind_slug?: AgentKindSlug | undefined;
+    settings_json?: Record<string, unknown> | undefined;
+    checklists?: IChecklistInput[] | undefined;
+}
+
+export interface IAgentUpdateInput {
+    name?: string | undefined;
+    category?: IAgent['category'] | undefined;
+    cli?: IAgent['cli'] | undefined;
+    model?: string | undefined;
+    effort?: IAgent['effort'] | undefined;
+    framework?: string | undefined;
+    prompt_md?: string | undefined;
+    status?: IAgent['status'] | undefined;
+    accent_color?: string | undefined;
+    sort_order?: number | undefined;
+    description?: string | undefined;
+    designation?: string | undefined;
+    // A08 — re-pointing an agent at a different SDLC role.
+    role_id?: SdlcRole | null | undefined;
+    glyph?: string | undefined;
+    memory_cadence?: number | undefined;
+    // Theme 09 — autonomous-agent metadata.
+    kind_slug?: AgentKindSlug | undefined;
+    settings_json?: Record<string, unknown> | undefined;
+    checklists?: IChecklistInput[] | undefined;
+}
+
+const AGENT_SCALAR_FIELDS = [
+    'name',
+    'category',
+    'cli',
+    'model',
+    // Missing until 2026-09-18, so effort could be neither set on create nor
+    // changed from Agent Detail — every agent stayed on the column default.
+    'effort',
+    'framework',
+    'prompt_md',
+    'status',
+    'accent_color',
+    'sort_order',
+    'description',
+    'designation',
+    'role_id',
+    'glyph',
+    'memory_cadence',
+    'kind_slug',
+    'settings_json',
+] as const;
+
+function pickAgentScalars(input: IAgentCreateInput | IAgentUpdateInput): Record<string, unknown> {
+    const src = input as unknown as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of AGENT_SCALAR_FIELDS) {
+        if (key in src && src[key] !== undefined) {
+            out[key] = src[key];
+        }
+    }
+    return out;
+}
+
+async function replaceChecklists(
+    trx: Transaction<DB>,
+    agentId: string,
+    items: IChecklistInput[]
+): Promise<void> {
+    await trx.deleteFrom('agent_checklists').where('agent_id', '=', agentId).execute();
+    if (items.length === 0) return;
+    await trx
+        .insertInto('agent_checklists')
+        .values(
+            items.map((c, idx) => ({
+                agent_id: agentId,
+                label: c.label,
+                sort_order: c.sort_order ?? idx,
+                required: c.required ?? true,
+            }))
+        )
+        .execute();
+}
+
+const AGENT_SUMMARY_COLUMNS = [
+    'id', 'team_managed', 'name', 'category', 'cli', 'model', 'effort', 'framework', 'prompt_version', 'status',
+    'accent_color', 'sort_order', 'description', 'designation', 'role_id', 'glyph', 'memory_cadence', 'kind_slug',
+    'settings_json', 'marketplace_source_id', 'marketplace_pulled_version', 'marketplace_upgradable_hash',
+    'created_at', 'updated_at',
+] as const satisfies ReadonlyArray<Exclude<keyof DB['agents'], 'prompt_md'>>;
+
+export const agentsService = {
+    async list(): Promise<IAgent[]> {
+        const rows = await db.selectFrom('agents').selectAll().orderBy('name', 'asc').execute();
+        return rows as unknown as IAgent[];
+    },
+
+    /** Every column but `prompt_md`, so Postgres never de-TOASTs the prompts. */
+    async listSummary(): Promise<Array<Omit<IAgent, 'prompt_md'>>> {
+        const rows = await db.selectFrom('agents').select(AGENT_SUMMARY_COLUMNS).orderBy('name', 'asc').execute();
+        return rows as unknown as Array<Omit<IAgent, 'prompt_md'>>;
+    },
+
+    async get(id: string): Promise<IAgent | undefined> {
+        const row = await db.selectFrom('agents').selectAll().where('id', '=', id).executeTakeFirst();
+        return row as unknown as IAgent | undefined;
+    },
+
+    async create(data: IAgentCreateInput): Promise<IAgent> {
+        // Workstream #4 — block create when (cli, model) isn't in the
+        // registry. Belt-and-suspenders alongside the composite FK
+        // (migration 061): the FK gives correctness, this gives a clean
+        // 400 with a useful "pick from: …" message instead of a raw
+        // PG constraint error.
+        await assertModelInRegistry(data.cli, data.model);
+        await assertRoleInCatalog(data.role_id);
+        const id = data.id ?? randomUUID();
+        const scalars = pickAgentScalars(data);
+        const status = (scalars['status'] as IAgent['status']) ?? 'active';
+        const created = await db.transaction().execute(async (trx) => {
+            const inserted = await trx
+                .insertInto('agents')
+                .values({
+                    id,
+                    name: data.name,
+                    category: data.category,
+                    cli: data.cli,
+                    model: data.model,
+                    ...(scalars['effort'] ? { effort: scalars['effort'] as IAgent['effort'] } : {}),
+                    framework: (scalars['framework'] as string | undefined) ?? '',
+                    prompt_md: (scalars['prompt_md'] as string | undefined) ?? '',
+                    status,
+                    accent_color: data.accent_color,
+                    sort_order: (scalars['sort_order'] as number | undefined) ?? 0,
+                    description: (scalars['description'] as string | undefined) ?? '',
+                    designation: (scalars['designation'] as string | undefined) ?? '',
+                    glyph: (scalars['glyph'] as string | undefined) ?? '',
+                    memory_cadence: (scalars['memory_cadence'] as number | undefined) ?? 1,
+                    kind_slug: (scalars['kind_slug'] as AgentKindSlug | undefined) ?? 'custom',
+                    settings_json: (scalars['settings_json'] as Record<string, unknown> | undefined) ?? {},
+                    // A08 — optional FK to the SDLC role catalog. null
+                    // keeps the agent in autonomous/unbound state.
+                    role_id: (scalars['role_id'] as string | null | undefined) ?? null,
+                })
+                .returningAll()
+                .executeTakeFirstOrThrow();
+
+            await trx
+                .insertInto('agent_prompt_versions')
+                .values({
+                    agent_id: id,
+                    version: (inserted as unknown as IAgent).prompt_version,
+                    body_md: (inserted as unknown as IAgent).prompt_md,
+                    edited_by: 'Owner',
+                })
+                .execute();
+
+            await trx
+                .insertInto('agent_memory')
+                .values({ agent_id: id, body_md: '', version: 1, source: 'ai-generated' })
+                .onConflict((oc) => oc.column('agent_id').doNothing())
+                .execute();
+
+            if (data.checklists) await replaceChecklists(trx, id, data.checklists);
+
+            return inserted as unknown as IAgent;
+        });
+        // Every surface that counts or lists agents just went stale: the
+        // sidenav badge, the dashboard `activeAgents` KPI and any open
+        // /agents list. Broadcast after the transaction commits, never inside
+        // it — a rolled-back insert must not tell clients to refetch.
+        broadcastSSE({ type: 'counts_changed' });
+        return created;
+    },
+
+    async update(id: string, data: IAgentUpdateInput): Promise<IAgent> {
+        // Workstream #4 — re-check the (cli, model) pair when either
+        // changes. We need both sides to validate; if only one is in the
+        // patch body, fetch the other from the existing row.
+        if (data.cli !== undefined || data.model !== undefined) {
+            const existing = await this.get(id);
+            const cli = data.cli ?? existing?.cli ?? null;
+            const model = data.model ?? existing?.model ?? null;
+            await assertModelInRegistry(cli, model);
+        }
+        if (data.role_id !== undefined) await assertRoleInCatalog(data.role_id);
+        const scalars = pickAgentScalars(data);
+        const promptMdChanged = 'prompt_md' in data && data.prompt_md !== undefined;
+        const updated = await db.transaction().execute(async (trx) => {
+            let row: IAgent;
+            if (promptMdChanged) {
+                // Editing `prompt_md` bumps `prompt_version` and snapshots
+                // the new body into `agent_prompt_versions` for revert-safety.
+                row = (await trx
+                    .updateTable('agents')
+                    .set(
+                        ((eb: unknown) => {
+                            const set: Record<string, unknown> = {
+                                ...(scalars as Record<string, unknown>),
+                            };
+                            const incEb = eb as {
+                                (col: 'prompt_version', op: '+', val: number): unknown;
+                            };
+                            set['prompt_version'] = incEb('prompt_version', '+', 1);
+                            return set;
+                        }) as never,
+                    )
+                    .where('id', '=', id)
+                    .returningAll()
+                    .executeTakeFirstOrThrow()) as unknown as IAgent;
+                await trx
+                    .insertInto('agent_prompt_versions')
+                    .values({
+                        agent_id: id,
+                        version: row.prompt_version,
+                        body_md: row.prompt_md,
+                        edited_by: 'Owner',
+                    })
+                    .execute();
+            } else if (Object.keys(scalars).length > 0) {
+                row = (await trx
+                    .updateTable('agents')
+                    .set(scalars as never)
+                    .where('id', '=', id)
+                    .returningAll()
+                    .executeTakeFirstOrThrow()) as unknown as IAgent;
+            } else {
+                row = (await trx
+                    .selectFrom('agents')
+                    .selectAll()
+                    .where('id', '=', id)
+                    .executeTakeFirstOrThrow()) as unknown as IAgent;
+            }
+
+            if (data.checklists !== undefined) {
+                await replaceChecklists(trx, id, data.checklists);
+            }
+
+            return row;
+        });
+        // Same staleness as create: `status` flips active/inactive, which moves
+        // the dashboard `activeAgents` KPI, and a rename changes every list
+        // that shows the name.
+        broadcastSSE({ type: 'counts_changed' });
+        return updated;
+    },
+
+    async listPromptVersions(agentId: string): Promise<IAgentPromptVersion[]> {
+        const rows = await db
+            .selectFrom('agent_prompt_versions')
+            .selectAll()
+            .where('agent_id', '=', agentId)
+            .orderBy('version', 'desc')
+            .execute();
+        return rows as unknown as IAgentPromptVersion[];
+    },
+
+    async revertPrompt(agentId: string, sourceVersion: number): Promise<IAgent> {
+        const agent = await this.get(agentId);
+        if (!agent) throw new Error('Agent not found');
+        const source = await db
+            .selectFrom('agent_prompt_versions')
+            .select('body_md')
+            .where('agent_id', '=', agentId)
+            .where('version', '=', sourceVersion)
+            .executeTakeFirst();
+        if (!source) throw new Error('Version not found');
+        if (source.body_md === agent.prompt_md) return agent;
+        const nextVersion = agent.prompt_version + 1;
+        await db.transaction().execute(async (trx) => {
+            await trx
+                .updateTable('agents')
+                .set({ prompt_md: source.body_md, prompt_version: nextVersion })
+                .where('id', '=', agentId)
+                .execute();
+            await trx
+                .insertInto('agent_prompt_versions')
+                .values({
+                    agent_id: agentId,
+                    version: nextVersion,
+                    body_md: source.body_md,
+                    edited_by: 'Owner',
+                    reverted_from: sourceVersion,
+                })
+                .execute();
+        });
+        return (await this.get(agentId))!;
+    },
+
+    async delete(id: string): Promise<void> {
+        await db.deleteFrom('agents').where('id', '=', id).execute();
+        broadcastSSE({ type: 'counts_changed' });
+    },
+
+    async getRuns(agentId: string): Promise<IAgentRun[]> {
+        // List projection: drop prompt_snapshot entirely and truncate
+        // output_text to head + tail. See `routes/run.ts` for full
+        // rationale — same pattern, same trade-off. The Agent / Overview
+        // tile and the Runs tab only render summary + last-line preview,
+        // both of which survive the truncation.
+        const rows = await db
+            .selectFrom('agent_runs as r')
+            .leftJoin('items as i', 'i.id', 'r.item_id')
+            .select([
+                'r.id as id',
+                'r.agent_id as agent_id',
+                'r.item_id as item_id',
+                'i.type as item_type',
+                'i.title as item_title',
+                'r.status as status',
+                sql<string | null>`NULL::text`.as('prompt_snapshot'),
+                // Head only — see OUTPUT_TEXT_LIST_SQL in routes/run.ts.
+                sql<string | null>`left(r.output_text, 100)`.as('output_text'),
+                'r.started_at as started_at',
+                'r.completed_at as completed_at',
+                'r.created_at as created_at',
+                'r.input_tokens as input_tokens',
+                'r.output_tokens as output_tokens',
+                'r.cache_creation_tokens as cache_creation_tokens',
+                'r.cache_read_tokens as cache_read_tokens',
+                'r.total_cost_usd as total_cost_usd',
+            ])
+            .where('r.agent_id', '=', agentId)
+            .orderBy('r.created_at', 'desc')
+            .execute();
+        return rows.map((r) => asAgentRun(r as never, (r.item_type as IssueType) ?? 'task'));
+    },
+
+    async getChecklists(agentId: string): Promise<IAgentChecklistItem[]> {
+        const rows = await db
+            .selectFrom('agent_checklists')
+            .selectAll()
+            .where('agent_id', '=', agentId)
+            .orderBy('sort_order', 'asc')
+            .execute();
+        return rows as unknown as IAgentChecklistItem[];
+    },
+
+    async setChecklists(agentId: string, items: IChecklistInput[]): Promise<void> {
+        await db.transaction().execute(async (trx) => {
+            await replaceChecklists(trx, agentId, items);
+        });
+    },
+};

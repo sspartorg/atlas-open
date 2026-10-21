@@ -1,0 +1,64 @@
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { api } from '../api/api.js';
+import type { IssueType } from '@atlas/shared';
+import { useToast } from './useToast.js';
+
+// Detail pages render comments + activity from the composite `*-full`
+// payload, not from the standalone `useComments` / `useActivity` queries.
+// A comment create or update therefore has to invalidate the matching
+// `[<plural>, id, 'full']` cache as well, or the new/edited row won't
+// appear until the next hard reload.
+const FULL_KEY: Record<IssueType, readonly [string, 'full']> = {
+    task: ['tasks', 'full'],
+    sub_task: ['sub-tasks', 'full'],
+};
+
+function invalidateCommentCaches(qc: QueryClient, issueType: IssueType, issueId: string): void {
+    void qc.invalidateQueries({ queryKey: ['comments', issueType, issueId] });
+    // Unified activity feed — drives the standalone ActivityCard render path
+    // when the parent didn't pre-supply `activity`.
+    void qc.invalidateQueries({ queryKey: ['activity', issueType, issueId] });
+    // Composite payload that detail pages actually render from.
+    const fullKey = FULL_KEY[issueType];
+    void qc.invalidateQueries({ queryKey: [fullKey[0], issueId, fullKey[1]] });
+}
+
+export function useComments(issueType: IssueType, issueId: string) {
+    return useQuery({
+        queryKey: ['comments', issueType, issueId],
+        queryFn: () => api.comments.list(issueType, issueId),
+        enabled: Boolean(issueId),
+    });
+}
+
+// Comment writes toast their own failure with the API's reason.
+export function useCreateComment() {
+    const qc = useQueryClient();
+    const toast = useToast();
+    return useMutation({
+        mutationFn: (data: {
+            author: 'owner' | 'agent';
+            issue_type: IssueType;
+            issue_id: string;
+            body: string;
+            agent_id?: string;
+        }) => api.comments.create(data),
+        onSuccess: (_c, vars) => {
+            invalidateCommentCaches(qc, vars.issue_type, vars.issue_id);
+        },
+        onError: (err) => toast.show({ message: "Couldn't post the comment", detail: err.message }),
+    });
+}
+
+export function useUpdateComment(issueType: IssueType, issueId: string) {
+    const qc = useQueryClient();
+    const toast = useToast();
+    return useMutation({
+        mutationFn: ({ id, body }: { id: number; body: string }) =>
+            api.comments.update(id, body),
+        onSuccess: () => {
+            invalidateCommentCaches(qc, issueType, issueId);
+        },
+        onError: (err) => toast.show({ message: "Couldn't save the comment", detail: err.message }),
+    });
+}

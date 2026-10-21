@@ -1,0 +1,326 @@
+import http from 'node:http';
+import { test, expect } from '@playwright/test';
+import { goto } from '../helpers/nav.js';
+import { API, PROJECT_NAME, SEEDED_AGENT, apiGet, closeTask } from '../helpers/api.js';
+
+// Jira bridge end to end (ADR 0016): the Owner configures Jira in Settings,
+// Sync now imports an issue from a fake Jira (a real HTTP server the e2e API
+// calls), the source assigns the Task to its agent (which queues it), the run
+// parks on delivery (AI is off in e2e and the seeded project has no
+// credential), the Owner closes the Task, and the next sync posts the final
+// comment and moves the Jira issue to Done.
+
+interface JiraCall {
+    method: string;
+    path: string;
+    body: unknown;
+}
+
+// The Jira key the fake instance serves, unique per attempt. `jira_issues`
+// has `jira_key` as its PRIMARY KEY and a deleted Task is never re-imported,
+// so a fixed key imports exactly once per e2e database: on a retry the sync
+// reported "0 imported" and the run failed on a stale assertion rather than
+// the original fault.
+let issueKey = 'FAKE-1';
+
+const ISSUE = {
+    id: '10001',
+    fields: {
+        summary: 'Add a --version flag',
+        description: 'h2. Goal\nPrint the version and exit.',
+        issuetype: { name: 'Story', subtask: false },
+        status: { name: 'Selected for Development' },
+        priority: { name: 'High' },
+        labels: ['e2e-jira'],
+        updated: '2026-09-18T10:00:00.000+0000',
+        comment: {
+            comments: [
+                {
+                    id: '1',
+                    author: { displayName: 'Pat PO' },
+                    body: 'Keep the output to one line.',
+                    created: '2026-09-18T11:00:00.000+0000',
+                },
+            ],
+            total: 1,
+        },
+    },
+};
+
+let calls: JiraCall[] = [];
+let server: http.Server;
+let siteUrl = '';
+
+test.beforeAll(async () => {
+    server = http.createServer((req, res) => {
+        let raw = '';
+        req.on('data', (c: Buffer) => (raw += c.toString()));
+        req.on('end', () => {
+            const url = new URL(req.url ?? '/', 'http://fake');
+            calls.push({
+                method: req.method ?? 'GET',
+                path: url.pathname,
+                body: raw ? JSON.parse(raw) : null,
+            });
+            const send = (status: number, body: unknown) => {
+                res.writeHead(status, { 'content-type': 'application/json' });
+                res.end(body === null ? undefined : JSON.stringify(body));
+            };
+            if (
+                req.headers.authorization !==
+                `Basic ${Buffer.from('owner@e2e.test:e2e-token').toString('base64')}`
+            ) {
+                return send(401, { errorMessages: ['bad credentials'] });
+            }
+            if (url.pathname === '/rest/api/2/myself')
+                return send(200, { displayName: 'Fake Owner' });
+            if (url.pathname === '/rest/api/2/search/jql')
+                return send(200, { issues: [{ ...ISSUE, key: issueKey }] });
+            if (url.pathname === `/rest/api/3/issue/${issueKey}/comment` && req.method === 'POST') {
+                return send(201, { id: `c${calls.length}` });
+            }
+            if (url.pathname === `/rest/api/2/issue/${issueKey}/transitions` && req.method === 'GET') {
+                return send(200, {
+                    transitions: [{ id: '31', to: { statusCategory: { key: 'done' } } }],
+                });
+            }
+            if (url.pathname === `/rest/api/2/issue/${issueKey}/transitions` && req.method === 'POST')
+                return send(204, null);
+            return send(404, { errorMessages: [`unexpected ${req.method} ${url.pathname}`] });
+        });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    siteUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+});
+
+test.afterAll(async ({ request }) => {
+    server.close();
+    // Leave the singleton config clean for other specs. Sources live on the
+    // project now (migration 010), so they are deleted through their own route.
+    const projects = await apiGet<{ id: string }[]>(request, '/api/projects');
+    for (const p of projects) {
+        const sources = await apiGet<{ id: number }[]>(
+            request,
+            `/api/projects/${p.id}/jira-sources`
+        );
+        for (const s of sources) {
+            await request.delete(`${API}/api/projects/${p.id}/jira-sources/${s.id}`);
+        }
+    }
+    await request.put(`${API}/api/integrations/jira`, {
+        data: { enabled: false, site_url: null, email: null },
+    });
+});
+
+test.describe('Jira bridge', () => {
+    test('configure → import → agent run → Done syncs back to Jira', async ({
+        page,
+        request,
+    }) => {
+        test.setTimeout(120_000);
+        calls = [];
+        // Unique per attempt: `jira_issues.jira_key` is a PRIMARY KEY and a
+        // deleted Task is never re-imported, so a fixed key would make a retry
+        // fail on a stale assertion instead of the original fault.
+        issueKey = `FAKE-${Date.now()}`;
+
+        await goto(page, '/settings?tab=jira');
+        await expect(page.getByRole('tab', { name: 'Jira' })).toHaveAttribute(
+            'aria-selected',
+            'true'
+        );
+
+        // Connection: a wrong token first, then the right one.
+        await page.getByPlaceholder('https://your-site.atlassian.net').fill(siteUrl);
+        await page.getByPlaceholder('you@example.com').fill('owner@e2e.test');
+        await page.getByLabel('Jira API token').fill('wrong-token');
+        await page.getByLabel('Jira API token').blur();
+        await expect(page.getByText('API token saved')).toBeVisible();
+        await page.getByRole('button', { name: 'Test connection' }).click();
+        await expect(page.getByText('Jira connection failed')).toBeVisible();
+
+        await page.getByLabel('Jira API token').fill('e2e-token');
+        await page.getByLabel('Jira API token').blur();
+        await expect(page.getByLabel('Jira API token')).toHaveValue('');
+        await expect(page.getByPlaceholder('Stored. Type to replace.')).toBeVisible();
+        await page.getByRole('button', { name: 'Test connection' }).click();
+        await expect(page.getByText('Connected to Jira as Fake Owner')).toBeVisible();
+
+        // G-014 — a manual sync writes comments to real Jira issues, so it
+        // honours the Import switch exactly like the poller does. This spec
+        // used to rely on Sync now running from a switched-off bridge, which
+        // is the bug that let a disabled integration post one comment to a
+        // live board and then go silent for good.
+        await expect(page.getByRole('button', { name: 'Sync now' })).toBeDisabled();
+        // click(), not check(): the switch reflects server config, so its checked
+        // state only settles after the PUT round-trips and the query updates.
+        await page.getByLabel('Jira sync enabled').click();
+        await expect(page.getByText('Jira sync on')).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Sync now' })).toBeEnabled();
+
+        // The token never comes back from the API.
+        const cfgRes = await request.get(`${API}/api/integrations/jira`);
+        expect(await cfgRes.text()).not.toContain('e2e-token');
+
+        // The source — one query + agent + repos combo — lives on the
+        // project, not in Settings (migration 010).
+        const projects = await apiGet<{ id: string; name: string }[]>(request, '/api/projects');
+        const projectId = projects.find((p) => p.name === PROJECT_NAME)?.id ?? projects[0]!.id;
+        await goto(page, `/projects/${projectId}?tab=jira`);
+        await page.getByRole('button', { name: 'Add source' }).click();
+        await page.getByLabel('JQL').fill('project = FAKE');
+        await page.getByLabel('Agent').click();
+        await page.getByRole('option', { name: 'Solo Engineer', exact: true }).click();
+        await page.getByRole('button', { name: 'Save' }).click();
+        await expect(page.getByText('Source added')).toBeVisible();
+
+        await page.getByRole('button', { name: 'Sync now' }).click();
+        await expect(page.getByText(/Jira sync for .+: 1 imported/)).toBeVisible();
+
+        const tasks = await apiGet<
+            Array<{ id: string; title: string; status: string; assignee_agent_id: string | null }>
+        >(request, '/api/tasks');
+        const task = tasks.find((t) => t.title === `[${issueKey}] Add a --version flag`);
+        expect(task, 'imported Task').toBeTruthy();
+        if (!task) return;
+        expect(task.assignee_agent_id).toBe(SEEDED_AGENT);
+        // Assigned means queued; dispatch may already have started the run.
+        expect(['ready', 'in_progress', 'waiting_for_info']).toContain(task.status);
+        const pickedUp = calls.find((c) => c.method === 'POST' && c.path.endsWith('/comment'));
+        expect(JSON.stringify(pickedUp?.body)).toMatch(/queued for Solo Engineer|work in progress|waiting on the owner/);
+
+        // The Task page carries the whole issue and links back to Jira.
+        await goto(page, `/tasks/${task.id}`);
+        await expect(page.getByText('Print the version and exit.').first()).toBeVisible();
+        await expect(page.getByText('Keep the output to one line.').first()).toBeVisible();
+        const jiraLink = page.getByRole('link', {
+            name: new RegExp(`${issueKey} Add a --version flag`),
+        });
+        await expect(jiraLink).toHaveAttribute('href', `${siteUrl}/browse/${issueKey}`);
+
+        // The agent works the Task (simulated); with no credential to push,
+        // delivery parks the run. The Owner closes the Task.
+        await expect
+            .poll(
+                async () =>
+                    (await apiGet<{ status: string }>(request, `/api/tasks/${task.id}`)).status,
+                { timeout: 60_000, intervals: [1_000] }
+            )
+            .toBe('waiting_for_info');
+        await closeTask(request, task.id);
+
+        // The next sync reports Done to Jira and closes the issue.
+        calls = [];
+        await goto(page, '/settings?tab=jira');
+        await page.getByRole('button', { name: 'Sync now' }).click();
+        await expect(page.getByText(/Jira sync:/)).toBeVisible();
+        const final = calls.filter((c) => c.method === 'POST' && c.path.endsWith('/comment'));
+        expect(final).toHaveLength(1);
+        expect(JSON.stringify(final[0]?.body)).toContain(`"text":"Atlas ${task.id}"`);
+        expect(JSON.stringify(final[0]?.body)).toContain(': done.');
+        expect(calls.some((c) => c.method === 'POST' && c.path.endsWith('/transitions'))).toBe(
+            true
+        );
+
+        // Idempotent: another sync neither re-imports nor re-closes.
+        calls = [];
+        await page.getByRole('button', { name: 'Sync now' }).click();
+        await expect(page.getByText(/Jira sync( for .+)?: 0 imported, 0 comment\(s\) posted/)).toBeVisible();
+        expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+    });
+
+    test('disconnect forgets the connection; reconnect works; an email change says the token went', async ({
+        page,
+        request,
+    }) => {
+        await request.put(`${API}/api/integrations/jira`, {
+            data: { site_url: siteUrl, email: 'owner@e2e.test', api_token: 'e2e-token', enabled: false },
+        });
+        await goto(page, '/settings?tab=jira');
+        await page.getByRole('button', { name: 'Test connection' }).click();
+        await expect(page.getByText('Connected to Jira as Fake Owner')).toBeVisible();
+
+        await page.getByRole('button', { name: 'Disconnect' }).click();
+        await page.getByRole('dialog').getByRole('button', { name: 'Disconnect' }).click();
+        await expect(page.getByText('Disconnected from Jira')).toBeVisible();
+        await expect(page.getByPlaceholder('https://your-site.atlassian.net')).toHaveValue('');
+        await expect(page.getByRole('button', { name: 'Test connection' })).toBeDisabled();
+        const cfg = await apiGet<{ site_url: string | null; api_token_set: boolean }>(request, '/api/integrations/jira');
+        expect(cfg).toMatchObject({ site_url: null, api_token_set: false });
+
+        // Reconnect from blank through the form.
+        const site = page.getByPlaceholder('https://your-site.atlassian.net');
+        await site.fill(siteUrl);
+        await site.blur();
+        const email = page.getByPlaceholder('you@example.com');
+        await email.fill('owner@e2e.test');
+        await email.blur();
+        const token = page.getByLabel('Jira API token');
+        await token.fill('e2e-token');
+        await token.blur();
+        await expect(page.getByRole('button', { name: 'Test connection' })).toBeEnabled();
+        await page.getByRole('button', { name: 'Test connection' }).click();
+        await expect(page.getByText('Connected to Jira as Fake Owner').last()).toBeVisible();
+
+        // Moving the email without a new token drops it — and the UI says so.
+        await email.fill('someone@e2e.test');
+        await email.blur();
+        await expect(page.getByText('API token cleared')).toBeVisible();
+    });
+
+    test('poll interval, extra fields and the Import switch save and validate', async ({ page, request }) => {
+        await request.put(`${API}/api/integrations/jira`, {
+            data: { site_url: siteUrl, email: 'owner@e2e.test', api_token: 'e2e-token', enabled: false, poll_interval_minutes: 60, extra_fields: [] },
+        });
+        await goto(page, '/settings?tab=jira');
+        type Cfg = { poll_interval_minutes: number; extra_fields: string[]; enabled: boolean };
+        const cfg = () => apiGet<Cfg>(request, '/api/integrations/jira');
+
+        const poll = page.locator('input[type="number"]').first();
+        await poll.fill('4');
+        await poll.blur();
+        await expect(poll).toHaveValue('60');
+        for (const v of [15, 30]) {
+            await poll.fill(String(v));
+            await poll.blur();
+            await expect.poll(async () => (await cfg()).poll_interval_minutes).toBe(v);
+        }
+
+        const extra = page.getByPlaceholder(/Acceptance Criteria/);
+        await extra.fill(' Story Points , , customfield_10016 ');
+        await extra.blur();
+        await expect.poll(async () => (await cfg()).extra_fields).toEqual(['Story Points', 'customfield_10016']);
+        await extra.fill('');
+        await extra.blur();
+        await expect.poll(async () => (await cfg()).extra_fields).toEqual([]);
+
+        const sync = page.getByRole('button', { name: 'Sync now' });
+        await expect(sync).toBeDisabled();
+        await page.getByLabel('Jira sync enabled').click();
+        await expect.poll(async () => (await cfg()).enabled).toBe(true);
+        await expect(sync).toBeEnabled();
+        await page.getByLabel('Jira sync enabled').click();
+        await expect.poll(async () => (await cfg()).enabled).toBe(false);
+        await expect(sync).toBeDisabled();
+        expect((await request.post(`${API}/api/integrations/jira/sync`)).status()).toBe(409);
+    });
+
+    test('rejects a non-URL site and keeps the saved one', async ({ page }) => {
+        await goto(page, '/settings?tab=jira', {
+            allow: [/400 \(Bad Request\)/, /integrations\/jira/],
+        });
+        const site = page.getByPlaceholder('https://your-site.atlassian.net');
+        await site.fill('not a url');
+        await site.blur();
+        await expect(page.getByText('Could not save')).toBeVisible();
+    });
+
+    test('Jira tab fits a phone screen @mobile', async ({ page }) => {
+        await goto(page, '/settings?tab=jira');
+        await expect(page.getByText('Jira connection')).toBeVisible();
+        const overflow = await page.evaluate(
+            () => document.documentElement.scrollWidth - window.innerWidth
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+    });
+});
