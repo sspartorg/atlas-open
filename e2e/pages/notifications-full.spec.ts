@@ -464,13 +464,20 @@ test.describe('/notifications — outward delivery from real producers', () => {
         await quietNow(request, false);
         await request.patch(`${API}/api/settings/notifications`, { data: { external_notification_event_toggles: {} } });
     });
+    // A parked run holds the seeded repo (one Task at a time per repo), so
+    // each test closes its Task or the next one never starts a run.
+    let parked: string[] = [];
     test.afterEach(async ({ request }) => {
         await request.patch(`${API}/api/settings/notifications`, { data: { external_notification_event_toggles: {} } });
+        for (const id of parked) await closeTask(request, id);
+        parked = [];
     });
 
     /** A Task run that parks on delivery (no credential) → `workflow.failed`. */
     async function park(request: APIRequestContext, name: string) {
-        return createTask(request, `${name} task`, SEEDED_AGENT);
+        const task = await createTask(request, `${name} task`, SEEDED_AGENT);
+        parked.push(task.id);
+        return task;
     }
 
     test('a park reaches Telegram verbatim, markdown-ish characters and all', async ({ page, request }) => {
@@ -480,7 +487,7 @@ test.describe('/notifications — outward delivery from real producers', () => {
         await expect.poll(() => sent.length, { timeout: 30_000 }).toBe(1);
         const body = JSON.parse(sent[0]!) as { text: string; parse_mode?: string };
         expect(body.parse_mode).toBeUndefined();
-        expect(body.text).toContain(`${task.id} needs you: project credential_id is not configured`);
+        expect(body.text).toContain(`${task.id} needs you: Push failed: project credential_id is not configured`);
 
         await goto(page, '/notifications');
         await expect(logRow(page, `${task.id} needs you`)).toContainText('Sent');

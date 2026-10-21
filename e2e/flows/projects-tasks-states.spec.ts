@@ -505,7 +505,7 @@ test.describe('task and sub-task detail', () => {
         await expect(page.getByRole('link', { name: 'https://github.com/atlas-e2e/stoat/pull/3' })).toHaveAttribute('href', 'https://github.com/atlas-e2e/stoat/pull/3');
 
         const rail = page.getByText('Details', { exact: true }).locator('xpath=ancestor::div[2]');
-        for (const label of ['Project', 'Status', 'Assignee', 'Reporter', 'Priority', 'Created', 'Last updated']) await expect(rail).toContainText(label);
+        for (const label of ['Project', 'Repos', 'Status', 'Agent', 'Reporter', 'Priority', 'Created', 'Last updated']) await expect(rail).toContainText(label);
         await expect(rail.getByRole('link', { name: new RegExp(NAME) })).toHaveAttribute('href', `/projects/${projectId}`);
         await expect(rail).toContainText('stoat');
     });

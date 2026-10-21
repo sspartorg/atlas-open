@@ -101,8 +101,12 @@ test.beforeAll(async () => {
 });
 
 let projectId = '';
+let taskId = '';
 test.afterAll(async ({ request }) => {
     server.close();
+    // The reopened Task is queued again and its run parks on the seeded repo,
+    // which would hold that repo (one Task at a time per repo) for every later spec.
+    if (taskId) await closeTask(request, taskId);
     if (projectId) {
         for (const s of await apiGet<{ id: number }[]>(request, `/api/projects/${projectId}/jira-sources`)) {
             await request.delete(`${API}/api/projects/${projectId}/jira-sources/${s.id}`);
@@ -146,6 +150,7 @@ test('mapping drives import, queueing, Jira moves and reopen; comments and a scr
     const find = async () => (await apiGet<T[]>(request, '/api/tasks')).find((t) => t.title.startsWith(`[${KEY}]`));
     const task = await find();
     expect(task?.status).toBe('draft');
+    taskId = task!.id;
 
     // The Task page: comments section with the reply, and the screenshot inline.
     await goto(page, `/tasks/${task!.id}`);

@@ -16,7 +16,7 @@ test.describe('/analytics — dark mode', () => {
         await goto(page, '/analytics');
         await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
         // The Overview's tiles and chart render on the themed surface.
-        await expect(page.getByText('Workflow success rate')).toBeVisible();
+        await expect(page.getByText('First-attempt rate', { exact: true })).toBeVisible();
         await expect(page.getByRole('heading', { name: /Shipped and spent/ })).toBeVisible();
     });
 });

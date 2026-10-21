@@ -169,7 +169,7 @@ test.describe('Jira bridge', () => {
         await goto(page, `/projects/${projectId}?tab=jira`);
         await page.getByRole('button', { name: 'Add source' }).click();
         await page.getByLabel('JQL').fill('project = FAKE');
-        await page.getByLabel('Agent').click();
+        await page.getByRole('combobox', { name: 'Agent' }).click();
         await page.getByRole('option', { name: 'Solo Engineer', exact: true }).click();
         await page.getByRole('button', { name: 'Save' }).click();
         await expect(page.getByText('Source added')).toBeVisible();

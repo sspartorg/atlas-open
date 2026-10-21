@@ -30,6 +30,9 @@ export default defineConfig({
             // developer's ~/.config/Atlas — Reset Workspace's test deletes
             // <dataDir>/team-config and <dataDir>/jira-attachments for real.
             ATLAS_DATA_DIR: join(tmpdir(), 'atlas-api-test-data'),
+            // The Environment routes write a real env file; never the
+            // developer's own .env at the repo root.
+            ATLAS_ENV_FILE: join(tmpdir(), 'atlas-api-test.env'),
         },
         globalSetup: ['./tests/_global-setup.ts'],
         // Run test files serially so they share one PG connection pool

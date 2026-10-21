@@ -203,6 +203,8 @@ describe('parseEnv — line fails ASSIGN_RE (no `=` / non-key-shaped line)', () 
 describe('envFileService.write — fs-mocked write paths (A5)', () => {
     beforeEach(() => {
         vi.restoreAllMocks();
+        // write() chmods the renamed file; with rename mocked there is no file.
+        vi.spyOn(fs, 'chmodSync').mockImplementation((() => undefined) as never);
     });
 
     it('writes updates when the .env file is missing (catch arm: empty source)', () => {

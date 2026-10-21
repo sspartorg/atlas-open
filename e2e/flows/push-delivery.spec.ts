@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:https';
 import { test, expect, type APIRequestContext } from '@playwright/test';
 import { goto } from '../helpers/nav.js';
-import { API, SEEDED_AGENT, apiGet, createTask } from '../helpers/api.js';
+import { API, SEEDED_AGENT, apiGet, closeTask, createTask } from '../helpers/api.js';
 import { sql } from '../helpers/db.js';
 
 // Web push end to end, short of Google's push service: the API's real
@@ -80,6 +80,14 @@ test.beforeEach(async ({ request }) => {
     await settings(request, { external_notification_event_toggles: {}, quiet_hours_enabled: 0, quiet_hours_from: '22:00', quiet_hours_to: '08:00' });
 });
 
+// A parked run holds the seeded repo (one Task at a time per repo), so each
+// test closes its Task or the next one never starts a run.
+let parked: string[] = [];
+test.afterEach(async ({ request }) => {
+    for (const id of parked) await closeTask(request, id);
+    parked = [];
+});
+
 test.afterAll(async ({ request }) => {
     await request.post(`${API}/api/push-subscriptions/unsubscribe`, { data: { endpoint: ENDPOINT } });
     await settings(request, { external_notification_event_toggles: {}, quiet_hours_enabled: 0, quiet_hours_from: '22:00', quiet_hours_to: '08:00' });
@@ -96,7 +104,9 @@ async function settings(request: APIRequestContext, data: Record<string, unknown
  * project has no credential, so delivery parks the run (`workflow.failed`).
  */
 async function park(request: APIRequestContext, name: string): Promise<string> {
-    return (await createTask(request, `${name} task`, SEEDED_AGENT)).id;
+    const { id } = await createTask(request, `${name} task`, SEEDED_AGENT);
+    parked.push(id);
+    return id;
 }
 
 const pushRow = async (request: APIRequestContext, taskId: string) =>
@@ -104,7 +114,7 @@ const pushRow = async (request: APIRequestContext, taskId: string) =>
         (n) => n.issue_id === taskId && n.event_type === 'workflow_run',
     );
 
-test('a park is pushed: VAPID-signed, aes128gcm-encrypted, the payload opens its run page', async ({ request }) => {
+test('a park is pushed: VAPID-signed, aes128gcm-encrypted, the payload opens its Task', async ({ request }) => {
     const taskId = await park(request, `E2E push ${Date.now()}`);
     await expect.poll(() => received.length, { timeout: 30_000 }).toBe(1);
     const [{ headers, payload }] = received as [Received];

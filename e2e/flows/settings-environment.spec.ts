@@ -6,7 +6,7 @@ import { API, E2E_ENV_FILE } from '../helpers/api.js';
 // Settings → Environment and Help & About. The e2e API writes a scratch env
 // file (ATLAS_ENV_FILE in global-setup), never the developer's .env.
 
-const DEFAULT_FEEDBACK = 'https://github.com/sspartorg/atlas/issues';
+const DEFAULT_FEEDBACK = 'https://github.com/sspartorg/atlas-open/issues';
 const envFile = () => readFileSync(E2E_ENV_FILE, 'utf8');
 
 test.afterAll(async ({ request }) => {
@@ -49,9 +49,9 @@ test('Help & About: links point where they say; the feedback URL follows the env
     await request.patch(`${API}/api/settings/env`, { data: { updates: [{ key: 'ATLAS_FEEDBACK_URL', value: 'mailto:bugs@example.test' }] } });
     await goto(page, '/settings?tab=help');
     const href = (name: RegExp) => page.getByRole('link', { name }).first().getAttribute('href');
-    expect(await href(/release notes/)).toBe('https://github.com/sspartorg/atlas/releases/tag/v1.0.0');
-    expect(await href(/Open on GitHub/)).toBe('https://github.com/sspartorg/atlas');
-    expect(await href(/Open docs/)).toBe('https://github.com/sspartorg/atlas/tree/main/docs');
+    expect(await href(/release notes/)).toBe('https://github.com/sspartorg/atlas-open/releases/tag/v1.0.0');
+    expect(await href(/Open on GitHub/)).toBe('https://github.com/sspartorg/atlas-open');
+    expect(await href(/Open docs/)).toBe('https://github.com/sspartorg/atlas-open/tree/main/docs');
     expect(await href(/sspart\.org@gmail\.com/)).toBe('mailto:sspart.org@gmail.com');
     for (const l of await page.locator('a[href^="https://"]').all()) await expect(l).toHaveAttribute('target', '_blank');
 

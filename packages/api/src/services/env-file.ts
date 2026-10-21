@@ -34,7 +34,7 @@ export const KNOWN_ENV_VARS: ReadonlyArray<Omit<IEnvVar, 'value'>> = [
         description:
             'Where the "Report a bug" button in Settings → Help & About ' +
             'points. Also accepts mailto:you@example.com. Blank uses the ' +
-            'default: https://github.com/sspartorg/atlas/issues.',
+            'default: https://github.com/sspartorg/atlas-open/issues.',
     },
 ];
 
