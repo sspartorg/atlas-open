@@ -11,7 +11,6 @@ const pages: [string, RegExp][] = [
     ['/settings?tab=models', /Claude CLI/],
     ['/settings?tab=notifications', /External Notification Channel/],
     ['/settings?tab=jira', /Jira connection/],
-    ['/settings?tab=team', /Team config repo/],
     ['/settings?tab=help', /About Atlas/],
     ['/settings/credentials', /Git credentials/],
 ];

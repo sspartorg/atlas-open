@@ -14,7 +14,7 @@ test.describe('GenerateAiScaffoldDialog', () => {
         await projectAction(page, /Generate AI scaffold…/);
         const dialog = page.getByRole('dialog');
         await expect(dialog.getByText('Generate AI scaffold', { exact: true })).toBeVisible();
-        await expect(dialog).toContainText(/Atlas will analyze project at .*atlas-e2e-fixtures\/project, detect its stack/);
+        await expect(dialog).toContainText(/Atlas will analyze project at .*atlas-open-e2e-fixtures\/project, detect its stack/);
         await expect(dialog).toContainText('Files that already exist on main will be skipped.');
         await expect(dialog.getByRole('button', { name: 'Generate' })).toBeEnabled();
         await dialog.getByRole('button', { name: 'Cancel' }).click();

@@ -12,7 +12,6 @@ const pages = [
     '/settings?tab=models',
     '/settings?tab=notifications',
     '/settings?tab=jira',
-    '/settings?tab=team',
     '/settings?tab=help',
     '/settings/credentials',
 ];
