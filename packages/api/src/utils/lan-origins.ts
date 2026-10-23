@@ -1,6 +1,6 @@
 import * as os from 'node:os';
 
-const WEB_PORT = Number(process.env['WEB_PORT'] ?? process.env['PORT']) || 4000;
+const WEB_PORT = Number(process.env['WEB_PORT'] ?? process.env['PORT']) || 4300;
 
 const STATIC_ORIGINS = [`http://localhost:${WEB_PORT}`, `http://127.0.0.1:${WEB_PORT}`] as const;
 

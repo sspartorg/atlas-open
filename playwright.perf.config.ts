@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 // Perf + visual harness config. Unlike `playwright.config.ts` it owns no
 // stack: point it at one started by `scripts/perf-stack.sh up` (a production
-// web build over an API on the large `atlas_perf` seed).
+// web build over an API on the large `atlas_open_perf` seed).
 //
 //   PERF=1 PERF_LABEL=before pnpm exec playwright test -c playwright.perf.config.ts
 //
@@ -10,7 +10,7 @@ import { defineConfig, devices } from '@playwright/test';
 // `--update-snapshots` for the "before" side, then without it for "after" —
 // Playwright's own screenshot diff reports every route that changed.
 
-const BASE_URL = process.env['PERF_BASE_URL'] ?? 'http://localhost:4700';
+const BASE_URL = process.env['PERF_BASE_URL'] ?? 'http://localhost:4800';
 
 export default defineConfig({
     testDir: './e2e/perf-harness',

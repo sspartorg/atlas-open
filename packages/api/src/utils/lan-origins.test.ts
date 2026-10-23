@@ -92,13 +92,13 @@ describe('lan-origins', () => {
         process.env['ATLAS_LAN_ACCESS'] = 'true';
         const { getLanOrigins } = await import('./lan-origins.js');
         const origins = getLanOrigins();
-        expect(origins).toContain('http://192.168.1.50:4000');
-        expect(origins).toContain('http://10.0.0.5:4000');
+        expect(origins).toContain('http://192.168.1.50:4300');
+        expect(origins).toContain('http://10.0.0.5:4300');
         // the machine's mDNS name rides along, normalized to lowercase with
         // exactly one .local suffix
-        expect(origins).toContain('http://my-machine.local:4000');
+        expect(origins).toContain('http://my-machine.local:4300');
         // loopback, IPv6, and link-local 169.254.x are filtered out
-        expect(origins).not.toContain('http://127.0.0.1:4000');
+        expect(origins).not.toContain('http://127.0.0.1:4300');
         expect(origins.some((o) => o.includes('fe80'))).toBe(false);
         expect(origins.some((o) => o.includes('169.254'))).toBe(false);
     });
@@ -111,35 +111,35 @@ describe('lan-origins', () => {
 
     it('getAllowedOrigins always includes the two static localhost origins', async () => {
         const { getAllowedOrigins } = await import('./lan-origins.js');
-        expect(getAllowedOrigins()).toEqual(['http://localhost:4000', 'http://127.0.0.1:4000']);
+        expect(getAllowedOrigins()).toEqual(['http://localhost:4300', 'http://127.0.0.1:4300']);
     });
 
     it('getAllowedOrigins appends LAN origins when the env is on', async () => {
         process.env['ATLAS_LAN_ACCESS'] = 'true';
         const { getAllowedOrigins } = await import('./lan-origins.js');
         const allowed = getAllowedOrigins();
-        expect(allowed).toContain('http://localhost:4000');
-        expect(allowed).toContain('http://127.0.0.1:4000');
-        expect(allowed).toContain('http://192.168.1.50:4000');
+        expect(allowed).toContain('http://localhost:4300');
+        expect(allowed).toContain('http://127.0.0.1:4300');
+        expect(allowed).toContain('http://192.168.1.50:4300');
     });
 
     it('getTrustedBrowserOrigins returns a Set with the same entries', async () => {
         process.env['ATLAS_LAN_ACCESS'] = 'true';
         const { getTrustedBrowserOrigins } = await import('./lan-origins.js');
         const trusted = getTrustedBrowserOrigins();
-        expect(trusted.has('http://localhost:4000')).toBe(true);
-        expect(trusted.has('http://127.0.0.1:4000')).toBe(true);
-        expect(trusted.has('http://192.168.1.50:4000')).toBe(true);
+        expect(trusted.has('http://localhost:4300')).toBe(true);
+        expect(trusted.has('http://127.0.0.1:4300')).toBe(true);
+        expect(trusted.has('http://192.168.1.50:4300')).toBe(true);
     });
 
     it('trusts the HTTPS origin only when ATLAS_HTTPS_PORT is set', async () => {
         const { getAllowedOrigins } = await import('./lan-origins.js');
         delete process.env['ATLAS_HTTPS_PORT'];
         expect(getAllowedOrigins().some((o) => o.startsWith('https://'))).toBe(false);
-        process.env['ATLAS_HTTPS_PORT'] = '5443';
+        process.env['ATLAS_HTTPS_PORT'] = '5643';
         try {
             expect(getAllowedOrigins()).toEqual(
-                expect.arrayContaining(['https://localhost:5443', 'https://127.0.0.1:5443'])
+                expect.arrayContaining(['https://localhost:5643', 'https://127.0.0.1:5643'])
             );
             process.env['ATLAS_HTTPS_PORT'] = 'not-a-port';
             expect(getAllowedOrigins().some((o) => o.startsWith('https://'))).toBe(false);

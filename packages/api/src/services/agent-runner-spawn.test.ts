@@ -14,7 +14,7 @@ describe('claudeIsolationArgs', () => {
         expect(args.slice(0, 3)).toEqual(['--setting-sources', 'project,local', '--strict-mcp-config']);
         expect(args[3]).toBe('--mcp-config');
         expect(JSON.parse(args[4] ?? '')).toEqual({
-            mcpServers: { atlas: { type: 'http', url: 'http://127.0.0.1:4500/mcp' } },
+            mcpServers: { atlas: { type: 'http', url: 'http://127.0.0.1:4600/mcp' } },
         });
         expect(args).toHaveLength(5);
     });
@@ -130,12 +130,12 @@ describe('agentRunEnv', () => {
         expect(agentRunEnv('claude', 'claude-opus-4-7', null, null)['ATLAS_API_URL']).toBe('http://127.0.0.1:4101');
     });
 
-    it('falls back to PORT, then 4001', () => {
+    it('falls back to PORT, then 4301', () => {
         delete process.env['API_PORT'];
         process.env['PORT'] = '5001';
         expect(agentRunEnv('copilot', 'gpt-5.4', null, null)['ATLAS_API_URL']).toBe('http://127.0.0.1:5001');
         delete process.env['PORT'];
-        expect(agentRunEnv('copilot', 'gpt-5.4', null, null)['ATLAS_API_URL']).toBe('http://127.0.0.1:4001');
+        expect(agentRunEnv('copilot', 'gpt-5.4', null, null)['ATLAS_API_URL']).toBe('http://127.0.0.1:4301');
     });
 
     it('keeps the git credential env and layers the ollama overlay last', () => {

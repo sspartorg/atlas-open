@@ -7,10 +7,10 @@ import { config as loadDotenv } from 'dotenv';
 import { visualizer } from 'rollup-plugin-visualizer';
 
 // Honor WEB_PORT + API_PROXY_TARGET env vars so the E2E suite can spin a
-// dedicated web on :6000 proxying to api on :6001 alongside any dev
-// :4000/:4001 instance. Defaults preserved for the standard dev flow.
+// dedicated web on :7010 proxying to api on :7001 alongside any dev
+// :4300/:4301 instance. Defaults preserved for the standard dev flow.
 //
-// ATLAS_ENV=prod picks .env.prod (web on 5000, proxy to api on 5001).
+// ATLAS_ENV=prod picks .env.prod (web on 5300, proxy to api on 5301).
 // Otherwise reads .env (dev defaults). Mirrors packages/api/src/load-env.ts
 // so vite's WEB_PORT / API_PROXY_TARGET come from the same source of truth
 // as the API's DATABASE_URL / API_PORT.
@@ -20,8 +20,8 @@ loadDotenv({ path: path.resolve(__dirname, '..', '..', envFile) });
 
 // Prefer WEB_PORT so dev/prod/E2E never fight over a shared PORT var. Fall
 // back to PORT for tools that only set the generic var.
-const WEB_PORT = Number(process.env.WEB_PORT ?? process.env.PORT) || 4000;
-const API_TARGET = process.env.API_PROXY_TARGET || 'http://127.0.0.1:4001';
+const WEB_PORT = Number(process.env.WEB_PORT ?? process.env.PORT) || 4300;
+const API_TARGET = process.env.API_PROXY_TARGET || 'http://127.0.0.1:4301';
 
 // Production is served by `vite preview` (`pnpm start`), which gzips on the
 // fly and marks every file `Cache-Control: no-cache`. For hashed assets that
@@ -126,7 +126,7 @@ export default defineConfig(({ mode }) => ({
   },
   server: {
     port: WEB_PORT,
-    // Accept LAN mDNS hostnames (e.g. http://mymac.local:4000) so the dev
+    // Accept LAN mDNS hostnames (e.g. http://mymac.local:4300) so the dev
     // server can be reached from other machines on the network — Vite's
     // default host check only allows localhost. Leading dot = any *.local.
     allowedHosts: ['.local'],

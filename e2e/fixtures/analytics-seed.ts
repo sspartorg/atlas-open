@@ -12,10 +12,10 @@ import { marketplaceService, MarketplaceSlugTakenError } from '../../packages/ap
 // Jira-sourced Tasks, two agent-test Tasks and terminal sessions. Seeded
 // relative to now with a fixed RNG, so the shape is the same every run.
 //
-//   DATABASE_URL=postgres://atlas:atlas@localhost:5500/atlas_e2e pnpm exec tsx e2e/fixtures/analytics-seed.ts
+//   DATABASE_URL=postgres://atlas:atlas@localhost:5600/atlas_open_e2e pnpm exec tsx e2e/fixtures/analytics-seed.ts
 //   … analytics-seed.ts --clean    # remove everything it wrote
 //
-// `pnpm e2e:seed:analytics` runs the first against atlas_e2e (add `-- --clean`
+// `pnpm e2e:seed:analytics` runs the first against atlas_open_e2e (add `-- --clean`
 // to remove it) — e.g. on a stack brought up by `e2e/global-setup.ts`, to look
 // at the pages by hand. The spec seeds
 // in beforeAll and cleans in afterAll, so the rest of the suite still sees the
@@ -29,8 +29,8 @@ import { marketplaceService, MarketplaceSlugTakenError } from '../../packages/ap
 // are not on github.com (the PR-state tick would try to fetch them).
 
 const url = process.env['DATABASE_URL'] ?? '';
-if (!/\/atlas_e2e(\?|$)/.test(url)) {
-    throw new Error(`analytics-seed only writes to atlas_e2e, got ${url || '(unset)'}`);
+if (!/\/atlas_open_e2e(\?|$)/.test(url)) {
+    throw new Error(`analytics-seed only writes to atlas_open_e2e, got ${url || '(unset)'}`);
 }
 
 const ROOT = new URL('../..', import.meta.url).pathname;
@@ -140,7 +140,7 @@ async function seed(): Promise<void> {
         await db.insertInto('projects').values({ id: p.id, name: p.name, issue_key_prefix: p.prefix, description: `${p.name} (analytics fixture)` }).execute();
         await db
             .insertInto('project_repos')
-            .values({ id: p.id, project_id: p.id, name: p.repo, git_path: `/tmp/atlas-e2e-analytics/${p.repo}`, git_url: '', default_branch: 'main', clone_status: 'ready', position: 0 })
+            .values({ id: p.id, project_id: p.id, name: p.repo, git_path: `/tmp/atlas-open-e2e-analytics/${p.repo}`, git_url: '', default_branch: 'main', clone_status: 'ready', position: 0 })
             .execute();
     }
     const WORKFLOWS = [

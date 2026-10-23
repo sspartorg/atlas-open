@@ -21,7 +21,7 @@ describe('loadConfig', () => {
         delete process.env['ATLAS_MCP_TIMEOUT_MS'];
         delete process.env['ATLAS_MCP_TOKEN'];
         const c = loadConfig();
-        expect(c.apiBase).toBe('http://127.0.0.1:4001');
+        expect(c.apiBase).toBe('http://127.0.0.1:4301');
         expect(c.requestTimeoutMs).toBe(15_000);
         expect(c.mcpToken).toBe('');
     });

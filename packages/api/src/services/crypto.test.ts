@@ -68,7 +68,7 @@ describe('crypto', () => {
                 expect(mod.decrypt(cipher)).toBe('payload');
                 expect(
                     fs.existsSync(
-                        path.join(tmpHome, 'AppData', 'Roaming', 'Atlas', 'workspace.key'),
+                        path.join(tmpHome, 'AppData', 'Roaming', 'AtlasOpen', 'workspace.key'),
                     ),
                 ).toBe(true);
             } finally {
@@ -108,7 +108,7 @@ describe('crypto', () => {
                 expect(mod.decrypt(cipher)).toBe('payload');
                 expect(
                     fs.existsSync(
-                        path.join(tmpCwd, 'AppData', 'Roaming', 'Atlas', 'workspace.key'),
+                        path.join(tmpCwd, 'AppData', 'Roaming', 'AtlasOpen', 'workspace.key'),
                     ),
                 ).toBe(true);
             } finally {

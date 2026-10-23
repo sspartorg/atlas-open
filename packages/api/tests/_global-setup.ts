@@ -1,5 +1,5 @@
 // Vitest globalSetup. Runs ONCE before any test file loads. Responsible for:
-//   1. Computing the test DATABASE_URL (default: atlas_test on the local PG).
+//   1. Computing the test DATABASE_URL (default: atlas_open_test on the local PG).
 //   2. Ensuring the test DB exists (CREATE DATABASE if missing).
 //   3. Running Knex migrations against it.
 //
@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const { Client } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const DEFAULT_TEST_URL = 'postgres://atlas:atlas@localhost:5500/atlas_test';
+const DEFAULT_TEST_URL = 'postgres://atlas:atlas@localhost:5600/atlas_open_test';
 
 function parseDbName(url: string): { adminUrl: string; dbName: string } {
     // postgres://user:pass@host:port/dbname
@@ -76,7 +76,7 @@ export default async function setup(): Promise<() => Promise<void>> {
     const { adminUrl, dbName } = parseDbName(testUrl);
     const runLock = new Client({ connectionString: adminUrl });
     await runLock.connect();
-    const lockKey = `atlas-vitest:${dbName}`;
+    const lockKey = `atlas-open-vitest:${dbName}`;
     const got = await runLock.query<{ ok: boolean }>('SELECT pg_try_advisory_lock(hashtext($1)) AS ok', [lockKey]);
     if (!got.rows[0]?.ok) {
         console.warn(`[vitest] another api test run holds ${dbName}; waiting for it to finish…`);

@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { runSeed } from '../../packages/api/src/db/seed.js';
 import { db } from '../../packages/api/src/db/kysely-client.js';
 
-const DATA = process.env['GUIDE_DATA'] ?? '/tmp/atlas-guide';
+const DATA = process.env['GUIDE_DATA'] ?? '/tmp/atlas-open-guide';
 const WORKSPACE = join(DATA, 'workspace');
 const ORIGINS = join(DATA, 'origins');
 const PROJECT_ID = 'acme-notes';

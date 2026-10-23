@@ -1,5 +1,5 @@
 // Postgres test fixture. The whole api test suite shares ONE PG database
-// (`atlas_test` by default) — Knex migrations are applied once in the
+// (`atlas_open_test` by default) — Knex migrations are applied once in the
 // vitest `globalSetup`, and each test calls `truncateAll()` in `beforeEach`
 // to wipe data without paying schema-rebuild cost.
 //
@@ -59,8 +59,6 @@ export async function closeTestDb(): Promise<void> {
 const TRUNCATE_TABLES = [
     // ADR 0014 — listed explicitly for the same reason as cli_sessions.
     'workflow_runs',
-    // Migration 041 — Marketplace entries published from workflows.
-    'published_workflows',
     'workflows',
     // 2026-06-22 — Terminal v1. FK → projects.id with ON DELETE CASCADE,
     // but listed explicitly so tests that only touch cli_sessions still
@@ -83,8 +81,6 @@ const TRUNCATE_TABLES = [
     // Migration 010 — cascades from projects, but truncate runs before them.
     'jira_sources',
     'jira_config',
-    // Migration 004 — team config sync singleton.
-    'team_config',
     'items',
     // Migration 043 — a project's extra repos (ADR 0017).
     'project_repos',

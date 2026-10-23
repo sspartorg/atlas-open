@@ -13,7 +13,7 @@ import { sql } from '../helpers/db.js';
 // delivered to the real service worker over CDP, which must show the OS
 // notification. The producer is a real run park.
 
-const PUSH_PORT = 6094;
+const PUSH_PORT = 7094;
 const ENDPOINT = `https://127.0.0.1:${PUSH_PORT}/push/e2e-device`;
 // Written by global-setup, which also makes the API trust it.
 const TLS = new URL('../../e2e-logs/push-tls/', import.meta.url).pathname;

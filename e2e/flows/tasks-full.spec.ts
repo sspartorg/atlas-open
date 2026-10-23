@@ -22,8 +22,8 @@ async function cleanup(request: APIRequestContext) {
 test.beforeAll(async ({ request }) => {
     await cleanup(request);
     projectId = (await createProject(request, NAME, 'WTK')).id;
-    insertRepo(projectId, { id: `${projectId}-api`, name: 'wombat-api', git_path: '/tmp/atlas-e2e-wombat-api' });
-    insertRepo(projectId, { id: `${projectId}-web`, name: 'wombat-web', git_path: '/tmp/atlas-e2e-wombat-web', position: 1 });
+    insertRepo(projectId, { id: `${projectId}-api`, name: 'wombat-api', git_path: '/tmp/atlas-open-e2e-wombat-api' });
+    insertRepo(projectId, { id: `${projectId}-web`, name: 'wombat-web', git_path: '/tmp/atlas-open-e2e-wombat-web', position: 1 });
     agentId = one('SELECT id FROM agents ORDER BY created_at LIMIT 1');
     for (let i = 1; i <= COUNT; i++) {
         await apiPost(request, '/api/tasks', { project_id: projectId, title: `Wombat ${String.fromCharCode(64 + i)} task`, repo_ids: [`${projectId}-api`], description: i === 7 ? 'mentions the burrow' : '' });

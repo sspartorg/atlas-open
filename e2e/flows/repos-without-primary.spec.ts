@@ -15,7 +15,7 @@ const REPO_B = 'e2e-equal-repo-b';
 function psql(sql: string): void {
     execFileSync(
         'docker',
-        ['exec', 'atlas-postgres', 'psql', '-U', 'atlas', '-d', 'atlas_e2e', '-c', sql],
+        ['exec', 'atlas-open-postgres', 'psql', '-U', 'atlas', '-d', 'atlas_open_e2e', '-c', sql],
         { stdio: 'pipe' }
     );
 }
@@ -35,7 +35,7 @@ test.describe('repos without a primary (ADR 0018)', () => {
         ] as const) {
             psql(
                 `INSERT INTO project_repos (id, project_id, name, git_url, git_path, position) ` +
-                    `VALUES ('${id}', '${PROJECT_ID}', '${name}', 'https://github.com/e2e/${name}', '/tmp/atlas-e2e-${name}', ${pos})`
+                    `VALUES ('${id}', '${PROJECT_ID}', '${name}', 'https://github.com/e2e/${name}', '/tmp/atlas-open-e2e-${name}', ${pos})`
             );
         }
     });

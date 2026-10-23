@@ -5,7 +5,7 @@ import { goto } from '../helpers/nav.js';
 // → assert moves to history. Auth note: ATLAS_MCP_TOKEN defaults to '' in
 // dev (open gate); Playwright request fixture sends no token, which is fine.
 
-const API = 'http://127.0.0.1:6001';
+const API = 'http://127.0.0.1:7001';
 
 test.describe('Reminder flow', () => {
     let reminderId = 0;

@@ -90,7 +90,7 @@ Flags:
 Both `.env` and `.env.prod` are always created — the dev and prod local stacks
 are designed to coexist, so leaving one out breaks the other.
 
-After it finishes, run `pnpm dev` and open <http://localhost:4000>.
+After it finishes, run `pnpm dev` and open <http://localhost:4300>.
 
 If the script just enabled WSL2 for you, reboot Windows once before `pnpm dev`
 so Docker Desktop's engine can come up cleanly. For real AI agent runs, also
@@ -222,7 +222,7 @@ pnpm doctor    # verifies Node, pnpm, Docker, and Postgres connectivity — run 
 pnpm dev
 ```
 
-The web UI opens at `http://localhost:4000`. The API runs at `http://localhost:4001`.
+The web UI opens at `http://localhost:4300`. The API runs at `http://localhost:4301`.
 On first run you'll see the onboarding wizard — enter a display name and pick a
 local folder to use as your workspace (any path you want).
 
@@ -231,9 +231,14 @@ can coexist with each other and with any other app on the machine:
 
 | Tier | Web | API | MCP | Postgres (host) | Postgres DB |
 |---|---|---|---|---|---|
-| Dev  | 4000 | 4001 | 4500 | 5500 | `atlas` |
-| Prod | 5000 | 5001 | 4500 | 5510 | `atlas_prod` |
-| E2E  | 6000 | 6001 | —    | 5500 (dev container, separate DB) | `atlas_e2e` |
+| Dev  | 4300 | 4301 | 4600 | 5600 | `atlas_open` |
+| Prod | 5300 | 5301 | 4600 | 5610 | `atlas_open_prod` |
+| E2E  | 7010 | 7001 | —    | 5600 (dev container, separate DB) | `atlas_open_e2e` |
+
+These ranges are chosen so Atlas Open runs side by side with the commercial
+Atlas edition (4000/4001, MCP 4500, Postgres 5500): separate ports, a separate
+`atlas-open-postgres` container and volume, and a separate data folder
+(`~/.config/AtlasOpen`, `%APPDATA%\AtlasOpen` on Windows).
 
 ---
 
@@ -245,12 +250,12 @@ They live in the same repo, share `node_modules`, and never collide:
 
 | Surface | Dev (`pnpm dev`) | Prod (`pnpm prod`) |
 |---|---|---|
-| Web port | `4000` | `5000` |
-| API port | `4001` | `5001` |
-| Postgres host port | `5500` | `5510` |
-| Postgres container | `atlas-postgres` | `atlas-postgres-prod` |
-| Postgres data volume | `atlas-pg` | `atlas-pg-prod` |
-| Postgres database | `atlas` | `atlas_prod` |
+| Web port | `4300` | `5300` |
+| API port | `4301` | `5301` |
+| Postgres host port | `5600` | `5610` |
+| Postgres container | `atlas-open-postgres` | `atlas-open-postgres-prod` |
+| Postgres data volume | `atlas-open-pg` | `atlas-open-pg-prod` |
+| Postgres database | `atlas` | `atlas_open_prod` |
 | Env file | `.env` | `.env.prod` |
 | HMR / watch | ✅ vite HMR + tsx watch | ❌ vite preview + plain tsx |
 
@@ -268,8 +273,8 @@ time:
 
 ```bash
 cp .env.prod.example .env.prod   # then edit creds / tokens as needed
-pnpm prod                        # first boot starts atlas-postgres-prod
-                                 # and runs migrations against atlas_prod
+pnpm prod                        # first boot starts atlas-open-postgres-prod
+                                 # and runs migrations against atlas_open_prod
 ```
 
 ### Faster prod: HTTPS + HTTP/2 (`pnpm prod:https`)
@@ -277,21 +282,21 @@ pnpm prod                        # first boot starts atlas-postgres-prod
 `vite preview` speaks HTTP/1.1, so the browser fetches six files at a time
 while a cold page makes 30–65 requests. `pnpm prod:https` runs the same prod
 chain but serves the UI through [Caddy](https://caddyserver.com) at
-**https://localhost:5443** with HTTP/2 and HTTP/3, the build's Brotli files,
+**https://localhost:5643** with HTTP/2 and HTTP/3, the build's Brotli files,
 immutable caching for `/assets`, and `/api` (SSE + WebSockets) proxied to
 the API. Measured on slow 4G it loads pages 5–25% sooner (ADR 0031).
 
 ```bash
 brew install caddy     # once (Linux: your package manager; Windows: winget install CaddyServer.Caddy)
 caddy trust            # once: trusts Caddy's local CA (asks for your password)
-pnpm prod:https        # https://localhost:5443
+pnpm prod:https        # https://localhost:5643
 ```
 
-It sets `ATLAS_HTTPS_PORT=5443`, which makes the web serve via Caddy
+It sets `ATLAS_HTTPS_PORT=5643`, which makes the web serve via Caddy
 (`packages/web/Caddyfile`, started by `scripts/serve.mjs`) and makes the API
-trust `https://localhost:5443` as a browser origin. Plain `pnpm prod` is
+trust `https://localhost:5643` as a browser origin. Plain `pnpm prod` is
 unchanged. LAN access over HTTPS isn't covered — LAN devices keep using
-`http://<ip>:5000`.
+`http://<ip>:5300`.
 
 Useful prod-side scripts (all driven by `cross-env ATLAS_ENV=prod`):
 
@@ -313,16 +318,16 @@ be a one-liner.
 
 `pnpm dev` chains four steps in order:
 
-1. **`pnpm db:up`** — brings up the `atlas-postgres` container via
+1. **`pnpm db:up`** — brings up the `atlas-open-postgres` container via
    `docker compose up -d postgres`. The compose file at the repo root pins
-   pgvector/pgvector:pg16, host port 5500 → container port 5432, with
+   pgvector/pgvector:pg16, host port 5600 → container port 5432, with
    `atlas`/`atlas`/`atlas` defaults (matching `DATABASE_URL` in
    `.env.example`).
 2. **`pnpm db:wait`** — polls until Postgres accepts a connection (≤60 s).
 3. **`pnpm db:migrate`** — applies Knex migrations from
    `packages/api/src/db/migrations/`.
-4. **`pnpm --parallel -r dev`** — starts the API (Fastify on `:4001`) and
-   the web UI (Vite on `:4000`) in parallel.
+4. **`pnpm --parallel -r dev`** — starts the API (Fastify on `:4301`) and
+   the web UI (Vite on `:4300`) in parallel.
 
 All four steps are pure Node — no PowerShell, no shell-specific syntax. The
 same `pnpm dev` works identically on Windows, macOS, and Linux.
@@ -349,8 +354,8 @@ wizard.
 
 ## Multi-device access (LAN)
 
-By default, Atlas only trusts browser requests from `localhost:4000` and
-`127.0.0.1:4000` (dev) — `localhost:5000` / `127.0.0.1:5000` on prod. Open the
+By default, Atlas only trusts browser requests from `localhost:4300` and
+`127.0.0.1:4300` (dev) — `localhost:5300` / `127.0.0.1:5300` on prod. Open the
 UI from a second device on the same Wi-Fi and you can READ data (the page
 renders, SSE arrives) but every WRITE silently fails — the API blocks the
 cross-origin POST/PATCH.
@@ -364,7 +369,7 @@ ATLAS_LAN_ACCESS=true
 Then restart the API. On boot you'll see something like:
 
 ```
-[security] ATLAS_LAN_ACCESS=true — trusting LAN origins for CORS + MCP-token gate: http://192.168.1.50:4000, http://10.0.0.5:4000
+[security] ATLAS_LAN_ACCESS=true — trusting LAN origins for CORS + MCP-token gate: http://192.168.1.50:4300, http://10.0.0.5:4300
 ```
 
 Both ends of the trust contract are updated: the CORS allowlist accepts the
@@ -380,14 +385,14 @@ any other device on the network.
 ## Connecting Atlas to your AI CLI (MCP)
 
 The Atlas API hosts an MCP listener in-process at
-`http://127.0.0.1:4500/mcp`. Your AI clients (Claude Code, Claude Desktop,
+`http://127.0.0.1:4600/mcp`. Your AI clients (Claude Code, Claude Desktop,
 GitHub Copilot CLI) connect to that single URL. No repo paths, no tokens, no
 copy-paste between dev and prod, no `<REPO>` placeholders to update when you
 move the clone.
 
 **One URL, two stacks.** Whichever local stack (`pnpm dev` or `pnpm prod`)
-starts first owns port 4500 and serves MCP. The other instance catches
-`EADDRINUSE`, logs `[mcp] port 4500 in use — running API-only`, and serves
+starts first owns port 4600 and serves MCP. The other instance catches
+`EADDRINUSE`, logs `[mcp] port 4600 in use — running API-only`, and serves
 its own `/api/*` traffic without MCP. To hand MCP over, stop the owning
 instance and start the other — the client config never changes.
 
@@ -406,7 +411,7 @@ stack — useful for headless / CI runs, but then no client can connect.
 From any directory:
 
 ```powershell
-claude mcp add-json atlas --scope user '{\"url\":\"http://127.0.0.1:4500/mcp\"}'
+claude mcp add-json atlas --scope user '{\"url\":\"http://127.0.0.1:4600/mcp\"}'
 ```
 
 Verify with `claude mcp list` — you want `atlas ✓ Connected`. The `--scope
@@ -428,7 +433,7 @@ if the file is empty), then fully restart the desktop app:
 {
   "mcpServers": {
     "atlas": {
-      "url": "http://127.0.0.1:4500/mcp"
+      "url": "http://127.0.0.1:4600/mcp"
     }
   }
 }
@@ -446,7 +451,7 @@ sessions:
   "mcpServers": {
     "atlas": {
       "type": "http",
-      "url": "http://127.0.0.1:4500/mcp",
+      "url": "http://127.0.0.1:4600/mcp",
       "tools": ["*"]
     }
   }
@@ -469,7 +474,7 @@ same zero-credential client config:
     "atlas": {
       "type": "local",
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://127.0.0.1:4500/mcp"],
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:4600/mcp"],
       "tools": ["*"]
     }
   }
@@ -482,7 +487,7 @@ The MCP package still ships a stdio entry point at `packages/mcp/src/index.ts`
 for CI and sandboxed environments where the API process can't host the
 listener. See [`.agents/mcp.md`](.agents/mcp.md) for that path — it requires
 a built `dist/`, a `ATLAS_API_BASE` env var, and manual reconfiguration when
-you switch between dev (4001) and prod (5001). The HTTP host above is the
+you switch between dev (4301) and prod (5301). The HTTP host above is the
 supported flow for every other case.
 
 ---
@@ -610,9 +615,9 @@ that's Docker Desktop in the system tray. On Linux it's `systemctl status
 docker`.
 
 **`postgres did not become ready within 60s`** — usually means the container
-crashed mid-boot. `docker logs atlas-postgres` shows the cause; the most
-common is host port 5500 already in use. Stop whatever else is bound there
-(`netstat -ano | findstr :5500` on Windows, `lsof -iTCP:5500 -sTCP:LISTEN` on
+crashed mid-boot. `docker logs atlas-open-postgres` shows the cause; the most
+common is host port 5600 already in use. Stop whatever else is bound there
+(`netstat -ano | findstr :5600` on Windows, `lsof -iTCP:5600 -sTCP:LISTEN` on
 Mac/Linux) or change the host port in `docker-compose.yml`.
 
 **Can't write from a second device on the LAN** — set
@@ -626,7 +631,7 @@ PowerShell dependency on any OS.
 **Credentials decrypt to garbage after deleting `workspace.key` on macOS.**
 macOS doesn't expose a stable machine ID Atlas can re-derive
 `workspace.key` from, so the file is generated with random bytes on first
-boot. If you delete `~/.config/Atlas/workspace.key` (or move to a new
+boot. If you delete `~/.config/AtlasOpen/workspace.key` (or move to a new
 mac), the new key won't decrypt your old stored credentials — re-enter
 Credentials in the UI. On Windows and Linux the key is re-derived from
 `MachineGuid` / `/etc/machine-id`, so it survives file deletion on the

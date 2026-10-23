@@ -36,13 +36,13 @@ matching env file and downstream config:
 
 | Surface | Dev (default, `pnpm dev`) | Prod (`pnpm prod`) |
 |---|---|---|
-| Web port | 4000 | 5000 |
-| API port | 4001 | 5001 |
-| MCP port | 4500 (shared, first-boot-wins) | 4500 |
-| Postgres host port | 5500 | 5510 |
-| Container | `atlas-postgres` | `atlas-postgres-prod` |
-| Data volume | `atlas-pg` | `atlas-pg-prod` |
-| DB name | `atlas` | `atlas_prod` |
+| Web port | 4300 | 5300 |
+| API port | 4301 | 5301 |
+| MCP port | 4600 (shared, first-boot-wins) | 4600 |
+| Postgres host port | 5600 | 5610 |
+| Container | `atlas-open-postgres` | `atlas-open-postgres-prod` |
+| Data volume | `atlas-open-pg` | `atlas-open-pg-prod` |
+| DB name | `atlas` | `atlas_open_prod` |
 | Env file | `.env` | `.env.prod` |
 
 Web reads `WEB_PORT`; API reads `API_PORT` (each with a `PORT` fallback for
@@ -57,16 +57,16 @@ the ports / container swapped.
 â”‚                                                                        â”‚
 â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”         â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
 â”‚  â”‚   Vite dev server    â”‚         â”‚     Fastify API server         â”‚   â”‚
-â”‚  â”‚   (Port 4000 dev /   â”‚         â”‚     (Port 4001 dev /           â”‚   â”‚
-â”‚  â”‚    5000 prod)        â”‚         â”‚      5001 prod)                â”‚   â”‚
+â”‚  â”‚   (Port 4300 dev /   â”‚         â”‚     (Port 4301 dev /           â”‚   â”‚
+â”‚  â”‚    5300 prod)        â”‚         â”‚      5301 prod)                â”‚   â”‚
 â”‚  â”‚   serves @atlas/web â”‚ â—€â”€HTTPâ”€â–¶â”‚                                â”‚   â”‚
 â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜         â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”‚   â”‚
 â”‚                                   â”‚  â”‚ Kysely â†’ pg.Pool         â”‚  â”‚   â”‚
 â”‚                                   â”‚  â”‚ Postgres 16 (docker;     â”‚  â”‚   â”‚
-â”‚                                   â”‚  â”‚  service `atlas-postgresâ”‚  â”‚   â”‚
-â”‚                                   â”‚  â”‚  on :5500, or            â”‚  â”‚   â”‚
-â”‚                                   â”‚  â”‚  atlas-postgres-prod on â”‚  â”‚   â”‚
-â”‚                                   â”‚  â”‚  :5510 in prod)          â”‚  â”‚   â”‚
+â”‚                                   â”‚  â”‚  service `atlas-open-postgresâ”‚  â”‚   â”‚
+â”‚                                   â”‚  â”‚  on :5600, or            â”‚  â”‚   â”‚
+â”‚                                   â”‚  â”‚  atlas-open-postgres-prod on â”‚  â”‚   â”‚
+â”‚                                   â”‚  â”‚  :5610 in prod)          â”‚  â”‚   â”‚
 â”‚                                   â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â”‚   â”‚
 â”‚                                   â”‚                                â”‚   â”‚
 â”‚                                   â”‚  spawn child_process per task: â”‚   â”‚
@@ -106,7 +106,7 @@ Every spawn point in the process model is a cross-platform binary:
 
 Auto-fetch runs in Node on every OS â€” `auto-fetch-runner.ts` calls the typed `performAutoFetch()` in `services/auto-fetch.ts`, which shells out to `git` via `execFile`. The previous PowerShell holdout (`auto-fetch.ps1`) was retired in C01.
 
-The CORS allowlist + `requireMcpToken` trusted-browser-origin set are computed from `utils/lan-origins.ts`. When `ATLAS_LAN_ACCESS=true`, the helper walks `os.networkInterfaces()` for non-loopback non-link-local IPv4 addresses and adds `http://<ip>:${WEB_PORT}` (dev 4000 / prod 5000) to both sets, plus the machine's mDNS name `http://<hostname>.local:${WEB_PORT}` (lowercased, one `.local` suffix) so LAN browsers can use the friendly name instead of an IP. Vite mirrors this with `server.allowedHosts: ['.local']`. The boot log lists what got added.
+The CORS allowlist + `requireMcpToken` trusted-browser-origin set are computed from `utils/lan-origins.ts`. When `ATLAS_LAN_ACCESS=true`, the helper walks `os.networkInterfaces()` for non-loopback non-link-local IPv4 addresses and adds `http://<ip>:${WEB_PORT}` (dev 4300 / prod 5300) to both sets, plus the machine's mDNS name `http://<hostname>.local:${WEB_PORT}` (lowercased, one `.local` suffix) so LAN browsers can use the friendly name instead of an IP. Vite mirrors this with `server.allowedHosts: ['.local']`. The boot log lists what got added.
 
 ### Security â€” write gate & origin allowlist
 
@@ -134,7 +134,7 @@ The API has exactly one auth gate: a global Fastify `onRequest` hook (`server.ts
 **What is allowed**
 
 1. **Empty token (`ATLAS_MCP_TOKEN=""`)** â€” gate is bypassed entirely. **Reaching this state now takes `ATLAS_MCP_TOKEN_OPEN=1`**: `main.ts` generates a 48-byte token at boot when the var is empty and persists it to the root env file, so a fresh install is closed by default (F-021). Only the e2e suite opts out, because it writes over plain HTTP with no browser headers.
-2. **Trusted browser origin** â€” `Origin` header matches the static set (`http://localhost:${WEB_PORT}`, `http://127.0.0.1:${WEB_PORT}` â€” dev 4000 / prod 5000) plus, when `ATLAS_LAN_ACCESS=true`, the host's non-loopback IPv4s.
+2. **Trusted browser origin** â€” `Origin` header matches the static set (`http://localhost:${WEB_PORT}`, `http://127.0.0.1:${WEB_PORT}` â€” dev 4300 / prod 5300) plus, when `ATLAS_LAN_ACCESS=true`, the host's non-loopback IPv4s.
 3. **Matching token header** â€” `X-Atlas-Token` equals `ATLAS_MCP_TOKEN`. This is the path the MCP server uses for write-side calls.
 
 **What is rejected**

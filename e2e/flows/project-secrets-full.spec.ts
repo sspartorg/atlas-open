@@ -21,7 +21,7 @@ async function cleanup(request: APIRequestContext) {
 test.beforeAll(async ({ request }) => {
     await cleanup(request);
     projectId = (await createProject(request, NAME, 'ZSC')).id;
-    insertRepo(projectId, { id: `${projectId}-r`, name: 'zephyr', git_path: '/tmp/atlas-e2e-zephyr' });
+    insertRepo(projectId, { id: `${projectId}-r`, name: 'zephyr', git_path: '/tmp/atlas-open-e2e-zephyr' });
 });
 test.afterAll(async ({ request }) => cleanup(request));
 

@@ -27,7 +27,7 @@ const child = spawn(cmd, args, {
     env: {
         ...process.env,
         ATLAS_WEB_DIST: join(WEB, 'dist'),
-        API_PORT: process.env.API_PORT || '4001',
+        API_PORT: process.env.API_PORT || '4301',
     },
 });
 child.on('error', (err) => {

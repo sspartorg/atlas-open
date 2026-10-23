@@ -34,7 +34,7 @@
 6. An unresolved `${variable.KEY}` is fatal — the run finalises with `status = 'setup_failed'` and the CLI never spawns. (`project-setup-runner.ts:100-107`)
 7. The script gets **5 minutes**. Configurable via the `ATLAS_SETUP_TIMEOUT_MS` env var on the API host. Stdout/stderr captured up to 8 MB. (`project-setup-runner.ts:47-48, 113`)
 8. On failure the output is **redacted** — every secret value with length ≥ 4 is replaced with `***` before storage in `agent_runs.setup_output_text`. (`project-setup-runner.ts:49, 54-61`)
-9. Secrets at rest are AES-256-GCM encrypted with a workspace key file under `%APPDATA%/Atlas/workspace.key` (Windows) or `~/.config/Atlas/workspace.key` (POSIX). (`crypto.ts:7, 12-24`)
+9. Secrets at rest are AES-256-GCM encrypted with a workspace key file under `%APPDATA%/AtlasOpen/workspace.key` (Windows) or `~/.config/AtlasOpen/workspace.key` (POSIX). (`crypto.ts:7, 12-24`)
 10. **Anything the script leaves in the worktree root is committed and pushed.** `commitPending` runs `git add -A` before delivery, and `ensureWorktreeGitignore` only adds `.atlas/`, `.claude/commands/atlas-*` and `.github/prompts/atlas-*`. A marker file, a cache, a build artifact or a lockfile the repo does not already ignore will appear in the pull request. Write scratch to `$TMPDIR`, or add the path to the repo's own `.gitignore`.
 11. The script must be **idempotent** — Atlas runs it every time a worktree is provisioned for an agent run, not just once at project creation.
 
@@ -176,7 +176,7 @@ for (k, v) in project_env_vars(projectId):  merged[k] = v   # project overwrites
 ### Encryption at rest
 
 - Algorithm: AES-256-GCM (`packages/api/src/services/crypto.ts:7`).
-- Key file: `%APPDATA%/Atlas/workspace.key` (Windows) or `~/.config/Atlas/workspace.key` (POSIX). Override via the `ATLAS_DATA_DIR` env var. (`crypto.ts:12-24`)
+- Key file: `%APPDATA%/AtlasOpen/workspace.key` (Windows) or `~/.config/AtlasOpen/workspace.key` (POSIX). Override via the `ATLAS_DATA_DIR` env var. (`crypto.ts:12-24`)
 - Key derivation: HKDF-SHA256 over a machine fingerprint (Windows MachineGuid or POSIX `/etc/machine-id`), with random-key fallback when no stable fingerprint is available. (`crypto.ts:38-71, 113-118`)
 - Filesystem ACL: `chmod 0o600` on POSIX, `icacls /inheritance:r /grant:r <user>:(R,W)` on Windows. (`crypto.ts:74-94`)
 

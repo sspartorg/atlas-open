@@ -1,6 +1,6 @@
 # Data Model
 
-> **2026-05 â€” Postgres migration in progress.** The DB engine is now Postgres 16 (docker compose service `atlas-postgres`, host port 5500 â†’ container port 5432). Schema is a single Knex migration: `packages/api/src/db/migrations/001_baseline.ts`. Items live in a **single `items` table with a `type` discriminator** and a `parent_id`/`parent_type` pair. Since migration 037 (ADR 0015, `docs/adr/0015-one-task-one-pr.md`) there are exactly two kinds: `task` (top level) and `sub_task` (a Task's child); epics became Tasks and stories / bugs / sub-bugs became sub-tasks. The legacy polymorphic side tables (`comments`, `issue_events`, `agent_runs`, `notifications`) now use a single `item_id` FK to `items` with `ON DELETE CASCADE`. The link table is renamed `item_links` and carries a `relation_type` column (`relates_to` or `depends_on`). The entity descriptions below document the per-kind API contract (`/api/tasks`, `/api/sub-tasks`); the storage shape is unified.
+> **2026-05 â€” Postgres migration in progress.** The DB engine is now Postgres 16 (docker compose service `atlas-open-postgres`, host port 5600 â†’ container port 5432). Schema is a single Knex migration: `packages/api/src/db/migrations/001_baseline.ts`. Items live in a **single `items` table with a `type` discriminator** and a `parent_id`/`parent_type` pair. Since migration 037 (ADR 0015, `docs/adr/0015-one-task-one-pr.md`) there are exactly two kinds: `task` (top level) and `sub_task` (a Task's child); epics became Tasks and stories / bugs / sub-bugs became sub-tasks. The legacy polymorphic side tables (`comments`, `issue_events`, `agent_runs`, `notifications`) now use a single `item_id` FK to `items` with `ON DELETE CASCADE`. The link table is renamed `item_links` and carries a `relation_type` column (`relates_to` or `depends_on`). The entity descriptions below document the per-kind API contract (`/api/tasks`, `/api/sub-tasks`); the storage shape is unified.
 
 **`priority` lives on both item kinds** (`low | normal | high | urgent`, default `'normal'`); the detail-page right rail's `<DetailsRailCard>` renders a priority chip wired to the kind's update mutation.
 
@@ -229,10 +229,10 @@ Fields: `id, item_id, link_kind, url, title, external_ref, created_at, created_b
 - `pr_state` ∈ `'open' | 'merged' | 'closed' | null` (migration 033, CHECK constraint) — last GitHub state observed for a PR link; null until the first successful lookup, and forever on a project with no credential.
 - `pr_state_checked_at` (DB only, not on the wire) — stamped on every lookup attempt, success or failure. Reading the links (`GET …/external-links`, every `/full` envelope) refreshes PR links older than 5 min in the background; `POST /api/issues/:type/:id/external-links/refresh` refreshes synchronously.
 - `ci_state` ∈ `'pending' | 'success' | 'failure' | null` (migration 023, CHECK) — CI on an **open** PR's head commit (check runs + legacy statuses, see `ci-routing.ts`). Null = no CI observed (a repo without checks, or never read), not success. `ci_failing_checks` = `ci_summary` jsonb `[{name, detail}]`, `[]` unless failing.
-- DB only: `ci_head_sha`, `ci_checked_at`, `ci_handled_sha`, `ci_fix_attempts`. The last two belong to the commercial edition's CI follow-through (automatic fix runs on red CI) and are never written in Atlas Open; here CI state only colours the PR chip.
+- DB only: `ci_head_sha`, `ci_checked_at`, `ci_handled_sha`. `ci_handled_sha` belongs to the commercial edition's CI follow-through (automatic fix runs on red CI) and is never written in Atlas Open; here CI state only colours the PR chip.
 
-### team_config / team_managed (migration 004) — schema only
-Team config sync is a commercial-edition feature. Atlas Open keeps the `team_config` singleton and `team_managed` on `projects` / `agents` / `workflows` (and `IProject.team_managed` stays on the wire), but no route or service reads or writes them; Settings → Reset clears `team_config`.
+### team_managed — schema only
+Team config sync is a commercial-edition feature. Atlas Open keeps `team_managed` on `projects` / `agents` / `workflows` (and `IProject.team_managed` stays on the wire, always `false`); no route or service writes it. The `team_config` table was dropped in the 2026-10-23 squash (ADR 0032).
 
 ### IJiraConfig / jira_sources / jira_issues (ADR 0016, migrations 042 + 044 + 010)
 `jira_config` is a singleton row holding the Jira bridge config. `IJiraConfig` returns every column except the token, and adds `api_token_set: boolean`:
@@ -415,7 +415,7 @@ Fields (`IWorkflowRunSummary` / `IWorkflowRunDetail`): `id, workflow_id ('solo')
 - `workflow_runs_one_live_per_item` allows one `running` or `waiting_for_owner` run per item. Only `running` locks item status / assignee writes (`workflow-lock.ts`); only `running` runs count against `MAX_PARALLEL_RUNS` (3).
 - Each agent step is an ordinary `agent_runs` row with `workflow_run_id` + `node_id = 'agent'`; a crash's one automatic retry is a second row with `parent_run_id` = the crashed step.
 - DB-only leftovers of the commercial edition: `parent_workflow_run_id`, `parent_node_id`, `loop_count`, `gate_rounds` and `repo_ids` (migration 019; read by `run-repos.ts` only for a run with no item). Atlas Open never writes the first four.
-- `workflows` itself is only the FK anchor: migration 020 seeds the `solo` row (`inactive`, `input_kind='none'`), and `startTaskRun` re-inserts it if missing. On an install upgraded from the commercial edition, older workflow rows remain `inactive` (and their runs remain as history); nothing in Atlas Open reads their settings, graph or schedule. `items.workflow_id`, `projects.default_workflow_id` and `jira_sources.workflow_id` remain in the schema, unused.
+- `workflows` itself is only the FK anchor: the baseline seeds the `solo` row (`inactive`, `input_kind='none'`), and `startTaskRun` re-inserts it if missing. On an install upgraded from the commercial edition, older workflow rows remain `inactive` (and their runs remain as history); nothing in Atlas Open reads their settings, graph or schedule. `items.workflow_id` and `jira_sources.workflow_id` remain in the schema, unused.
 
 ### Run event (`workflow_run_events`, migration 024)
 **Why this entity exists**: `workflow_runs.park_reason` holds only the current wait and every resume nulls it, so a finished run kept no trace of having stopped for the Owner. The fleet page's "Owner interventions per Task" and Delivery's Owner-response time need that history.
@@ -505,9 +505,6 @@ Table `agent_test_runs`: `id, agent_test_id (FK, CASCADE), agent_run_id (FK → 
 **How it fails is the part that matters.** A judge that could not run, timed out, answered unreadably, or would not commit makes the run **`errored`** — never a pass, and never the agent's fault. Blaming an agent for a missing binary is the mistake `agent-tests-evaluate.ts` already refuses to make about the dispatch itself. Only a judge that read the block and said `rejected` produces a **failure**, and every judge-authored failure string carries a `judge:` prefix so a reader can always tell which assertion was machine-graded.
 
 Its structured output reuses the `atlas-outcome` block the whole product already speaks (`done` → pass, `rejected` → fail, `asked_question` → abstained) rather than a bespoke JSON contract, which would be a second parser to write, cover and keep honest. Its cost goes through `parseClaudeCostFromOutput` directly rather than `agent-runner.ts`'s dispatcher — the runner imports the evaluator which imports the judge, so reaching back into it would close a cycle.
-
-### `published_workflows` (migration 041) — schema only
-The commercial edition's workflow marketplace. Atlas Open keeps the table and never reads or writes it.
 
 ### IReminder
 **Why this entity exists**: Owner-set (or Claude-set) future nudges fired by the minute tick; future-pointing intents, so they live apart from the notifications they produce.

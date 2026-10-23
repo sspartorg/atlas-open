@@ -9,7 +9,7 @@
 // Never writes, so it is safe to point at a dev stack with real data.
 //
 //   node packages/mcp/scripts/smoke-test.mjs
-//   LIVE_API=1 ATLAS_API_BASE=http://127.0.0.1:4001 node packages/mcp/scripts/smoke-test.mjs
+//   LIVE_API=1 ATLAS_API_BASE=http://127.0.0.1:4301 node packages/mcp/scripts/smoke-test.mjs
 //
 // SMOKE_QUERY (default `todo`) is the search_item keyword; zero hits just
 // skips the get_item leg.
@@ -25,7 +25,7 @@ const child = spawn(process.execPath, ['--import', import.meta.resolve('tsx'), s
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
         ...process.env,
-        ATLAS_API_BASE: process.env.ATLAS_API_BASE ?? 'http://127.0.0.1:4001',
+        ATLAS_API_BASE: process.env.ATLAS_API_BASE ?? 'http://127.0.0.1:4301',
         ATLAS_MCP_TOKEN: process.env.ATLAS_MCP_TOKEN ?? '',
     },
 });

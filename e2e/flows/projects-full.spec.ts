@@ -85,7 +85,7 @@ test.describe('/projects list', () => {
 
     test('queue chips count every project and filter to the ones with a Task on an agent of that category', async ({ page, request }) => {
         const p = await createProject(request, 'Quasar Ops', 'QSR');
-        insertRepo(p.id, { id: `${p.id}-r`, name: 'ops', git_path: '/tmp/atlas-e2e-quasar' });
+        insertRepo(p.id, { id: `${p.id}-r`, name: 'ops', git_path: '/tmp/atlas-open-e2e-quasar' });
         const agent = one(`SELECT id || '|' || category FROM agents ORDER BY created_at LIMIT 1`).split('|');
         const task = await apiPost<{ id: string }>(request, '/api/tasks', { project_id: p.id, title: 'Quasar task on an agent' });
         await request.patch(`${API}/api/tasks/${task.id}/assign`, { data: { assignee_agent_id: agent[0] } });
@@ -213,13 +213,13 @@ test.describe('/projects/:id header actions', () => {
 
     test('Delete in "Remove from Atlas only" mode wipes the project and lands on /projects without it', async ({ page, request }) => {
         const p = await createProject(request, 'Quench Gone', 'QDL');
-        insertRepo(p.id, { id: `${p.id}-r`, name: 'gone', git_path: '/tmp/atlas-e2e-quench-gone' });
+        insertRepo(p.id, { id: `${p.id}-r`, name: 'gone', git_path: '/tmp/atlas-open-e2e-quench-gone' });
         await apiPost(request, '/api/tasks', { project_id: p.id, title: 'Task that goes with it' });
         await goto(page, `/projects/${p.id}`);
         await projectAction(page, 'Delete project…');
         const dialog = page.getByRole('dialog');
         await expect(dialog.getByText('Delete project?', { exact: true })).toBeVisible();
-        await expect(dialog.getByText('/tmp/atlas-e2e-quench-gone')).toBeVisible();
+        await expect(dialog.getByText('/tmp/atlas-open-e2e-quench-gone')).toBeVisible();
         await dialog.getByRole('button', { name: 'Remove from Atlas' }).click();
         await expect(dialog.getByText('Project deleted', { exact: true })).toBeVisible({ timeout: 20_000 });
         await expect(dialog.getByText('Unregistered from Atlas. Workspace folder kept on disk.')).toBeVisible();

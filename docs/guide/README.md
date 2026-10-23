@@ -59,12 +59,12 @@ pnpm doctor     # checks node ≥ 20, pnpm ≥ 9, docker, git, gh, and which age
 pnpm dev
 ```
 
-`pnpm dev` starts a Postgres container (`atlas-postgres`, image `pgvector/pgvector:pg16`), waits for it,
+`pnpm dev` starts a Postgres container (`atlas-open-postgres`, image `pgvector/pgvector:pg16`), waits for it,
 applies migrations, then launches the API, the web app and the MCP shim in parallel. `pnpm start` does the
 same from a production build, and `pnpm prod` runs a second, independent stack from `.env.prod`.
 
-Defaults are web **:4000**, API **:4001**, Postgres **:5500**, and an MCP listener on **:4500**
-(`ATLAS_MCP_PORT`). The prod stack uses **:5000 / :5001 / :5510**. If something else already holds those
+Defaults are web **:4300**, API **:4301**, Postgres **:5600**, and an MCP listener on **:4600**
+(`ATLAS_MCP_PORT`). The prod stack uses **:5300 / :5301 / :5610**. If something else already holds those
 ports, change `WEB_PORT` and `API_PORT` in `.env` — and change `API_PROXY_TARGET` to match the new API
 port, or the UI will proxy its API calls somewhere unexpected.
 
@@ -124,7 +124,7 @@ Either kind takes optional **human attribution** — your name, email and GitHub
 carry a `Co-Authored-By` trailer for you and pull requests are assigned to you; leave it blank for
 bot-only attribution.
 
-Everything is encrypted at rest with AES-256-GCM under a key at `~/.config/Atlas/workspace.key`
+Everything is encrypted at rest with AES-256-GCM under a key at `~/.config/AtlasOpen/workspace.key`
 (`%APPDATA%\Atlas\workspace.key` on Windows). Secrets never come back in a list response — the UI shows a
 fingerprint and fetches a single value on demand when you click Reveal, and each reveal is logged.
 
@@ -595,10 +595,10 @@ populate scripts still target the workflow build the screenshots came from, so t
 they will run against Atlas Open:
 
 ```bash
-pnpm guide:stack up        # atlas_guide DB, web :6010, API :6001, MCP :4720, data in /tmp/atlas-guide
+pnpm guide:stack up        # atlas_open_guide DB, web :7010, API :7001, MCP :4820, data in /tmp/atlas-open-guide
 pnpm guide:populate        # credentials, agents, Tasks, and real Claude runs
 pnpm guide:capture         # full-page captures into docs/guide/images
-pnpm guide:stack drop      # remove the DB and /tmp/atlas-guide
+pnpm guide:stack drop      # remove the DB and /tmp/atlas-open-guide
 ```
 
 The stack uses the e2e ports, so stop any `pnpm e2e` run first.

@@ -34,7 +34,7 @@ const WIDTH = 1440;
 const BASE_HEIGHT = 960;
 // A page taller than this is a list that never ends; the guide wants its top.
 const MAX_HEIGHT = 4200;
-const API = 'http://127.0.0.1:6001';
+const API = 'http://127.0.0.1:7001';
 const PROJECT = 'acme-notes';
 
 const enabled = process.env['GUIDE'] === '1';
@@ -284,7 +284,7 @@ test.describe('@guide capture the user-guide screenshots', () => {
         await stop(page, id);
         await capture(page, `/terminal/${id}/history`, 'doc-36-terminal-history');
 
-        const folder = '/tmp/atlas-guide/scratch/release-notes';
+        const folder = '/tmp/atlas-open-guide/scratch/release-notes';
         const sa = await page.request.post(`${API}/api/cli/sessions/standalone`, {
             data: { folder_path: folder, title: 'Release notes', cli: 'claude' },
         });

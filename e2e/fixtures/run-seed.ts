@@ -1,5 +1,5 @@
 // Theme 13 — tiny wrapper that invokes the api seed module. Spawned
-// by `e2e/global-setup.ts` with DATABASE_URL pointing at atlas_e2e
+// by `e2e/global-setup.ts` with DATABASE_URL pointing at atlas_open_e2e
 // so the seed runs against the e2e DB (not the dev DB). Also flips
 // `settings.onboarding_complete=1` so the route guard doesn't
 // redirect every spec to /onboarding.
@@ -33,7 +33,7 @@ try {
 }
 await db
     .updateTable('settings')
-    .set({ onboarding_complete: 1, workspace_path: '/tmp/atlas-e2e' })
+    .set({ onboarding_complete: 1, workspace_path: '/tmp/atlas-open-e2e' })
     .where('id', '=', 1)
     .execute();
 
@@ -53,7 +53,7 @@ await db
 // `<E2E_FIX_DIR>/worktrees/<projectId>/…` and get wiped with the dir.
 // E2E_FIXTURE_DIR: a second stack  seeds its
 // own copy so it never wipes the main stack's clone mid-suite.
-const E2E_FIX_DIR = process.env['E2E_FIXTURE_DIR'] ?? join(tmpdir(), 'atlas-e2e-fixtures');
+const E2E_FIX_DIR = process.env['E2E_FIXTURE_DIR'] ?? join(tmpdir(), 'atlas-open-e2e-fixtures');
 const BARE_REPO = join(E2E_FIX_DIR, 'remote.git');
 const CLONE_PATH = join(E2E_FIX_DIR, 'project');
 const PROJECT_ID = 'e2e-terminal-project';

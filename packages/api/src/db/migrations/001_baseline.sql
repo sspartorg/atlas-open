@@ -243,6 +243,8 @@ CREATE TABLE public.agent_test_runs (
     judge_reason text,
     judge_cost_usd numeric(12,6),
     workflow_run_id text,
+    worktree_path text,
+    evidence jsonb,
     CONSTRAINT agent_test_runs_judge_verdict_check CHECK (((judge_verdict IS NULL) OR (judge_verdict = ANY (ARRAY['pass'::text, 'fail'::text, 'abstained'::text])))),
     CONSTRAINT agent_test_runs_verdict_check CHECK ((verdict = ANY (ARRAY['running'::text, 'passed'::text, 'failed'::text, 'errored'::text])))
 );
@@ -299,6 +301,7 @@ CREATE TABLE public.agents (
     marketplace_pulled_version integer,
     effort character varying(255) DEFAULT 'medium'::character varying NOT NULL,
     marketplace_upgradable_hash text,
+    team_managed boolean DEFAULT false NOT NULL,
     CONSTRAINT agents_category_check CHECK ((category = ANY (ARRAY['software-dev'::text, 'marketing'::text, 'content'::text, 'design'::text]))),
     CONSTRAINT agents_cli_check CHECK ((cli = ANY (ARRAY['claude'::text, 'copilot'::text, 'ollama'::text]))),
     CONSTRAINT agents_effort_check CHECK (((effort)::text = ANY (ARRAY[('none'::character varying)::text, ('low'::character varying)::text, ('medium'::character varying)::text, ('high'::character varying)::text, ('xhigh'::character varying)::text, ('max'::character varying)::text]))),
@@ -588,7 +591,6 @@ CREATE TABLE public.item_external_links (
     ci_summary jsonb,
     ci_checked_at timestamp with time zone,
     ci_handled_sha text,
-    ci_fix_attempts integer DEFAULT 0 NOT NULL,
     CONSTRAINT item_external_links_ci_state_check CHECK ((ci_state = ANY (ARRAY['pending'::text, 'success'::text, 'failure'::text]))),
     CONSTRAINT item_external_links_link_kind_check CHECK ((link_kind = ANY (ARRAY['pull_request'::text, 'jira_issue'::text]))),
     CONSTRAINT item_external_links_pr_state_check CHECK ((pr_state = ANY (ARRAY['open'::text, 'merged'::text, 'closed'::text])))
@@ -716,8 +718,24 @@ CREATE VIEW public.items_live AS
     sort_order,
     repo_ids,
     is_test
-   FROM public.items
-  WHERE (NOT is_test);
+   FROM public.items;
+
+
+--
+-- Name: jira_attachments; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.jira_attachments (
+    id text NOT NULL,
+    jira_key text NOT NULL,
+    item_id text,
+    filename text NOT NULL,
+    mime_type text DEFAULT 'application/octet-stream'::text NOT NULL,
+    size bigint DEFAULT 0 NOT NULL,
+    path text,
+    skipped_reason text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
 
 
 --
@@ -758,7 +776,9 @@ CREATE TABLE public.jira_issues (
     pushed_comment_id bigint DEFAULT 0 NOT NULL,
     pushed_status text,
     done_synced_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    synced_title text,
+    synced_description text
 );
 
 
@@ -772,7 +792,8 @@ CREATE TABLE public.jira_sources (
     jql text NOT NULL,
     workflow_id text,
     repo_ids jsonb DEFAULT '[]'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    agent_id text
 );
 
 
@@ -924,6 +945,13 @@ CREATE TABLE public.notifications (
     push_status text DEFAULT 'none'::text NOT NULL,
     push_failure_reason text,
     link_url text,
+    external_deferred_at timestamp with time zone,
+    reminder_id bigint,
+    external_event_key text,
+    external_claimed_at timestamp with time zone,
+    external_reclaimed boolean DEFAULT false NOT NULL,
+    in_app boolean DEFAULT true NOT NULL,
+    push_deferred_at timestamp with time zone,
     CONSTRAINT notifications_external_status_check CHECK ((external_status = ANY (ARRAY['none'::text, 'pending'::text, 'sent'::text, 'failed'::text]))),
     CONSTRAINT notifications_kind_check CHECK ((kind = ANY (ARRAY['needs_you'::text, 'update'::text, 'system'::text]))),
     CONSTRAINT notifications_push_status_check CHECK ((push_status = ANY (ARRAY['none'::text, 'pending'::text, 'sent'::text, 'failed'::text])))
@@ -1024,7 +1052,6 @@ CREATE TABLE public.project_repos (
     setup_ps1_body text DEFAULT ''::text NOT NULL,
     "position" integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    verify_command text DEFAULT ''::text NOT NULL,
     CONSTRAINT project_repos_clone_status_check CHECK ((clone_status = ANY (ARRAY['pending'::text, 'cloning'::text, 'ready'::text, 'error'::text]))),
     CONSTRAINT project_repos_name_check CHECK ((name ~ '^[a-z0-9][a-z0-9-]{0,39}$'::text))
 );
@@ -1071,24 +1098,10 @@ CREATE TABLE public.projects (
     guardrails_md text DEFAULT ''::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    default_workflow_id text,
+    is_test_sandbox boolean DEFAULT false NOT NULL,
+    team_managed boolean DEFAULT false NOT NULL,
+    jira_status_map jsonb,
     CONSTRAINT projects_issue_key_prefix_check CHECK ((issue_key_prefix ~ '^[A-Z]{3}$'::text))
-);
-
-
---
--- Name: published_workflows; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.published_workflows (
-    id text NOT NULL,
-    name text NOT NULL,
-    description text,
-    source_workflow_id text,
-    bundle bytea NOT NULL,
-    published_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    version integer DEFAULT 1 NOT NULL
 );
 
 
@@ -1254,7 +1267,9 @@ CREATE TABLE public.workflow_run_events (
     node_id text,
     reason text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT workflow_run_events_kind_check CHECK ((kind = ANY (ARRAY['parked'::text, 'resumed'::text])))
+    park_kind text,
+    CONSTRAINT workflow_run_events_kind_check CHECK ((kind = ANY (ARRAY['parked'::text, 'resumed'::text]))),
+    CONSTRAINT workflow_run_events_park_kind_check CHECK ((((kind = 'parked'::text) = (park_kind IS NOT NULL)) AND ((park_kind IS NULL) OR (park_kind = ANY (ARRAY['question'::text, 'no_outcome'::text, 'review_requested'::text, 'rejected'::text, 'checklist_failed'::text, 'gate_failed'::text, 'check_unavailable'::text, 'loop_limit'::text, 'step_error'::text, 'setup_failed'::text, 'delivery_failed'::text, 'lost_step'::text, 'missing_agent'::text, 'dispatch_failed'::text, 'wiring_gap'::text, 'subtask_waiting'::text, 'other'::text])))))
 );
 
 
@@ -1284,6 +1299,7 @@ CREATE TABLE public.workflow_runs (
     parent_node_id text,
     gate_rounds integer DEFAULT 0 NOT NULL,
     pr_urls jsonb DEFAULT '[]'::jsonb NOT NULL,
+    repo_ids jsonb DEFAULT '[]'::jsonb NOT NULL,
     CONSTRAINT workflow_runs_status_check CHECK ((status = ANY (ARRAY['running'::text, 'waiting_for_owner'::text, 'completed'::text, 'cancelled'::text, 'error'::text])))
 );
 
@@ -1304,23 +1320,17 @@ CREATE TABLE public.workflows (
     use_worktree boolean DEFAULT true NOT NULL,
     push_code boolean DEFAULT true NOT NULL,
     raises_pr boolean DEFAULT true NOT NULL,
-    max_loops integer DEFAULT 3 NOT NULL,
     schedule_preset text,
     schedule_time_of_day text,
-    schedule_weekday integer,
     cron_expr text,
     next_run_at timestamp with time zone,
     last_run_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    max_parallel_runs integer DEFAULT 1 NOT NULL,
-    push_to_default boolean DEFAULT false NOT NULL,
     marketplace_source_id text,
     marketplace_pulled_version integer,
-    marketplace_pulled_at timestamp with time zone,
+    team_managed boolean DEFAULT false NOT NULL,
     CONSTRAINT workflows_input_kind_check CHECK ((input_kind = ANY (ARRAY['item'::text, 'none'::text, 'sub_task'::text]))),
-    CONSTRAINT workflows_max_loops_check CHECK (((max_loops >= 1) AND (max_loops <= 20))),
-    CONSTRAINT workflows_max_parallel_runs_check CHECK (((max_parallel_runs >= 1) AND (max_parallel_runs <= 10))),
     CONSTRAINT workflows_project_required_check CHECK (((project_id IS NOT NULL) OR ((input_kind = 'none'::text) AND (NOT use_worktree)))),
     CONSTRAINT workflows_schedule_preset_check CHECK ((schedule_preset = ANY (ARRAY['hourly'::text, 'every_4h'::text, 'daily'::text, 'weekly'::text, 'custom'::text]))),
     CONSTRAINT workflows_status_check CHECK ((status = ANY (ARRAY['active'::text, 'inactive'::text]))),
@@ -1621,6 +1631,14 @@ ALTER TABLE ONLY public.items
 
 
 --
+-- Name: jira_attachments jira_attachments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.jira_attachments
+    ADD CONSTRAINT jira_attachments_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: jira_config jira_config_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1705,7 +1723,7 @@ ALTER TABLE ONLY public.project_env_vars
 --
 
 ALTER TABLE ONLY public.project_guardrail_scripts
-    ADD CONSTRAINT project_guardrail_scripts_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT project_guardrail_scripts_pkey PRIMARY KEY (project_id, id);
 
 
 --
@@ -1762,22 +1780,6 @@ ALTER TABLE ONLY public.projects
 
 ALTER TABLE ONLY public.projects
     ADD CONSTRAINT projects_pkey PRIMARY KEY (id);
-
-
---
--- Name: published_workflows published_workflows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.published_workflows
-    ADD CONSTRAINT published_workflows_pkey PRIMARY KEY (id);
-
-
---
--- Name: published_workflows published_workflows_source_workflow_id_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.published_workflows
-    ADD CONSTRAINT published_workflows_source_workflow_id_key UNIQUE (source_workflow_id);
 
 
 --
@@ -1952,10 +1954,10 @@ CREATE INDEX idx_agent_checklists_agent ON public.agent_checklists USING btree (
 
 
 --
--- Name: idx_agent_prompt_versions_agent; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_agent_memory_last_run_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_agent_prompt_versions_agent ON public.agent_prompt_versions USING btree (agent_id, version DESC);
+CREATE INDEX idx_agent_memory_last_run_id ON public.agent_memory USING btree (last_run_id);
 
 
 --
@@ -1973,6 +1975,13 @@ CREATE INDEX idx_agent_runs_agent_status ON public.agent_runs USING btree (agent
 
 
 --
+-- Name: idx_agent_runs_completed_cover; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_agent_runs_completed_cover ON public.agent_runs USING btree (completed_at) INCLUDE (total_cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, agent_id, project_id, item_id, cli, model) WHERE ((status = 'completed'::text) AND (completed_at IS NOT NULL));
+
+
+--
 -- Name: idx_agent_runs_created_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1984,6 +1993,13 @@ CREATE INDEX idx_agent_runs_created_at ON public.agent_runs USING btree (created
 --
 
 CREATE INDEX idx_agent_runs_item ON public.agent_runs USING btree (item_id, created_at DESC);
+
+
+--
+-- Name: idx_agent_runs_item_completed_cover; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_agent_runs_item_completed_cover ON public.agent_runs USING btree (item_id) INCLUDE (total_cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, completed_at) WHERE (status = 'completed'::text);
 
 
 --
@@ -2008,13 +2024,6 @@ CREATE INDEX idx_agent_runs_status ON public.agent_runs USING btree (status);
 
 
 --
--- Name: idx_agent_runs_status_completed_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_agent_runs_status_completed_at ON public.agent_runs USING btree (status, completed_at DESC) WHERE ((status = 'completed'::text) AND (completed_at IS NOT NULL));
-
-
---
 -- Name: idx_agent_runs_status_started_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2026,6 +2035,34 @@ CREATE INDEX idx_agent_runs_status_started_at ON public.agent_runs USING btree (
 --
 
 CREATE INDEX idx_agent_runs_total_cost ON public.agent_runs USING btree (total_cost_usd DESC) WHERE ((status = 'completed'::text) AND (total_cost_usd IS NOT NULL));
+
+
+--
+-- Name: idx_agent_test_runs_item_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_agent_test_runs_item_id ON public.agent_test_runs USING btree (item_id);
+
+
+--
+-- Name: idx_agent_tests_project_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_agent_tests_project_id ON public.agent_tests USING btree (project_id);
+
+
+--
+-- Name: idx_agent_tests_repo_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_agent_tests_repo_id ON public.agent_tests USING btree (repo_id);
+
+
+--
+-- Name: idx_agents_cli_model; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_agents_cli_model ON public.agents USING btree (cli, model);
 
 
 --
@@ -2071,10 +2108,17 @@ CREATE INDEX idx_cli_models_cli ON public.cli_models USING btree (cli, sort_orde
 
 
 --
--- Name: idx_cli_session_subagents_session; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_cli_sessions_closed_cover; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_cli_session_subagents_session ON public.cli_session_subagents USING btree (cli_session_id);
+CREATE INDEX idx_cli_sessions_closed_cover ON public.cli_sessions USING btree (closed_at) INCLUDE (total_cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cli, model, project_id) WHERE ((status = 'closed'::text) AND (closed_at IS NOT NULL));
+
+
+--
+-- Name: idx_cli_sessions_credential_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_cli_sessions_credential_id ON public.cli_sessions USING btree (credential_id);
 
 
 --
@@ -2096,6 +2140,13 @@ CREATE INDEX idx_cli_sessions_last_active ON public.cli_sessions USING btree (la
 --
 
 CREATE INDEX idx_cli_sessions_project_status ON public.cli_sessions USING btree (project_id, status);
+
+
+--
+-- Name: idx_cli_sessions_repo_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_cli_sessions_repo_id ON public.cli_sessions USING btree (repo_id);
 
 
 --
@@ -2155,6 +2206,20 @@ CREATE INDEX idx_issue_events_item_agent_event ON public.issue_events USING btre
 
 
 --
+-- Name: idx_issue_events_item_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_issue_events_item_status ON public.issue_events USING btree (item_id, created_at) INCLUDE (from_value, to_value) WHERE (field = 'status'::text);
+
+
+--
+-- Name: idx_issue_events_status_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_issue_events_status_created_at ON public.issue_events USING btree (created_at) INCLUDE (item_id, from_value, to_value) WHERE (field = 'status'::text);
+
+
+--
 -- Name: idx_item_external_links_created_by_run_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2162,10 +2227,10 @@ CREATE INDEX idx_item_external_links_created_by_run_id ON public.item_external_l
 
 
 --
--- Name: idx_item_external_links_item_id; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_item_external_links_pr_url; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_item_external_links_item_id ON public.item_external_links USING btree (item_id);
+CREATE INDEX idx_item_external_links_pr_url ON public.item_external_links USING btree (url) WHERE (link_kind = 'pull_request'::text);
 
 
 --
@@ -2190,6 +2255,13 @@ CREATE INDEX idx_items_assignee_status ON public.items USING btree (assignee_age
 
 
 --
+-- Name: idx_items_is_test; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_items_is_test ON public.items USING btree (id) WHERE is_test;
+
+
+--
 -- Name: idx_items_parent; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2201,13 +2273,6 @@ CREATE INDEX idx_items_parent ON public.items USING btree (parent_id);
 --
 
 CREATE INDEX idx_items_parent_updated_at ON public.items USING btree (parent_id, updated_at DESC) WHERE (parent_id IS NOT NULL);
-
-
---
--- Name: idx_items_project_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_items_project_type ON public.items USING btree (project_id, type);
 
 
 --
@@ -2239,10 +2304,10 @@ CREATE INDEX idx_items_search_tsv ON public.items USING gin (search_tsv);
 
 
 --
--- Name: idx_items_status; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_items_status_updated_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_items_status ON public.items USING btree (status);
+CREATE INDEX idx_items_status_updated_at ON public.items USING btree (status, updated_at DESC);
 
 
 --
@@ -2253,10 +2318,10 @@ CREATE INDEX idx_items_type_created_at ON public.items USING btree (type, create
 
 
 --
--- Name: idx_items_type_status; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_items_type_status_updated_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_items_type_status ON public.items USING btree (type, status);
+CREATE INDEX idx_items_type_status_updated_at ON public.items USING btree (type, status, updated_at);
 
 
 --
@@ -2267,10 +2332,31 @@ CREATE INDEX idx_items_updated_at ON public.items USING btree (updated_at DESC);
 
 
 --
+-- Name: idx_jira_attachments_key_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_jira_attachments_key_created ON public.jira_attachments USING btree (jira_key, created_at, id);
+
+
+--
+-- Name: idx_jira_sources_agent_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_jira_sources_agent_id ON public.jira_sources USING btree (agent_id);
+
+
+--
 -- Name: idx_jira_sources_project_id; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_jira_sources_project_id ON public.jira_sources USING btree (project_id);
+
+
+--
+-- Name: idx_jira_sources_workflow_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_jira_sources_workflow_id ON public.jira_sources USING btree (workflow_id);
 
 
 --
@@ -2295,10 +2381,10 @@ CREATE INDEX idx_notifications_agent ON public.notifications USING btree (agent_
 
 
 --
--- Name: idx_notifications_created_at; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_notifications_created_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_notifications_created_at ON public.notifications USING btree (created_at DESC);
+CREATE INDEX idx_notifications_created_id ON public.notifications USING btree (created_at DESC, id DESC);
 
 
 --
@@ -2330,6 +2416,13 @@ CREATE INDEX idx_notifications_kind ON public.notifications USING btree (kind, c
 
 
 --
+-- Name: idx_notifications_needs_you_item; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_notifications_needs_you_item ON public.notifications USING btree (item_id, id) WHERE ((kind = 'needs_you'::text) AND (event_type = ANY (ARRAY['agent_completed'::text, 'workflow_run'::text])));
+
+
+--
 -- Name: idx_notifications_project; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2344,20 +2437,6 @@ CREATE INDEX idx_notifications_unread ON public.notifications USING btree (creat
 
 
 --
--- Name: idx_project_env_vars_project; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_project_env_vars_project ON public.project_env_vars USING btree (project_id);
-
-
---
--- Name: idx_project_guardrail_scripts_project_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_project_guardrail_scripts_project_id ON public.project_guardrail_scripts USING btree (project_id);
-
-
---
 -- Name: idx_project_guardrails_project; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2365,10 +2444,10 @@ CREATE INDEX idx_project_guardrails_project ON public.project_guardrails USING b
 
 
 --
--- Name: idx_project_repos_project_id; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_project_repos_credential_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_project_repos_project_id ON public.project_repos USING btree (project_id);
+CREATE INDEX idx_project_repos_credential_id ON public.project_repos USING btree (credential_id);
 
 
 --
@@ -2379,6 +2458,13 @@ CREATE INDEX idx_project_schedules_enabled ON public.project_schedules USING btr
 
 
 --
+-- Name: idx_project_schedules_project_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_project_schedules_project_id ON public.project_schedules USING btree (project_id);
+
+
+--
 -- Name: idx_projects_created_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2386,10 +2472,24 @@ CREATE INDEX idx_projects_created_at ON public.projects USING btree (created_at 
 
 
 --
+-- Name: idx_reminders_history; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_reminders_history ON public.reminders USING btree (updated_at DESC, id DESC) WHERE (status = ANY (ARRAY['cancelled'::text, 'completed'::text]));
+
+
+--
 -- Name: idx_reminders_next_fire_active; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_reminders_next_fire_active ON public.reminders USING btree (next_fire_at) WHERE (status = 'active'::text);
+
+
+--
+-- Name: idx_run_gate_results_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_run_gate_results_created_at ON public.run_gate_results USING btree (created_at);
 
 
 --
@@ -2421,6 +2521,27 @@ CREATE INDEX idx_tool_catalog_group ON public.tool_catalog USING btree (group_na
 
 
 --
+-- Name: idx_workflow_run_events_parked_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflow_run_events_parked_created_at ON public.workflow_run_events USING btree (created_at) WHERE (kind = 'parked'::text);
+
+
+--
+-- Name: idx_workflow_runs_item_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflow_runs_item_id ON public.workflow_runs USING btree (item_id);
+
+
+--
+-- Name: idx_workflow_runs_top_started_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflow_runs_top_started_at ON public.workflow_runs USING btree (started_at) WHERE (parent_workflow_run_id IS NULL);
+
+
+--
 -- Name: idx_workflows_marketplace_source_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2428,17 +2549,17 @@ CREATE INDEX idx_workflows_marketplace_source_id ON public.workflows USING btree
 
 
 --
+-- Name: idx_workflows_project_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_workflows_project_id ON public.workflows USING btree (project_id);
+
+
+--
 -- Name: items_labels_gin; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX items_labels_gin ON public.items USING gin (labels jsonb_path_ops);
-
-
---
--- Name: items_not_test_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX items_not_test_idx ON public.items USING btree (project_id, type) WHERE (NOT is_test);
 
 
 --
@@ -2453,6 +2574,55 @@ CREATE INDEX items_repo_ids_gin ON public.items USING gin (repo_ids jsonb_path_o
 --
 
 CREATE INDEX items_workflow_status_idx ON public.items USING btree (workflow_id, status) WHERE (workflow_id IS NOT NULL);
+
+
+--
+-- Name: jira_attachments_item_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX jira_attachments_item_idx ON public.jira_attachments USING btree (item_id);
+
+
+--
+-- Name: notifications_external_claimed_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX notifications_external_claimed_idx ON public.notifications USING btree (external_claimed_at) WHERE ((external_status = 'pending'::text) AND (external_claimed_at IS NOT NULL));
+
+
+--
+-- Name: notifications_external_deferred_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX notifications_external_deferred_idx ON public.notifications USING btree (external_deferred_at) WHERE (external_deferred_at IS NOT NULL);
+
+
+--
+-- Name: notifications_push_deferred_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX notifications_push_deferred_idx ON public.notifications USING btree (push_deferred_at) WHERE (push_deferred_at IS NOT NULL);
+
+
+--
+-- Name: notifications_reminder_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX notifications_reminder_id_idx ON public.notifications USING btree (reminder_id, created_at DESC) WHERE (reminder_id IS NOT NULL);
+
+
+--
+-- Name: projects_one_test_sandbox; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX projects_one_test_sandbox ON public.projects USING btree (is_test_sandbox) WHERE is_test_sandbox;
+
+
+--
+-- Name: reminders_status_next_fire_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX reminders_status_next_fire_idx ON public.reminders USING btree (status, next_fire_at);
 
 
 --
@@ -2856,11 +3026,27 @@ ALTER TABLE ONLY public.items
 
 
 --
+-- Name: jira_attachments jira_attachments_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.jira_attachments
+    ADD CONSTRAINT jira_attachments_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.items(id) ON DELETE CASCADE;
+
+
+--
 -- Name: jira_issues jira_issues_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.jira_issues
     ADD CONSTRAINT jira_issues_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.items(id) ON DELETE SET NULL;
+
+
+--
+-- Name: jira_sources jira_sources_agent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.jira_sources
+    ADD CONSTRAINT jira_sources_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id) ON DELETE SET NULL;
 
 
 --
@@ -2909,6 +3095,14 @@ ALTER TABLE ONLY public.notifications
 
 ALTER TABLE ONLY public.notifications
     ADD CONSTRAINT notifications_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id) ON DELETE SET NULL;
+
+
+--
+-- Name: notifications notifications_reminder_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notifications
+    ADD CONSTRAINT notifications_reminder_id_fkey FOREIGN KEY (reminder_id) REFERENCES public.reminders(id) ON DELETE SET NULL;
 
 
 --
@@ -2976,22 +3170,6 @@ ALTER TABLE ONLY public.project_schedules
 
 
 --
--- Name: projects projects_default_workflow_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.projects
-    ADD CONSTRAINT projects_default_workflow_id_fkey FOREIGN KEY (default_workflow_id) REFERENCES public.workflows(id) ON DELETE SET NULL;
-
-
---
--- Name: published_workflows published_workflows_source_workflow_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.published_workflows
-    ADD CONSTRAINT published_workflows_source_workflow_id_fkey FOREIGN KEY (source_workflow_id) REFERENCES public.workflows(id) ON DELETE SET NULL;
-
-
---
 -- Name: run_gate_results run_gate_results_workflow_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3040,6 +3218,11 @@ ALTER TABLE ONLY public.workflows
 
 
 --
+-- PostgreSQL database dump complete
+--
+
+
+--
 -- PostgreSQL database dump
 --
 
@@ -3066,15 +3249,14 @@ INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at
 INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-ollama-qwen3-5', 'ollama', 'qwen3.5', 'Local. Ollama’s default coding pick — set a 64k+ context window for large repos.', 1, '2026-09-20 07:32:01.238202+00');
 INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-ollama-kimi-k2-7-code', 'ollama', 'kimi-k2.7-code:cloud', 'Cloud. Code-tuned; runs without downloading weights.', 2, '2026-09-20 07:32:01.238202+00');
 INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-ollama-gemma4', 'ollama', 'gemma4:cloud', 'Cloud. General-purpose; good for research and non-code work.', 3, '2026-09-20 07:32:01.238202+00');
-INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-opus-4-7', 'claude', 'claude-opus-4-7', 'Strongest reasoning. Best for plans, designs, complex refactors.', 5, '2026-06-02 16:51:18.805809+00');
-INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-opus-4-7-1m', 'claude', 'claude-opus-4-7[1m]', 'Opus 4.7 with 1M context. Pick for very large repos or long histories.', 6, '2026-06-02 16:51:18.805809+00');
-INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-opus-4-6', 'claude', 'claude-opus-4-6', 'Previous-gen Opus. Capable but superseded by 4-7.', 7, '2026-06-02 16:51:18.805809+00');
-INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-sonnet-4-6', 'claude', 'claude-sonnet-4-6', 'Fast and accurate at code. Default for the Coder agent.', 8, '2026-06-02 16:51:18.805809+00');
-INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-haiku', 'claude', 'haiku', 'Cheapest and fastest. Short, well-scoped tasks only.', 9, '2026-06-02 16:51:18.805809+00');
-INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-opus-5', 'claude', 'claude-opus-5', 'Strongest general model. Best default for plans, designs and complex refactors.', 1, '2026-09-27 19:51:27.112667+00');
-INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-opus-5[1m]', 'claude', 'claude-opus-5[1m]', 'Opus 5 with 1M context. Pick for very large repos or long histories.', 2, '2026-09-27 19:51:27.112667+00');
-INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-sonnet-5', 'claude', 'claude-sonnet-5', 'Faster and cheaper than Opus 5. Good for routine sub-tasks and reviewers.', 3, '2026-09-27 19:51:27.112667+00');
-INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-fable-5-1', 'claude', 'claude-fable-5-1', 'Most capable, and the most expensive. For the hardest reasoning and long-horizon work.', 4, '2026-09-27 19:51:27.112667+00');
+INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-opus-5-5', 'claude', 'claude-opus-5-5', 'Strongest general model and the default. Plans, designs, complex refactors.', 1, '2026-10-23 08:50:39.349802+00');
+INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-opus-5-5-1m', 'claude', 'claude-opus-5-5[1m]', 'Opus 5.5 with 1M context. Pick for very large repos or long histories.', 2, '2026-10-23 08:50:39.349802+00');
+INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-sonnet-5-5', 'claude', 'claude-sonnet-5-5', 'Faster and cheaper than Opus. Good for routine sub-tasks and reviews.', 3, '2026-10-23 08:50:39.349802+00');
+INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-haiku-5-5', 'claude', 'claude-haiku-5-5', 'Cheapest and fastest. Short, well-scoped tasks only.', 4, '2026-10-23 08:50:39.349802+00');
+INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-fable-5-1', 'claude', 'claude-fable-5-1', 'Most capable, and the most expensive. For the hardest reasoning and long-horizon work.', 5, '2026-09-27 19:51:27.112667+00');
+INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-opus-5', 'claude', 'claude-opus-5', 'Strongest general model. Best default for plans, designs and complex refactors.', 6, '2026-09-27 19:51:27.112667+00');
+INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-opus-5[1m]', 'claude', 'claude-opus-5[1m]', 'Opus 5 with 1M context. Pick for very large repos or long histories.', 7, '2026-09-27 19:51:27.112667+00');
+INSERT INTO public.cli_models (id, cli, model_name, note, sort_order, created_at) VALUES ('seed-claude-sonnet-5', 'claude', 'claude-sonnet-5', 'Faster and cheaper than Opus 5. Good for routine sub-tasks and reviewers.', 8, '2026-09-27 19:51:27.112667+00');
 
 
 --
@@ -3613,9 +3795,10 @@ INSERT INTO public.settings (id, owner_name, workspace_path, constitution_md, ex
 
 
 --
--- PostgreSQL database dump complete
+-- Data for Name: workflows; Type: TABLE DATA; Schema: public; Owner: -
 --
 
+INSERT INTO public.workflows (id, project_id, name, description, status, graph, input_kind, trigger, use_worktree, push_code, raises_pr, schedule_preset, schedule_time_of_day, cron_expr, next_run_at, last_run_at, created_at, updated_at, marketplace_source_id, marketplace_pulled_version, team_managed) VALUES ('solo', NULL, 'Single agent', 'A Task''s assigned agent runs it end to end.', 'inactive', '{"edges": [], "nodes": []}', 'none', 'manual', false, true, true, NULL, NULL, NULL, NULL, NULL, '2026-10-23 08:50:39.349802+00', '2026-10-23 08:50:39.349802+00', NULL, NULL, false);
 
 
 --

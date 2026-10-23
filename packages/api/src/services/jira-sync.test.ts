@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 // Attachment copies land in the data dir, which vitest.config.ts points at a
-// scratch folder for the whole suite (never ~/.config/Atlas).
+// scratch folder for the whole suite (never ~/.config/AtlasOpen).
 
 vi.mock('../routes/events.js', () => ({
     eventsRoutes: async () => undefined,

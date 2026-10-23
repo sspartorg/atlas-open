@@ -3,8 +3,8 @@
 //
 // Targets the dev container by default. When `ATLAS_ENV=prod` is set,
 // targets the prod container instead so dev and prod stacks stay isolated:
-//   dev  -> service `postgres`,      container `atlas-postgres`,      db `atlas`
-//   prod -> service `postgres-prod`, container `atlas-postgres-prod`, db `atlas_prod`
+//   dev  -> service `postgres`,      container `atlas-open-postgres`,      db `atlas_open`
+//   prod -> service `postgres-prod`, container `atlas-open-postgres-prod`, db `atlas_open_prod`
 //
 // Spawns:
 //   docker compose up -d <service>   (with cwd = repo root)
@@ -21,13 +21,13 @@ const REPO_ROOT = resolve(HERE, '..', '..', '..', '..');
 
 const isProd = process.env['ATLAS_ENV']?.toLowerCase() === 'prod';
 const service = isProd ? 'postgres-prod' : 'postgres';
-const container = isProd ? 'atlas-postgres-prod' : 'atlas-postgres';
+const container = isProd ? 'atlas-open-postgres-prod' : 'atlas-open-postgres';
 const dbUser = isProd
     ? process.env['POSTGRES_USER_PROD'] ?? 'atlas'
     : process.env['POSTGRES_USER'] ?? 'atlas';
 const dbName = isProd
-    ? process.env['POSTGRES_DB_PROD'] ?? 'atlas_prod'
-    : process.env['POSTGRES_DB'] ?? 'atlas';
+    ? process.env['POSTGRES_DB_PROD'] ?? 'atlas_open_prod'
+    : process.env['POSTGRES_DB'] ?? 'atlas_open';
 
 function run(cmd: string, args: readonly string[], opts: { cwd?: string; stdio?: 'inherit' | 'ignore' } = {}): number {
     const result = spawnSync(cmd, args, {

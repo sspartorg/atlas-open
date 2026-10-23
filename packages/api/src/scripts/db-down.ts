@@ -4,8 +4,8 @@
 // Targets only the dev container by default (so `pnpm db:down` / `db:down:purge`
 // in the dev workflow can never touch the prod container or its volume). When
 // `ATLAS_ENV=prod` is set, targets the prod container instead.
-//   dev  -> stop+rm `atlas-postgres`,      purge wipes `atlas-pg`
-//   prod -> stop+rm `atlas-postgres-prod`, purge wipes `atlas-pg-prod`
+//   dev  -> stop+rm `atlas-open-postgres`,      purge wipes `atlas-open-pg`
+//   prod -> stop+rm `atlas-open-postgres-prod`, purge wipes `atlas-open-pg-prod`
 //
 // Usage:
 //   tsx db-down.ts           -> stop + remove container, keep data volume
@@ -21,7 +21,7 @@ const REPO_ROOT = resolve(HERE, '..', '..', '..', '..');
 const purge = process.argv.includes('--purge');
 const isProd = process.env['ATLAS_ENV']?.toLowerCase() === 'prod';
 const service = isProd ? 'postgres-prod' : 'postgres';
-const volume = isProd ? 'atlas-pg-prod' : 'atlas-pg';
+const volume = isProd ? 'atlas-open-pg-prod' : 'atlas-open-pg';
 
 function run(cmd: string, args: readonly string[], opts: { cwd?: string; stdio?: 'inherit' | 'ignore' } = {}): number {
     const result = spawnSync(cmd, args, {

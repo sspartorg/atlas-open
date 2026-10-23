@@ -11,9 +11,9 @@ import { test, expect } from '@playwright/test';
 //
 // ATLAS_MCP_TOKEN is unset in the e2e environment, so both endpoints
 // are fully open. The `request` fixture is Node-side; relative URLs
-// work because the e2e API is bound to http://127.0.0.1:6001.
+// work because the e2e API is bound to http://127.0.0.1:7001.
 
-const API = 'http://127.0.0.1:6001';
+const API = 'http://127.0.0.1:7001';
 
 test.describe('/onboarding', () => {
     test.afterEach(async ({ request }) => {
@@ -21,7 +21,7 @@ test.describe('/onboarding', () => {
         // for subsequent specs that navigate to seeded pages.
         // onboard() now mkdirs the path, so it must be writable on every OS.
         const res = await request.post(`${API}/api/settings/onboard`, {
-            data: { owner_name: 'Owner', workspace_path: '/tmp/atlas-e2e' },
+            data: { owner_name: 'Owner', workspace_path: '/tmp/atlas-open-e2e' },
         });
         expect(res.ok()).toBe(true);
     });

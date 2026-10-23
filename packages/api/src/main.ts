@@ -243,7 +243,7 @@ async function main(): Promise<void> {
     orphanReaperTimer.unref();
 
     // Honor API_PORT env var so the E2E suite can spin a dedicated api on
-    // :6001 alongside any dev :4001 instance. Defaults preserved for the
+    // :7001 alongside any dev :4301 instance. Defaults preserved for the
     // standard dev flow.
     //
     // Prefer API_PORT so dev/prod/E2E never fight over a shared PORT var.
@@ -346,7 +346,7 @@ async function main(): Promise<void> {
         );
         // Start the fixed-port MCP HTTP listener AFTER the API is up so the
         // first request the MCP forwards to apiBase actually has somewhere
-        // to land. First-boot-wins: if another stack already owns :4500 the
+        // to land. First-boot-wins: if another stack already owns :4600 the
         // host returns null and this instance runs API-only.
         mcpHost = await startMcpHost({
             apiBase: `http://127.0.0.1:${PORT}`,

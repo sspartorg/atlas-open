@@ -2,8 +2,8 @@
 
 ## Responsibility
 
-Fastify 5 HTTP server on port 4001 (dev) / 5001 (prod). Owns:
-- PostgreSQL 16 database (docker compose service `atlas-postgres`, host port 5500; `atlas-postgres-prod` on 5510). Queries via Kysely, migrations via Knex. See `docs/adr/0001-postgres-migration.md` and `docs/adr/0003-kysely-knex-split.md`.
+Fastify 5 HTTP server on port 4301 (dev) / 5301 (prod). Owns:
+- PostgreSQL 16 database (docker compose service `atlas-open-postgres`, host port 5600; `atlas-open-postgres-prod` on 5610). Queries via Kysely, migrations via Knex. See `docs/adr/0001-postgres-migration.md` and `docs/adr/0003-kysely-knex-split.md`.
 - All REST API routes
 - Server-Sent Events (SSE) for agent status streaming
 - Business logic (services/)

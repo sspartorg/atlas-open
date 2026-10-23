@@ -103,7 +103,7 @@ describe('scripts/bootstrap.sh', () => {
             'pnpm db:wait',
             'pnpm db:migrate',
             // Byte-for-byte what bootstrap.ps1 registers.
-            'claude mcp add-json atlas --scope user {"url":"http://127.0.0.1:4500/mcp"}',
+            'claude mcp add-json atlas --scope user {"url":"http://127.0.0.1:4600/mcp"}',
             'pnpm doctor',
         ]) {
             expect(plan, cmd).toContain(cmd);
@@ -210,7 +210,7 @@ describe('scripts/bootstrap.sh', () => {
         expect(env).toMatch(/^POSTGRES_USER=\nATLAS_MCP_TOKEN=[A-Za-z0-9_-]{64}\n$/);
         expect(readFileSync(join(box.root, '.env.prod'), 'utf8')).toMatch(/^ATLAS_MCP_TOKEN=[A-Za-z0-9_-]{64}\n$/);
         expect(readFileSync(join(box.home, 'pnpm.log'), 'utf8')).toBe('pnpm install\npnpm db:up\npnpm db:wait\npnpm db:migrate\npnpm doctor\n');
-        expect(readFileSync(join(box.home, 'claude.log'), 'utf8')).toBe('claude mcp add-json atlas --scope user {"url":"http://127.0.0.1:4500/mcp"}\n');
+        expect(readFileSync(join(box.home, 'claude.log'), 'utf8')).toBe('claude mcp add-json atlas --scope user {"url":"http://127.0.0.1:4600/mcp"}\n');
 
         mkdirSync(join(box.root, 'node_modules'));
         const second = box.run('--non-interactive');

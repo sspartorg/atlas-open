@@ -4,7 +4,7 @@
 // history show what Atlas actually produced rather than SIMULATED canned text.
 //
 // This spends real tokens (a few dollars). Nothing leaves the machine: the
-// repos' origins are local bare repos under /tmp/atlas-guide/origins, so a
+// repos' origins are local bare repos under /tmp/atlas-open-guide/origins, so a
 // run's push lands there (and its PR, with no GitHub remote, parks the run).
 //
 // Run: pnpm guide:populate
@@ -12,11 +12,11 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const API = 'http://127.0.0.1:6001';
+const API = 'http://127.0.0.1:7001';
 const PROJECT = 'acme-notes';
 const REPO_API = 'acme-notes-api';
 const REPO_WEB = 'acme-notes-web';
-const DATA = '/tmp/atlas-guide';
+const DATA = '/tmp/atlas-open-guide';
 
 async function call<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(`${API}${path}`, {

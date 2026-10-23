@@ -2,22 +2,22 @@
 # Perf + visual harness stack: a production web build over an API on a large
 # seeded database, on its own ports so it never touches the dev stack.
 #
-#   scripts/perf-stack.sh up     # drop/create atlas_perf, migrate, seed, build, start
+#   scripts/perf-stack.sh up     # drop/create atlas_open_perf, migrate, seed, build, start
 #   scripts/perf-stack.sh down   # stop both servers (leaves the DB for inspection)
-#   scripts/perf-stack.sh drop   # down + DROP DATABASE atlas_perf
+#   scripts/perf-stack.sh drop   # down + DROP DATABASE atlas_open_perf
 #
-# Then: PERF=1 PERF_BASE_URL=http://localhost:4700 PERF_LABEL=before \
+# Then: PERF=1 PERF_BASE_URL=http://localhost:4800 PERF_LABEL=before \
 #         pnpm exec playwright test -c playwright.perf.config.ts
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DB=atlas_perf
-WEB_PORT=4700
-API_PORT=4701
-MCP_PORT=4710
-DB_URL="postgres://atlas:atlas@localhost:5500/${DB}"
+DB=atlas_open_perf
+WEB_PORT=4800
+API_PORT=4801
+MCP_PORT=4810
+DB_URL="postgres://atlas:atlas@localhost:5600/${DB}"
 LOGS="$ROOT/e2e-logs/perf-stack"
-psql() { docker exec atlas-postgres psql -U atlas -d postgres -qc "$1"; }
+psql() { docker exec atlas-open-postgres psql -U atlas -d postgres -qc "$1"; }
 
 down() {
     # By port, not by name: the dev stack runs the same commands on other ports.

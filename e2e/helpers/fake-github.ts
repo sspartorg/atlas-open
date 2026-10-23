@@ -12,7 +12,7 @@ import { API } from './api.js';
 // token. Other github.com URLs are not rewritten.
 
 const FAKE_GITHUB_ORG = 'atlas-e2e';
-const FAKE_GITHUB_DIR = join(tmpdir(), 'atlas-e2e-github');
+const FAKE_GITHUB_DIR = join(tmpdir(), 'atlas-open-e2e-github');
 /** A PAT whose clone URL (`https://x-access-token:<token>@github.com/…`) the rewrite also covers. */
 const FAKE_GITHUB_TOKEN = 'ghpE2Efakegithubtoken0000000001';
 

@@ -160,12 +160,10 @@ const PAGE_INDEXES = [
     'idx_cli_sessions_credential_id',
     'idx_cli_sessions_repo_id',
     'idx_project_repos_credential_id',
-    'idx_team_config_credential_id',
     'idx_agent_tests_project_id',
     'idx_agent_tests_repo_id',
     'idx_project_schedules_project_id',
     'idx_agents_cli_model',
-    'idx_projects_default_workflow_id',
     'idx_jira_sources_workflow_id',
     'idx_agent_memory_last_run_id',
 ];

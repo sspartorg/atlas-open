@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const args = process.argv.slice(2);
-const dir = join(tmpdir(), 'atlas-e2e-github');
+const dir = join(tmpdir(), 'atlas-open-e2e-github');
 if (args[0] === '--version') {
     process.stdout.write('gh version 0.0.0 (atlas e2e fake)\n');
     process.exit(0);

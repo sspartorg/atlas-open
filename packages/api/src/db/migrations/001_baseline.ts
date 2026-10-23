@@ -3,8 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Knex } from 'knex';
 
-// Baseline schema, squashed from migrations 001-024 on 2026-09-28 (ADR 0025).
-// Supersedes the 2026-09-20 squash of 001-045 (ADR 0019). The DDL lives in the
+// Baseline schema for Atlas Open, squashed from migrations 001-020 on
+// 2026-10-23 (ADR 0032). It carries only what this edition uses: the team
+// config, published-workflow and workflow-builder leftovers are gone.
+// Supersedes the squashes of ADR 0025 and ADR 0019. The DDL lives in the
 // sibling `001_baseline.sql` so future schema diffs are readable SQL rather
 // than a JS template literal.
 //
@@ -13,7 +15,7 @@ import type { Knex } from 'knex';
 //   1. `pg_dump --schema-only --no-owner --no-acl
 //      --exclude-table='_knex_migrations*'`.
 //   2. `pg_dump --data-only --column-inserts --no-owner --no-acl
-//      -t cli_models -t roles -t guardrail_rules -t settings`, appended before
+//      -t cli_models -t roles -t guardrail_rules -t settings -t workflows`, appended before
 //      the trailing "dump complete" comment.
 //
 // Then strip from the COMBINED result, not just from pass 1:
@@ -33,9 +35,9 @@ import type { Knex } from 'knex';
 //
 // Pass 2 is not optional. `--schema-only` emits no rows, and a baseline
 // without them installs with no CLI models, no roles, no guard-rail rules and
-// no settings singleton to onboard into. The 2026-09-28 regeneration carried
-// 48 rows (23 cli_models, 14 guardrail_rules, 10 roles, 1 settings) - up from
-// 39 after the Claude 5 models and the five SDLC roles landed.
+// no settings singleton to onboard into, and no built-in `solo` workflow every
+// run hangs off. The 2026-10-23 regeneration carried 48 rows (22 cli_models,
+// 14 guardrail_rules, 10 roles, 1 settings, 1 workflows).
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
