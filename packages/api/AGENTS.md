@@ -25,7 +25,7 @@ src/
 │   └── ...
 └── services/           → Business logic. DB calls live here, not in routes.
     ├── agent-runner.ts       → CLI spawning for one agent run; reports every terminal exit to the Task runner (`workflow-engine.ts`)
-    ├── workflow-engine.ts    → Task runner: one Task, one agent (`startTaskRun`, `soloGraph`); park/resume, one crash retry, commit + push + PR, dispatch tick (`MAX_PARALLEL_RUNS` = 3, one Task per repo). Run records are `workflow_runs` rows on the built-in `solo` record (migration 020)
+    ├── workflow-engine.ts    → Task runner: one Task, one agent (`startTaskRun`, `soloGraph`); park/resume, one crash retry, commit (the only commit path) + push + PR, dispatch tick (`MAX_PARALLEL_RUNS` = 3, one Task per repo). Run records are `workflow_runs` rows on the built-in `solo` record (migration 020)
     ├── workflow-lock.ts      → Global preHandler: 409 on item status/assign while a run holds the item
     ├── external-notifications.ts → Provider-agnostic dispatcher (gating + quiet hours)
     └── transports/*.ts       → Per-provider outbound senders (Telegram, Teams)
@@ -88,7 +88,7 @@ The Task runner (`services/workflow-engine.ts`) writes item status directly for 
 
 ## Worktree Lifecycle (run-owned)
 
-Worktrees belong to a **Task run**, not an item or an agent run. When the run starts it calls `ensureWorktree({ item: null, branch })` once per repo of the Task on `atlas/task/<taskId>`; the agent (and its one retry) runs in that directory. On `done` Atlas commits what is left, pushes and opens one PR per changed repo, then `cleanupWorktreeAfterPush` deletes the folder and local branch; a stop commits and pushes but opens no PR. The path lives only on `workflow_runs.worktree_path` — never `items.worktree_path` — so nothing else can push or delete it mid-run. Remote is the source of truth; the local workspace is disposable.
+Worktrees belong to a **Task run**, not an item or an agent run. When the run starts it calls `ensureWorktree({ item: null, branch })` once per repo of the Task on `atlas/task/<taskId>`; the agent (and its one retry) runs in that directory. On `done` Atlas commits the agent's edits (`<task key>: <task title>`; agents never commit), pushes and opens one PR per changed repo, then `cleanupWorktreeAfterPush` deletes the folder and local branch; a stop commits and pushes but opens no PR. The path lives only on `workflow_runs.worktree_path` — never `items.worktree_path` — so nothing else can push or delete it mid-run. Remote is the source of truth; the local workspace is disposable.
 
 If push *fails*, cleanup is skipped so manual recovery is possible. A parked run keeps its worktree. The `main.ts` orphan reaper only flips dead runs to `error` and reports them to the engine; it never pushes or deletes. `ensureWorktree`, `pushWorktree`, `openPullRequest` and `cleanupWorktreeAfterPush` each take `withProjectGitLock`, which is not re-entrant — never wrap them in another lock. Terminal sessions (`routes/cli-sessions.ts`) use the same helpers with their own lifecycle.
 

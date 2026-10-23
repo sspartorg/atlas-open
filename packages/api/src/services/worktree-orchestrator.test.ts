@@ -155,7 +155,9 @@ describe('buildWorktreePreamble', () => {
         expect(md).toContain('atlas/dev/ATL-7');
         expect(md).toContain('/repos/worktrees/p1/atlas__dev__ATL-7');
         expect(md).toContain('Do NOT run');
-        expect(md).toContain('worktree add');
+        expect(md).toContain('git worktree');
+        expect(md).toContain('git commit');
+        expect(md).toContain('Atlas commits, pushes and opens the PR');
         expect(md).toContain('git pull');
     });
 

@@ -125,3 +125,7 @@ Parallel Tasks and a question inside a sub-task:
 
 - Parallel sub-tasks inside one Task. They need per-branch worktrees and merge/conflict handling; the Owner chose parallel Tasks instead.
 - Nesting deeper than Task → Sub-task.
+
+## Note (2026-10-23): agents no longer commit
+
+This ADR's runs had agents commit their own work and Atlas commit only the leftovers. Since 2026-10-23 the workflow is the only committer: agents edit files and are told not to run `git commit`, `git push`, `gh`, `git worktree` or `git checkout <branch>`; the Claude (and ollama) `--disallowedTools` and Copilot `--deny-tool` flags block those commands, and the agent's env holds no GitHub token. When the run ends `commitPending` commits the worktree as `<task key>: <task title>` under the bot identity with the human `Co-Authored-By` trailer, then delivery pushes and opens the PR as described above. Migration `002_agents_never_commit.ts` clears the dead role prompts that still said `git push` / `gh pr create`.

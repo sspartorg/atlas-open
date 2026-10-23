@@ -47,7 +47,7 @@ Tab switching is plain `useTabParam(tabSlug)`. (The legacy `LinearProgress` mid-
 - **Discard** → revert local state
 - **Role section** — Designation, Memory cadence; **Save role** → `PATCH /agents/:id` `{ designation, memory_cadence }`.
 - **Quality checklist** card (`QualityChecklistCard`, between Role and Commit discipline) — loads `GET /agents/:id/checklists`; rows are editable labels with a delete icon (opens a confirm dialog, local until saved); **Add check**; **Save checklist** → `PUT /agents/:id/checklists` `{ items: [{ label, sort_order, required }] }`. Copy: "The agent reports each check in its outcome. A failed required check stops the work from being delivered." (the run parks on the Owner). (Moved here from the removed Handoffs tab; formerly "Pre-handoff checklist".)
-- **Commit discipline** tile — last 10 commit verifications as coloured dots.
+- **Commit discipline** tile — last 10 commit verifications as coloured dots: green = compliant (files changed, left for Atlas to commit), amber = partial (the agent committed itself), grey = clean.
 - Removed: Schedule presets / cron / Next pass preview, Concurrent runs, Max rounds, Item required, Requires worktree, Push code, Raises PR.
 
 ### Prompt (`PromptTab`)

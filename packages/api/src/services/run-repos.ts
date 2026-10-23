@@ -101,10 +101,10 @@ export function repositoriesMarkdown(repos: RunRepo[], branch: string | null): s
             (r, i) => `| \`./${basename(r.path)}\`${i === 0 ? ' (first)' : ''} | ${r.repo.git_url || '-'} | \`${r.repo.default_branch}\` |`
         ),
         '',
-        '- This folder is not a git repo. Change each file in the repo it belongs to, and commit inside that repo (`git -C ./<repo> ...`).',
+        '- This folder is not a git repo. Change each file in the repo it belongs to; do not commit — Atlas commits each repo you changed.',
         '- Run every checklist script from inside each repo you changed: `(cd ./<repo> && bash ./.atlas/scripts/bash/<script>.sh)`.',
         `- Put Task-wide files (specs, QA CSVs) in the first repo, \`./${first ? basename(first.path) : ''}\`.`,
-        '- When the workflow ends, Atlas pushes the branch and opens one pull request per repo you changed.',
+        '- When your run ends, Atlas commits, pushes the branch and opens one pull request per repo you changed.',
         '- **This shared parent folder is temporary.** It is deleted at teardown, and each repo is merged and built on its own. Never import or require across repos by relative path (`../<other-repo>/...`) and never point a config or test fixture at a sibling folder — it resolves here and nowhere else, so the test passes in this run and fails in CI, in a fresh clone, and after merge. Cross-repo agreement is asserted by duplicating the expected values in each repo, not by reaching across.',
         '',
     ].join('\n');

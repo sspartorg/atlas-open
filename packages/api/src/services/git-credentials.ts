@@ -83,6 +83,7 @@ export class GitAuthUnavailableError extends Error {
  */
 export async function buildGitAuth(
     credentialId: string | null,
+    opts: { identityOnly?: boolean } = {},
 ): Promise<GitAuth | null> {
     if (!credentialId) return null;
     const cred = await credentialsService.get(credentialId);
@@ -106,10 +107,12 @@ export async function buildGitAuth(
     try {
         const configPath = join(configDir, 'config');
 
+        // `identityOnly` is the agent's config (ADR 0015): the [user] block so
+        // anything it runs is attributed to the bot, and no token on disk —
+        // Atlas, not the agent, pushes.
         const authB64 = Buffer.from(`${enriched.username}:${token}`, 'utf8').toString('base64');
         const lines: string[] = [
-            '[http]',
-            `\textraheader = AUTHORIZATION: basic ${authB64}`,
+            ...(opts.identityOnly ? [] : ['[http]', `\textraheader = AUTHORIZATION: basic ${authB64}`]),
             '[credential]',
             '\thelper =',
         ];
@@ -267,6 +270,7 @@ export interface MultiRepoGitAuth {
  */
 export async function buildMultiRepoGitAuth(
     repos: readonly RepoAuthInput[],
+    opts: { identityOnly?: boolean } = {},
 ): Promise<MultiRepoGitAuth | null> {
     const built: Array<{ gitPath: string; auth: GitAuth }> = [];
     for (const repo of repos) {
@@ -275,7 +279,7 @@ export async function buildMultiRepoGitAuth(
         // the others still get their identity, and the caller's existing
         // best-effort handling covers the gap. Matches how `commitPending`
         // treats a failed `buildGitAuth`.
-        const auth = await buildGitAuth(repo.credentialId).catch(() => null);
+        const auth = await buildGitAuth(repo.credentialId, opts).catch(() => null);
         if (auth) built.push({ gitPath: repo.gitPath, auth });
     }
     const [first] = built;

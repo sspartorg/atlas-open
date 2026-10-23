@@ -131,7 +131,8 @@ describe('GUARDRAIL_SCRIPT_SEEDS — Phase 3 per-agent validators', () => {
         // agent-automation and agent-automation-reviewer were silently
         // substituting `pnpm typecheck + pnpm lint`).
         'check-automation-tests',
-        'commit-discipline',
+        // `commit-discipline` was dropped with ADR 0015's edit-only rule:
+        // agents no longer commit, so there is no agent commit to check.
         // 2026-09-25 (ADR 0024) — `coder-tests-green` and the four `gate-*`
         // scripts were deleted. Each of them guessed at the customer's stack:
         // a UI file-extension allowlist, a 95% coverage floor Atlas invented,

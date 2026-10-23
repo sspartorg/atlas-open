@@ -3,7 +3,6 @@ import { projectReposService } from './project-repos.js';
 import { commentsService } from './comments.js';
 import { itemLinks } from './item-links.js';
 import { DEFAULT_THREAD_TAIL_COMMENTS, takeRecentComments } from './context-budget.js';
-import { COMMIT_DISCIPLINE_PROMPT_SECTION, buildHumanAttributionSection } from './commit-discipline.js';
 
 // Theme 09 — render `{{ key }}` placeholders in an agent's prompt
 // body against its `settings_json`. Missing keys render as `(unset)`
@@ -191,9 +190,9 @@ function formatComments(comments: IComment[]): string {
 // + …) and can technically call any Atlas MCP tool, so the safety net
 // moved to a prompt-level clause.
 //
-// ADR 0014 — the workflow owns `git push` and `gh pr create`: it pushes and
-// opens one PR when the whole workflow run reaches End. Agents commit only.
-// The constitution mirrors that contract.
+// ADR 0015 — the workflow owns `git commit`, `git push` and `gh`: it commits,
+// pushes and opens one PR when the run ends. Agents only edit files, and
+// agent-runner hard-blocks those commands. The constitution mirrors that.
 const FORBIDDEN_TOOLS_SECTION = `## One run = one model session
 
 You may not dispatch sub-agents from this session. Concretely:
@@ -230,39 +229,28 @@ explain that this is an Owner-only action.
 
 ## Repository operations (every agent, no exceptions)
 
-**You commit. The workflow pushes and opens the PR.** This split
-is non-negotiable and identical for every role; do not duplicate or
-vary it in a per-agent prompt.
+**You edit files. Atlas commits, pushes and opens the PR when your run
+ends.** This split is non-negotiable and identical for every role; do
+not duplicate or vary it in a per-agent prompt.
 
-**You are one step of a workflow.** Other agents may run before and
-after you in this same working directory — their commits are already
-here, and yours will be there for the next step. Routing is the
-workflow's job: never assign the item, change its status, or hand the
-work to another agent yourself. Report your result with the
-\`atlas-outcome\` block and stop.
+**You are one step of a workflow.** Earlier runs of this Task may have
+left work in this directory — it is already here, and yours stays
+for whatever runs next. Routing is the workflow's job: never assign
+the item, change its status, or hand the work to another agent
+yourself. Report your result with the \`atlas-outcome\` block and stop.
 
-**Commit your own work.** Every commit must use the Husky workaround
-\`git -c core.hooksPath=.husky/_ commit\` (the sandbox can't spawn
-\`.husky/pre-commit\` directly). Every commit must include the
-\`Co-Authored-By: Claude <noreply@anthropic.com>\` trailer so the audit
-trail credits the AI for the work. Stage with \`git add\` (no
-\`--no-verify\`, no skipped hooks).
+**Do NOT run \`git commit\`, \`git push\`, \`gh\` (any subcommand),
+\`git worktree\`, or \`git checkout <branch>\` — via Bash or anywhere
+else.** Leave your changes in the working tree. When the run ends, Atlas
+stages everything, commits it as \`<task key>: <task title>\`, pushes the
+branch and opens one pull request against the project's default branch.
+The PR is linked on the item automatically; you do not need to mention
+it in a comment. Atlas holds the GitHub credential — no token is
+exposed to your shell, and those commands are blocked for this run.
 
-**Do NOT run \`git push\`, \`gh pr create\`, \`gh pr edit\`, or any
-other remote-mutating git/gh command — via Bash or anywhere else.**
-The workflow owns those:
-
-- When the workflow run reaches its End step it pushes the branch
-  and, if the workflow is configured to, opens one pull request
-  against the project's default branch. The PR is linked on the
-  item automatically; you do not need to mention it in a comment.
-- It uses the API server's stored GitHub credential (HTTPS
-  \`http.extraheader\`) — no token is exposed to your shell.
-
-Local reads are fine: \`git status\`, \`git diff\`, \`git log\`,
-\`gh pr view\` (read-only). Anything that mutates origin is the
-orchestrator's job. If you find yourself reaching for \`git push\`,
-stop and finish committing instead.
+Local reads are fine: \`git status\`, \`git diff\`, \`git log\`. If you
+find yourself reaching for \`git commit\` or \`git push\`, stop: your
+edits are already where Atlas will pick them up.
 
 ## Replying on the ticket
 
@@ -617,12 +605,6 @@ export interface BuildPromptInput {
      *  read both files. Skipping the constitution here keeps `WORK.md`
      *  focused on the role-specific instructions + item context. */
     omitConstitution?: boolean;
-    /** Migration 025 — human co-authorship. When both are set, the
-     *  prompt-builder appends a section instructing the agent to add
-     *  `--trailer "Co-Authored-By: <humanName> <humanEmail>"` on every
-     *  `git commit`. Populated by agent-runner from `buildGitAuth`. */
-    humanName?: string | null | undefined;
-    humanEmail?: string | null | undefined;
 }
 
 export async function buildPrompt(input: BuildPromptInput): Promise<string> {
@@ -633,11 +615,8 @@ export async function buildPrompt(input: BuildPromptInput): Promise<string> {
         projectId = null,
         constitutionMd: rawConstitution,
         omitConstitution = false,
-        humanName = null,
-        humanEmail = null,
     } = input;
     const constitutionMd = omitConstitution ? '' : rawConstitution;
-    const humanAttrSection = buildHumanAttributionSection(humanName, humanEmail);
 
     // Theme 09b — project-scope run path. Reached when the agent
     // operates on a project (not an item) — e.g., the AI-Readiness
@@ -721,8 +700,6 @@ export async function buildPrompt(input: BuildPromptInput): Promise<string> {
         sections.push(
             `# Working Protocol\n\nFollow the protocol in your role prompt above exactly. Your run output is the transcript; the artifact you produce (e.g., a PR) is what the Owner reviews.`,
         );
-        sections.push(COMMIT_DISCIPLINE_PROMPT_SECTION);
-        if (humanAttrSection) sections.push(humanAttrSection);
         sections.push(
             `# Output Instructions\n\nProvide your complete summary at the end: what you detected, what you produced (file list / branch name / PR URL), and any follow-up the Owner needs to take.`,
         );
@@ -828,12 +805,6 @@ export async function buildPrompt(input: BuildPromptInput): Promise<string> {
             `5. **End-of-run memory draft (optional).** If during this run you noticed a *generic behavioral lesson* about how you should approach future similar work — a process correction, an anti-pattern, an escalation trigger that would be true *regardless of which item or project hit this code path* — call \`updateAgentMemory\` with \`mode: 'append'\` and a single bullet (≤ 240 chars). Skip this for most runs; it should fire only when the lesson is reusable. **Examples** — ✅ "When AC is empty, escalate to Owner before drafting." ❌ "Story story_abc123 was about refunds" (project-specific facts belong in the item, not memory).`,
         ].join('\n'),
     );
-
-    // Theme 11 — commit discipline. Issue-attached runs get the
-    // commit-rule section; freedom runs do not (they don't typically
-    // touch the repo and the verifier skips them).
-    sections.push(COMMIT_DISCIPLINE_PROMPT_SECTION);
-    if (humanAttrSection) sections.push(humanAttrSection);
 
     sections.push(
         `# Output Instructions\n\nProvide your complete response for this task. Be specific, actionable, and thorough. Your output will be saved and surfaced to the Owner for review.`,

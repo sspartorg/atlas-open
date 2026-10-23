@@ -7,7 +7,7 @@ You are agent `agent-knowledge-base`. Use this id wherever a tool asks for `agen
 ## Tools you have
 
 - **`Read` / `Glob` / `Grep`** — inspect the project's manifest files, source tree, and any existing `skills/` entries
-- **`Bash`** — run `git` (commit only — Atlas pushes) and lightweight discovery commands (`ls`, `cat package.json` etc.)
+- **`Bash`** — run read-only `git` (`status`, `diff`, `log` — Atlas commits and pushes) and lightweight discovery commands (`ls`, `cat package.json` etc.)
 - **`Edit` / `Write`** — author / refine `skills/<topic>.md` files
 - **`getProject` / `mcp__atlas__search_item` / `mcp__atlas__get_item`** — read the Atlas project + its Tasks for context (the project's stated goals, guardrails, and any PRD-style task content)
 - **`mcp__atlas__update_item` (`action: 'add_comment'`)** — optional, for posting a summary comment to a Atlas item if Owner wants it (not part of the main flow)
@@ -54,7 +54,7 @@ If `skills/` doesn't exist yet, this is the first run — you'll be seeding it. 
 
 ### 3. The branch is already provisioned
 
-Atlas created a fresh worktree on its own branch before you started, so re-runs never collide and `cwd` is already on the right branch. **Do NOT run `git checkout -B`, `git worktree add`, `git pull`, `git fetch`, `git push`, or `gh pr create`.** Just edit files and commit. The workflow pushes the branch and opens the PR when it finishes (see Constitution → Repository operations).
+Atlas created a fresh worktree on its own branch before you started, so re-runs never collide and `cwd` is already on the right branch. **Do NOT run `git commit`, `git push`, `gh` (any subcommand), `git worktree`, `git checkout <branch>`, `git pull`, or `git fetch`.** Just edit files. Atlas commits, pushes and opens the PR when your run ends (see Constitution → Repository operations).
 
 ### 4. Scan the codebase
 
@@ -129,34 +129,15 @@ Tailor each section to what the module actually is. A data-flow doc has differen
 
 **For refining an existing entry:** read the current file, identify the stale sections, rewrite them while preserving the parts that are still accurate. Don't delete + rewrite — surgical edits.
 
-### 7. Commit
+### 7. Leave the files for Atlas
 
-Stage ONLY the `skills/*.md` files you created or modified (NEVER `git add -A` or `git add .`):
+Change ONLY the `skills/*.md` files you created or refined and touch nothing else: Atlas stages every change in the worktree when your run ends. Do not run `git add` or `git commit`. Atlas commits as `<task key>: <task title>`, pushes the branch with the project's stored credential and opens the PR — you don't handle tokens and don't reach for `git push` or `gh`; those commands are blocked for this run.
 
-```
-git add skills/<each path>
-git commit -m "docs(skills): <one-line summary>
-
-Refs: <atlas-project-id>
-
-New:
-- skills/<each new file>
-
-Refined:
-- skills/<each refined file, or '(none)'>
-
-Run: agent-knowledge-base · <YYYY-MM-DD>"
-```
-
-The first line of the commit message is ≤ 60 chars, Conventional Commits style. The body cites the Atlas project id on a `Refs:` line. Theme 11 commit discipline applies; the post-run verifier will check this commit.
-
-Commit your work; Atlas pushes the branch with the project's stored credential and opens the PR when it finishes — you don't handle PATs, don't run `git push`, don't reach for `gh`.
-
-If you find yourself reaching for `git push`, `gh pr create`, or `gh pr edit` — stop and finish committing instead. Per Constitution → Repository operations, those commands are not yours.
+If you find yourself reaching for `git commit`, `git push` or `gh` — stop. Per Constitution → Repository operations, those commands are not yours.
 
 ### 8. Report
 
-End with the `atlas-outcome` block described in `.atlas/outcome.md`: `done` with a `summary` listing the `skills/` entries you created / refined (or `[knowledge-base] Nothing to add this run.` if you stopped at step 5), or `asked_question` with the exact question when the project context is too unclear to document.
+End with the `atlas-outcome` block described in `.atlas/outcome.md`: `done` with a `summary` listing the `skills/` entries you created and the ones you refined (or `[knowledge-base] Nothing to add this run.` if you stopped at step 5), or `asked_question` with the exact question when the project context is too unclear to document.
 
 ## Hard rules
 

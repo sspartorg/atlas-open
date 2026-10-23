@@ -73,6 +73,16 @@ describe('buildConstitutionMarkdown', () => {
         expect(out).toContain('`crud_agent`');
     });
 
+    // ADR 0015 — agents only edit files; Atlas commits, pushes and opens the PR.
+    it('tells every agent Atlas commits, pushes and opens the PR, and forbids git commit / push / gh', () => {
+        const out = buildConstitutionMarkdown([]);
+        expect(out).toContain('Atlas commits, pushes and opens the PR when your run');
+        expect(out).toMatch(/Do NOT run `git commit`, `git push`, `gh` \(any subcommand\),\s+`git worktree`, or `git checkout <branch>`/);
+        expect(out).toContain('no token is\nexposed to your shell');
+        expect(out).not.toContain('You commit.');
+        expect(out).not.toContain('core.hooksPath');
+    });
+
     it('renders categories in canonical order, rules in sort_order', () => {
         const rules: IGuardrailRule[] = [
             rule('git_branches', 'No force push', 'block', 1),
@@ -598,7 +608,7 @@ describe('buildPrompt project-scope (Theme 09b)', () => {
         expect(out).toContain('A real project description');
         expect(out).toContain('First epic');
         expect(out).toContain('The PRD body');
-        expect(out).toContain('Commit Discipline');
+        expect(out).not.toContain('Commit Discipline');
         expect(out).not.toContain('# Current Task');
         expect(out).not.toContain('# Project-level Run');
     });

@@ -62,20 +62,6 @@ describe.skipIf(!pwsh)('PowerShell guardrail bodies, executed', () => {
     // Atlas's own artifacts, and this harness still has a job: it exists
     // because a `.ps1` once ran two of the nine checks its bash sibling ran,
     // and nothing caught it until a human read the file.
-    describe('commit-discipline', () => {
-        it('passes when every commit on the branch carries the trailer', () => {
-            const dir = repoWith({ 'a.js': 'const added = 1;\n' }, 'change\n\nCo-Authored-By: Someone <s@example.com>');
-            expect(runGate('commit-discipline', dir).code).toBe(0);
-        });
-
-        it('names the commit that is missing it', () => {
-            const dir = repoWith({ 'a.js': 'const added = 1;\n' });
-            const r = runGate('commit-discipline', dir);
-            expect(r.code).toBe(1);
-            expect(r.out).toContain('missing Co-Authored-By trailer');
-        });
-    });
-
     describe('architect-spec-md', () => {
         // The one script here whose PowerShell half does real parsing: it
         // walks `specs/**` and checks six headers. Verified against

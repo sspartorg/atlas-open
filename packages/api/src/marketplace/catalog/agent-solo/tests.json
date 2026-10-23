@@ -14,7 +14,7 @@
       "required_checklist_all_passed": true,
       "judge_criteria": [
         "The summary names the test command it documented and where that command is declared.",
-        "The summary lists the commits it made and each check it ran with its result."
+        "The summary lists the changes it made and each check it ran with its result."
       ],
       "max_cost_usd": 3.0
     },

@@ -6,7 +6,7 @@
   "model": "claude-sonnet-5-5",
   "effort": "high",
   "framework": "tdd-red-green-refactor",
-  "description": "Takes one Task end to end on its branch — understands it, plans, builds with TDD, reviews its own diff and runs the project's checks — then reports via the `atlas-outcome` block; Atlas pushes the branch and opens the PR.",
+  "description": "Takes one Task end to end on its branch — understands it, plans, builds with TDD, reviews its own diff and runs the project's checks — then reports via the `atlas-outcome` block; Atlas commits, pushes the branch and opens the PR.",
   "designation": "Engineer",
   "accent_color": "#22A06B",
   "sort_order": 1,
@@ -17,6 +17,6 @@
   "settings_json": {},
   "memory_cadence": 1,
   "summary": "Takes one Task end to end: plan, TDD, self-review, verify.",
-  "version": 1,
+  "version": 2,
   "published_at": "2026-10-21T00:00:00Z"
 }

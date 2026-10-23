@@ -168,7 +168,7 @@ Fields: `id, name, issue_key_prefix, description, status, guardrails_md, team_ma
 A git repo of a project. Fields: `id, project_id, name, git_url, git_path, credential_id, default_branch, clone_status, setup_sh_body, setup_ps1_body`. (`verify_command` was dropped by migration 006.)
 - Every repo is an ordinary `project_repos` row; **there is no primary**. A repo that predates ADR 0018 carries its project's id, which is what kept its worktrees, git-lock key and Jira sources valid through migration 045.
 - `name` is a slug unique within the project and is the repo's folder name in a multi-repo workspace. Each repo has its own credential, default branch, clone status, setup scripts and auto-fetch schedule.
-- **Order matters**: `position, created_at`. The *first* repo of a Task holds Task-wide files, hosts the multi-repo workspace folder, and lends its credential to the agents as `GH_TOKEN`.
+- **Order matters**: `position, created_at`. The *first* repo of a Task holds Task-wide files, hosts the multi-repo workspace folder, and lends its bot identity to the agent (no token — ADR 0015: Atlas pushes).
 - `clone_status` âˆˆ `pending | cloning | ready | error`
 - There is no per-repo verification command (migration 006 dropped `project_repos.verify_command`); the agent runs the project's own checks inside its run.
 
