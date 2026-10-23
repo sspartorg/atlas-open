@@ -46,7 +46,7 @@ await db
 //   * that git_path to be a clone of a remote that accepts push (so
 //     Stop's push-and-cleanup step doesn't strand the worktree)
 //
-// We provision both on disk under tmpdir/atlas-e2e-fixtures: a
+// We provision both on disk under tmpdir/atlas-open-e2e-fixtures: a
 // bare repo plays origin, a working clone is what `projects.git_path`
 // points at. Wipe-and-recreate every seed so reruns are hermetic.
 // The Atlas worktrees the Terminal route creates land alongside as
