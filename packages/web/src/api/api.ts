@@ -1,6 +1,6 @@
 import type {
     AnalyticsWindow,
-    IAnalyticsDelivery,
+    IAnalytics,
     AgentCategory,
     AgentKindSlug,
     ApiErrorBody,
@@ -81,11 +81,6 @@ import type {
     DashboardResponse,
     ProjectCounts,
     ProjectTaskSummary,
-    AnalyticsResponse,
-    AnalyticsProjectResponse,
-    AnalyticsProjectTasksResponse,
-    AnalyticsTaskResponse,
-    AnalyticsTaskChildrenResponse,
     AgentTest,
     AgentTestRun,
     AgentTestBatch,
@@ -273,40 +268,7 @@ export const api = {
 
     analytics: {
         get: (window: AnalyticsWindow = 'month', tz: string = viewerTz()) =>
-            get<AnalyticsResponse>(`/analytics?tz=${encodeURIComponent(tz)}&window=${window}`),
-        delivery: (window: AnalyticsWindow, tz: string = viewerTz()) =>
-            get<IAnalyticsDelivery>(`/analytics/delivery?tz=${encodeURIComponent(tz)}&window=${window}`),
-        // Drill-down: project aggregate (totals + byKind + top 25 tasks).
-        project: (projectId: string) =>
-            get<AnalyticsProjectResponse>(`/analytics/project/${encodeURIComponent(projectId)}`),
-        projectTasks: (projectId: string, params: { page?: number; limit?: number } = {}) => {
-            const q = new URLSearchParams();
-            if (params.page) q.set('page', String(params.page));
-            if (params.limit) q.set('limit', String(params.limit));
-            const qs = q.toString();
-            return get<AnalyticsProjectTasksResponse>(
-                `/analytics/project/${encodeURIComponent(projectId)}/tasks${qs ? `?${qs}` : ''}`
-            );
-        },
-        task: (taskId: string) =>
-            get<AnalyticsTaskResponse>(`/analytics/task/${encodeURIComponent(taskId)}`),
-        taskChildren: (
-            taskId: string,
-            params: {
-                page?: number;
-                limit?: number;
-                type?: IssueType;
-            } = {}
-        ) => {
-            const q = new URLSearchParams();
-            if (params.page) q.set('page', String(params.page));
-            if (params.limit) q.set('limit', String(params.limit));
-            if (params.type) q.set('type', params.type);
-            const qs = q.toString();
-            return get<AnalyticsTaskChildrenResponse>(
-                `/analytics/task/${encodeURIComponent(taskId)}/children${qs ? `?${qs}` : ''}`
-            );
-        },
+            get<IAnalytics>(`/analytics?tz=${encodeURIComponent(tz)}&window=${window}`),
     },
 
     jira: {

@@ -6,7 +6,7 @@ import { insertNotifications, sql } from '../helpers/db.js';
 import { setThemeMode } from '../helpers/theme.js';
 import { routeAnalytics } from '../fixtures/analytics-fixtures.js';
 
-// Notifications, Reminders, Analytics (+ drill-downs) and Settings →
+// Notifications, Reminders, Analytics and Settings →
 // Notifications, populated, at 390 / 834 / 1440 in light and dark: axe WCAG
 // A/AA, no console errors, no sideways page scroll. Then the keyboard: Tab
 // reaches every control, Enter / Space activate, Escape closes menus, dialogs
@@ -36,11 +36,7 @@ const VIEWS: View[] = [
             await expect(p.getByRole('region', { name: 'History' }).getByTestId('reminder-row')).toHaveCount(1);
         },
     },
-    { name: 'analytics overview', path: '/analytics', analytics: true, ready: async (p) => void (await expect(p.getByRole('heading', { name: /^Shipped and spent/ })).toBeVisible()) },
-    { name: 'analytics delivery', path: '/analytics?tab=delivery', analytics: true, ready: async (p) => void (await expect(p.getByRole('heading', { name: /^Throughput per/ })).toBeVisible()) },
-    { name: 'analytics spend', path: '/analytics?tab=spend', analytics: true, ready: async (p) => void (await expect(p.getByRole('heading', { name: 'Cost by model' })).toBeVisible()) },
-    { name: 'analytics project', path: '/analytics/project/e2e-terminal-project', ready: async (p) => void (await expect(p.getByText('E2E Terminal').first()).toBeVisible()) },
-    { name: 'analytics task', path: '/analytics/task/ETM-1', ready: async (p) => void (await expect(p.getByText('E2E linked task').first()).toBeVisible()) },
+    { name: 'analytics', path: '/analytics', analytics: true, ready: async (p) => void (await expect(p.getByRole('heading', { name: /^Shipped and spent/ })).toBeVisible()) },
     { name: 'settings notifications', path: '/settings?tab=notifications', ready: async (p) => void (await expect(p.getByText('Quiet Hours').first()).toBeVisible()) },
 ];
 
@@ -235,25 +231,20 @@ test.describe('keyboard', () => {
         await expect(page.getByRole('button', { name: /Renew the TLS certificate — hide fire log/ })).toHaveAttribute('aria-expanded', 'true');
     });
 
-    test('Analytics: arrows move between tabs, the window buttons and info tooltips work by keyboard', async ({ page }) => {
+    test('Analytics: the window buttons and info tooltips work by keyboard', async ({ page }) => {
         await routeAnalytics(page);
         await goto(page, '/analytics');
-        await page.getByRole('tab', { name: /Overview/ }).focus();
-        await page.keyboard.press('ArrowRight');
-        await expect(page.getByRole('tab', { name: /Delivery/ })).toBeFocused();
-        await page.keyboard.press('Enter');
-        await expect(page.getByRole('heading', { name: /^Throughput per/ })).toBeVisible();
         await page.getByRole('button', { name: '7 days', exact: true }).focus();
         await page.keyboard.press('Space');
         await expect(page).toHaveURL(/window=7d/);
         // The new window refetches and redraws the tiles; focus a settled one.
         await expect(page.getByText('for the last 7 days.')).toBeVisible();
         await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
-        await expect(page.getByRole('button', { name: 'How Waiting on you is measured' })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'How Tasks shipped is measured' })).toBeVisible();
         // Reach it with Tab (keyboard focus is what opens a tooltip; a scripted focus may not).
-        await page.getByRole('button', { name: 'How Waiting on you is measured' }).focus();
+        await page.getByRole('button', { name: 'How Tasks shipped is measured' }).focus();
         await page.keyboard.press('Tab');
-        await expect(page.getByRole('button', { name: 'How Reopen rate is measured' })).toBeFocused();
+        await expect(page.getByRole('button', { name: 'How PRs merged is measured' })).toBeFocused();
         await expect(page.getByRole('tooltip')).toBeVisible();
         await page.keyboard.press('Escape');
         await expect(page.getByRole('tooltip')).toHaveCount(0);

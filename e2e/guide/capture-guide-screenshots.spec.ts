@@ -310,7 +310,6 @@ test.describe('@guide capture the user-guide screenshots', () => {
         await settle(page);
         await shoot(page, 'doc-42-search-query');
         await capture(page, '/analytics', 'doc-43-analytics');
-        await capture(page, `/analytics/project/${PROJECT}`, 'doc-44-analytics-project');
     });
 
     test('reminders, scratch pad, notifications, guard-rails', async ({ page }) => {

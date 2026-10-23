@@ -56,8 +56,6 @@ const DETAIL_ROUTES = [
     '/projects/e2e-terminal-project?tab=guardrails',
     '/tasks/ETM-1',
     '/sub-tasks/ETM-2',
-    '/analytics/project/e2e-terminal-project',
-    '/analytics/task/ETM-1',
 ];
 
 const THEMES = ['light', 'dark'] as const;

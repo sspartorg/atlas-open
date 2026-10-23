@@ -226,25 +226,4 @@ test.describe('perf baseline', () => {
         const record = await gotoWithPerf(page, href);
         assertApiBudget(record, href);
     });
-
-    // -----------------------------------------------------------------------
-    // Analytics — project-level and task-level detail pages
-    // -----------------------------------------------------------------------
-    test('walk first analytics project detail', async ({ page }) => {
-        await gotoWithPerf(page, '/analytics');
-        const projectLink = page.locator('a[href^="/analytics/project/"]').first();
-        if ((await projectLink.count()) === 0) {
-            test.skip(true, 'no analytics project links visible — skipping AnalyticsProject walk');
-            return;
-        }
-        const href = await projectLink.getAttribute('href');
-        if (!href) return;
-        const record = await gotoWithPerf(page, href);
-        assertApiBudget(record, href);
-    });
-
-    test('walk seeded analytics task detail', async ({ page }) => {
-        const record = await gotoWithPerf(page, '/analytics/task/ETM-1');
-        assertApiBudget(record, '/analytics/task/ETM-1');
-    });
 });

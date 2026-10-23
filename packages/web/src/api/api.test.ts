@@ -529,42 +529,6 @@ describe('api.analytics (extended)', () => {
         expect(cap.url).toContain('tz=America%2FNew_York');
         expect(cap.url).toContain('window=7d');
     });
-    it('delivery passes window + tz', async () => {
-        const d = captureGet('/analytics/delivery', {});
-        await api.analytics.delivery('90d', 'Asia/Kolkata');
-        expect(d.url).toContain('/analytics/delivery?tz=Asia%2FKolkata&window=90d');
-    });
-    it('project drill-down', async () => {
-        const cap = captureGet('/analytics/project/p1', {});
-        await api.analytics.project('p1');
-        expect(cap.url).toContain('/analytics/project/p1');
-    });
-    it('projectTasks with page+limit', async () => {
-        const cap = captureGet('/analytics/project/p1/tasks', { rows: [], total: 0 });
-        await api.analytics.projectTasks('p1', { page: 2, limit: 10 });
-        expect(cap.url).toContain('page=2');
-        expect(cap.url).toContain('limit=10');
-    });
-    it('projectTasks without params', async () => {
-        const cap = captureGet('/analytics/project/p1/tasks', { rows: [], total: 0 });
-        await api.analytics.projectTasks('p1');
-        expect(cap.url).toMatch(/\/analytics\/project\/p1\/tasks$/);
-    });
-    it('task drill-down', async () => {
-        const cap = captureGet('/analytics/task/t1', {});
-        await api.analytics.task('t1');
-        expect(cap.url).toContain('/analytics/task/t1');
-    });
-    it('taskChildren with type', async () => {
-        const cap = captureGet('/analytics/task/t1/children', { rows: [], total: 0 });
-        await api.analytics.taskChildren('t1', { page: 1, limit: 25, type: 'sub_task' });
-        expect(cap.url).toContain('type=sub_task');
-    });
-    it('taskChildren without params', async () => {
-        const cap = captureGet('/analytics/task/t1/children', { rows: [], total: 0 });
-        await api.analytics.taskChildren('t1');
-        expect(cap.url).toMatch(/\/analytics\/task\/t1\/children$/);
-    });
 });
 
 describe('api.labels', () => {

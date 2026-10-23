@@ -119,16 +119,14 @@ Wave letters match the sweep order (entity graph first, readers after).
 |---|---|
 | `/search` | Results equal what the entity pages show for the same query. Task and sub-task results land on `/tasks/:id` / `/sub-tasks/:id`. |
 | `/scratch-pad` | 5s autosave survives a reload; delete is not soft-only. |
-| `/analytics`, `/analytics/project/:projectId`, `/analytics/task/:taskId` | Totals equal the dashboard's and the entity pages'. Pagination does not drop or duplicate rows. Agent names come from the denormalized `agent_name`. |
+| `/analytics` | Month spend equals the Dashboard's. Each window's numbers match their stated definitions. |
 | `/terminal`, `/terminal/standalone`, `/terminal/layout`, `/terminal/:id`, `/terminal/:id/history` | Session create → appears in the list and survives a reload. Pause/resume/stop reach terminal states. WS stream reconnects without losing the transcript. Standalone sessions carry their credential and commit under its identity. Diff panel matches `GET /api/cli-sessions/:id/diff`. |
 
 Every route has a page doc. The analytics / marketplace ones were written 2026-09-12 as
 part of this sweep: [`27-marketplace.md`](pages/27-marketplace.md),
 [`28-marketplace-detail.md`](pages/28-marketplace-detail.md),
 [`29-mcp-tools.md`](pages/29-mcp-tools.md),
-[`30-analytics.md`](pages/30-analytics.md),
-[`31-analytics-project.md`](pages/31-analytics-project.md),
-[`32-analytics-task.md`](pages/32-analytics-task.md).
+[`30-analytics.md`](pages/30-analytics.md) (the drill-down pages were removed 2026-10-23).
 
 ---
 
@@ -244,7 +242,7 @@ like every other surface), and the Projects subtitle read "1 projects · 1 epics
 
 Cosmetic, still open: eight other count headers have no singular form either —
 `Epics.tsx:148`, `Issues.tsx:315`, `Guardrails.tsx:154`, `Terminal.tsx:168`,
-`TerminalStandalone.tsx:114`, `AnalyticsProject.tsx:363,469,513`. One shared
+`TerminalStandalone.tsx:114`. One shared
 `plural()` helper would close all eight; not worth an eight-file diff on its own,
 so fold it into the next edit that touches those files.
 
@@ -386,7 +384,7 @@ change is scoped and ready — DB column + backfill migration, a stamp in
 `author_name` added to `IComment` in `packages/shared/src/types/index.ts`, and
 `packages/shared/` is protected by `AGENTS.md`. **Not started: waiting on an
 explicit "yes, edit shared".** The in-repo precedent for denormalizing a name
-is `counts.ts:270,286` and `routes/analytics.ts:185`.
+is `counts.ts:270,286`.
 
 **C2 — five unseeded `SdlcRole` slugs.** `spec-writer`, `tester`, `devops`,
 `security` and `designer` are in the `SdlcRole` union in `@atlas/shared` but not

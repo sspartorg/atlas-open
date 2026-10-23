@@ -61,7 +61,7 @@ Full view of one Task (ADR 0015): its brief (description, acceptance criteria), 
 - A finished run leaves the Task `in_review` when it opened a PR or any sub-task isn't `done`; the Owner closes the sub-tasks and then the Task after verifying the branch.
 
 ## Connectivity
-- **Pages**: [Tasks](05-tasks.md), [New Task](06-task-new.md), [Sub-task Detail](10-sub-task-detail.md) (rows), [Run Detail](37-run-detail.md) (rail chip), [Analytics — Task](32-analytics-task.md).
+- **Pages**: [Tasks](05-tasks.md), [New Task](06-task-new.md), [Sub-task Detail](10-sub-task-detail.md) (rows), [Run Detail](37-run-detail.md) (rail chip).
 - **MCP tools**: `get_item { issue_type: 'task', id }` returns the Task + `sub_tasks` + project + comments + links + activity.
 - **Entities**: `task`, `sub_task`, `workflow_run` (Task run record), `comment`, `issue_event`, `agent`.
 

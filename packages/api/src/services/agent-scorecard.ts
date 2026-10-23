@@ -451,7 +451,7 @@ function addFirstPass(into: FirstPass, routing: RoutedStep['routing'], detail: s
     void detail;
 }
 
-export function percentile(sorted: number[], p: number): number | null {
+function percentile(sorted: number[], p: number): number | null {
     if (sorted.length === 0) return null;
     return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1))] ?? null;
 }
@@ -771,9 +771,8 @@ export async function runPrs(card: Scorecard): Promise<RunPrs[]> {
     });
 }
 
-/** `perRun` is `runPrs(card)` when the caller already has it. */
-export async function fleetDelivery(card: Scorecard, perRunIn?: RunPrs[]): Promise<FleetDelivery> {
-    const perRun = perRunIn ?? (await runPrs(card));
+async function fleetDelivery(card: Scorecard): Promise<FleetDelivery> {
+    const perRun = await runPrs(card);
     const liveIds = new Set(perRun.map((r) => r.run_id));
     const live = card.roots.filter((r) => liveIds.has(r.id));
 

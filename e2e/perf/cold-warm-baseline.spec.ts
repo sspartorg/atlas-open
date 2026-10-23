@@ -42,7 +42,6 @@ const STATIC_ROUTES = [
     // Seeded by e2e/fixtures/run-seed.ts: Task ETM-1 and its sub-task ETM-2.
     '/tasks/ETM-1',
     '/sub-tasks/ETM-2',
-    '/analytics/task/ETM-1',
 ] as const;
 
 test.describe('cold/warm TTI baseline', () => {
@@ -119,20 +118,6 @@ test.describe('cold/warm TTI baseline', () => {
             expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
         });
 
-        test('cold /analytics/project/:id (first analytics project)', async ({ page, context }) => {
-            await gotoWithPerf(page, '/analytics');
-            const projLink = page.locator('a[href^="/analytics/project/"]').first();
-            if ((await projLink.count()) === 0) {
-                // Honest: a project only appears here once it has cost rows, and
-                // the seed creates no agent runs. Genuinely absent.
-                test.skip(true, 'no project has cost rows yet — genuinely absent');
-                return;
-            }
-            const href = await projLink.getAttribute('href');
-            if (!href) return;
-            const record = await gotoWithPerfCold(page, context, href);
-            expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
-        });
     });
 
     // ------------------------------------------------------------------
@@ -170,20 +155,6 @@ test.describe('cold/warm TTI baseline', () => {
             expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
         });
 
-        test('warm /analytics/project/:id (first analytics project)', async ({ page, context }) => {
-            await gotoWithPerf(page, '/analytics');
-            const projLink = page.locator('a[href^="/analytics/project/"]').first();
-            if ((await projLink.count()) === 0) {
-                // Honest: a project only appears here once it has cost rows, and
-                // the seed creates no agent runs. Genuinely absent.
-                test.skip(true, 'no project has cost rows yet — genuinely absent');
-                return;
-            }
-            const href = await projLink.getAttribute('href');
-            if (!href) return;
-            const record = await gotoWithPerfWarm(page, context, href);
-            expect(record.tti_proxy_ms).toBeGreaterThanOrEqual(0);
-        });
     });
 
     // The TTI < 200ms enforcement is intentionally NOT in this spec —

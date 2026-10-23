@@ -1,69 +1,49 @@
 # Analytics
 
-**Route:** `/analytics`  •  **Component:** `packages/web/src/pages/Analytics.tsx` (shell) + `pages/analytics/{Overview,Delivery,Spend}Tab.tsx`
+**Route:** `/analytics`  •  **Component:** `packages/web/src/pages/Analytics.tsx` (one file, no tabs)
 
 ## Purpose
-What shipped, how fast work moves, how the Task runs went, and what it all cost — over a window the Owner picks, in the Owner's timezone.
+The basics over a window the Owner picks, in the Owner's timezone: how much shipped, how fast, and what it cost. Cut down on 2026-10-23 from three tabs (Overview / Delivery / Spend) and two drill-down pages (Owner: "too many details for an open application"); the drill-downs `/analytics/project/:id` and `/analytics/task/:id` are gone.
 
 ## States
-- Loading: `TabSkeleton` (`_chrome.tsx`) while the active tab's chunk or data loads.
-- Error: `Alert severity="error"` "Could not load … : <message>" for the active tab only.
-- Empty: each card has its own honest empty copy ("Nothing shipped in this window", "No Task runs in this window", "No Tasks are in progress, waiting or in review right now."). The Overview insight reads "Nothing shipped, ran or spent in this window yet." when all three are zero.
+- Loading: a skeleton (`aria-busy`, `aria-label="Loading"`) — four tile blocks and one chart block.
+- Error: `Alert severity="error"` "Could not load analytics: <message>".
+- Empty: the tiles read `0`, `0`, `—` (no cycle time), `$0.00`, and the chart draws zero-filled buckets.
 
 ## UI elements
 
-**Header** — `PageHeader` (`analytics` icon). Subtitle: "What shipped, how fast, how the runs went and what it cost, for {October 2026 | the last N days}. Times are in {viewer tz}."
-- **Window** `ToggleButtonGroup` (header actions): `7 days` · `30 days` · `90 days` · `This month`. URL `?window=7d|30d|90d`; `month` (default) clears the param so the first load matches the Dashboard's month spend. On phones the four windows can't fit beside the title, so the group drops to its own line under it (above the subtitle) and stretches full width, the windows sharing it evenly.
+**Header** — `PageHeader` (`analytics` icon). Subtitle: "What shipped, how fast and what it cost, for {October 2026 | the last N days}. Times are in {viewer tz}."
+- **Window** `ToggleButtonGroup` (header actions): `7 days` · `30 days` · `90 days` · `This month`. URL `?window=7d|30d|90d`; `month` (default) clears the param so the first load matches the Dashboard's month spend. On phones the group drops to its own line under the title and stretches full width. An unknown `?window=` reads as `month`.
 
-**Tabs** (scrollable, `aria-label="Analytics sections"`, styled like the Notifications tabs: ink indicator, ink selected label) — `?tab=overview|delivery|spend` via `useTabParam`; `overview` clears the param. Each tab is a `lazyNamed` chunk and calls only its own hooks, so a tab never opened never fetches.
+**Four tiles** (2 per row on phones, 4 from `md`), each with an info button (`aria-label="How {label} is measured"`) whose tooltip is the definition:
+- **Tasks shipped** — Tasks whose first move into Done falls in the window (sub-tasks and agent tests left out).
+- **PRs merged** — PRs opened by Task runs that started in the window, merged as last checked on GitHub (the fleet page's maths, `agent-scorecard.ts` `runPrs`).
+- **Median cycle time** — a Task's first In progress → its first Done, median over the shipped Tasks; `—` when none has one.
+- **Spend** — completed agent runs plus closed terminal sessions in the window.
 
-**Every metric states its definition**: tiles are `StatTile` with an info button (`aria-label="How {label} is measured"`) whose tooltip is the definition; charts state theirs in the `ChartTitle` sub line.
-
-**Every tile has a trend** (`StatTile trend={trendFor(...)}`, from the API's `trends[key]` = `{cur, prev, series}`): a `Delta` against the previous equal-length window ("vs the 7 days before" / "vs the same days last month"; ▲/▼ + "up/down N%", green when the move is good news for that metric, red when not; rates move in points, `pts`; "—" with a "No earlier data to compare" title when the previous window has nothing to compare) and a `Sparkline` of the per-bucket series (one indigo line, gaps where a bucket has nothing to measure; `role="img"` labelled "{tile} per day: lowest …, highest …, latest …"). The API computes the value, its previous value and its series from one metric function (`trendOf`), so the three cannot disagree.
-
-### Overview
-- **Hero** (`_chrome.tsx` `Hero`: a plain card like every other — white surface, `slate10` border; the insight label is the one indigo accent, `accentFg`) carrying one computed insight (`_insight.ts` `pickInsight`), in priority order: share of shipped Tasks' time spent **waiting on you** (≥30%, ≥3 shipped) → **cycle time** swing (≥25%) → **throughput** swing (≥25%) → **aging work** (oldest WIP id) → **spend** swing → **cache leverage** → plain activity.
-- Six tiles: Tasks shipped · Median cycle time · PRs merged · First-attempt rate (Task runs whose every PR merged with no retried agent step and no park, over those whose every PR merged) · Spend · Cost per shipped Task (spend ÷ Tasks shipped).
-- **Shipped and spent, per day|week** — two charts on one time axis (`syncId`), each with its own y-axis (never a dual axis): Tasks shipped bars, then agent-run + terminal spend stacked.
-
-### Delivery (`GET /api/analytics/delivery`)
-- Tiles: Tasks shipped (+sub-tasks), Lead time p50 (p90), Cycle time p50 (p90), Work in progress (aging count; its trend replays the status history at each bucket end), Waiting on you (total, parks, median, still waiting), Reopen rate, PRs merged (merge rate), Time to PR.
-- **Flow and quality** (`section`, `aria-labelledby` its h3): Flow efficiency (shipped Tasks' In progress + In review time ÷ all their time before first Done; caption worked · waiting), Your response to parks (Task run park → that run's next resume, median; caption p90 · answered · open; "no parks"), Weekly throughput (Tasks shipped ÷ window weeks; sparkline per Monday week), Rework after Done (shipped Tasks that left Done again before the window end), First-attempt merges (runs whose every PR merged with no retried step and no park in the run tree; "no merged runs").
-- Charts: Throughput (Tasks/sub-tasks stacked), Cycle time trend (per-bucket median; gaps = nothing shipped), Cycle time distribution (histogram), Where shipped work waited (avg time per status; Waiting for info emphasised), Cycle time by priority, Where shipped Tasks came from (Atlas vs Jira).
-- **Oldest work in progress** — 10 oldest WIP Tasks, id links to `/tasks/:id`, "aging" past 7 days.
-- **By project** table (`aria-label="Delivery by project"`, scrolls sideways on a phone) — row/name → `/analytics/project/:id`.
-
-### Spend (`GET /api/analytics?window=`)
-- Tiles: Spend, Cost per shipped Task, Cache savings ($, with unpriced cached tokens stated), Cache hit rate.
-- Agent runs vs terminal sessions, Cost by model (model · CLI · runs/sessions), Spend per day|week (stacked), Tokens per day|week (input/output/cache reads).
-- **Cache savings per day|week** (bars from `trends.cache_savings.series`; "No cache savings in this window") beside **Cost per PR and per shipped Task** (one table, `aria-label` "Cost per PR and Task by model": runs, cost, PRs, per PR, shipped, per Task; "—" where there is no PR or no shipped Task; "No Task runs in this window"). Cohort = Task runs started in the window, every agent step of the run; a model's row is its spend in the trees it worked in over those trees' PRs and Tasks, so models share a PR.
-- Existing cards, now over the window: Spend by agent, Cost per project, Owner-driven runs (terminal sessions), Trailing 12 months (single axis — the run-count overlay was dropped), Top runs by cost.
+**Shipped and spent, per day|week** (h2) — two bar charts on one time axis (`syncId`), each with its own y-axis: Tasks shipped, then spend.
 
 ## Modals / drawers
 None.
 
 ## Hooks used
-- `useAnalyticsSpend(window)` → `['analytics', window]`, `useAnalyticsDelivery(window)` → `['analytics','delivery',window]` (`hooks/useAnalytics.ts`, 30 s stale). The viewer tz is sent as `?tz=` by `api.analytics.*`.
+- `useAnalytics(window)` → `['analytics', window]` (`hooks/useAnalytics.ts`, 30 s stale). The viewer tz is sent as `?tz=` by `api.analytics.get`.
 
 ## API endpoints touched
-- `GET /api/analytics?tz&window`, `GET /api/analytics/delivery?tz&window` — see `api-surface.md`.
+- `GET /api/analytics?tz&window` → `IAnalytics` — see `api-surface.md`.
 
 ## Permissions / guards
 - Post-onboarding only. Read-only.
 
 ## Edge cases / quirks
-- **The month boundary is local, and the timestamp column is UTC.** On 2026-09-12, all-time project cost read `$8.12` while September read `$2.28`; five runs completed 18:32–20:32Z on Aug 31, i.e. Sept 1 in Asia/Calcutta. Verify against the same `tz` the page sent before filing a mismatch.
-- `window=month` is the month start in the viewer's zone. The Dashboard sends the same zone (`GET /api/dashboard?tz=`) and resolves the month with the same `resolveWindow`, so its "this month" spend equals this page's month Spend to the cent (`routes/analytics.test.ts` "the Dashboard month agrees with Analytics"). Before 2026-10-16 the Dashboard used the server's local month start and could disagree across a month boundary.
-- 90 days buckets by Monday weeks (`date_trunc('week')`); the web rolls daily spend into the same weeks (`mondayOf`).
-- Agent-test items (`items.is_test`) are left out of delivery and run numbers. The Fleet performance page still counts them in its agent rows — its documented scope.
-- **Spend leaves agent tests out too** (2026-10-16, `notTestRun` in `services/analytics-window.ts`): every agent-run spend figure — summary, daily, by agent, by project, by model, top runs, the 12-month ladder and the previous-window delta — skips runs whose item is `is_test`. A run with no item (a standalone agent run) is real spend and stays. **Decision:** an agent test is a qualification probe on a throwaway item, not work; counting it made "Cost per shipped Task" charge test probes to shipped work and put a spend bar under a project no Task shipped from. The Dashboard's month spend leaves them out the same way so the two still agree. Their cost stays visible where it belongs: the agent's Tests tab (`TestsTabContent`). The drill-downs (`/analytics/project/:id`, `/analytics/task/:id`) are all-time per item and unchanged: the agent-test sandbox project's own page still shows what its probes cost.
-- Park reasons are exact: the engine writes `workflow_run_events.park_kind` (the Task run's event log) at each park site (migration 014; see `data-model.md`). Parks from before 014 were backfilled from their prose; what could not be classified reads "Other".
-- **Realistic-data check**: `e2e/pages/analytics-real.spec.ts` seeds ~6 months of work (`e2e/fixtures/analytics-seed.ts`, `pnpm e2e:seed:analytics` for a hand look) and asserts, for every window, that Tasks shipped, median cycle time, spend, reopen rate and park counts equal plain SQL over the seed; it also walks both drill-downs (paging, rows per page, kind filter, links).
-- Chart colours come from `CHART_PALETTE` (`theme/tokens.ts`, `--atlas-chart-1..8` in `theme-vars.css`), validated for colour-blind separation in both modes.
-- Agent names come from the API (`agent_name` join), so a deleted agent's spend keeps its name.
+- **The month boundary is local, and the timestamp column is UTC.** Verify against the same `tz` the page sent before filing a mismatch.
+- `window=month` is the month start in the viewer's zone. The Dashboard sends the same zone (`GET /api/dashboard?tz=`) and resolves the month with the same `resolveWindow`, so its "this month" spend equals this page's month Spend (`routes/analytics.test.ts` "the Dashboard month agrees with Analytics").
+- 90 days buckets by Monday weeks (`date_trunc('week')`), server side.
+- Agent-test items (`items.is_test`) are left out of every number (`notTestRun` in `services/analytics-window.ts`); a run with no item (a standalone agent run) is real spend and stays. Their cost stays visible on the agent's Tests tab.
+- A malformed or unknown `tz` is a 400 (`AnalyticsQuerySchema`), as is an unknown `window` or any other query key.
+- Chart colours come from `CHART_PALETTE` (`theme/tokens.ts`).
 
 ## Related pages
-- [`31-analytics-project.md`](31-analytics-project.md), [`32-analytics-task.md`](32-analytics-task.md) — drill-downs (same `Hero` card)
 - [`36-fleet-performance.md`](36-fleet-performance.md) — the agent comparison (from the Agents page header)
 - [`01-dashboard.md`](01-dashboard.md) — the month-spend figure that must agree with this page
 

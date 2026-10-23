@@ -478,7 +478,7 @@ export const LABEL_COLORS = {
 export type LabelColorKey = keyof typeof LABEL_COLORS;
 
 // =====================================================================
-// CHART_PALETTE — every chart's series colours (Analytics + drill-downs).
+// CHART_PALETTE — every chart's series colours.
 // The eight slots are the dataviz reference palette, light and dark steps
 // in theme-vars.css, validated (validate_palette.js) for the adjacent
 // orders used below. Roles name the entity, so a colour means one thing

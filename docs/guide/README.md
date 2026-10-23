@@ -460,15 +460,11 @@ and Labels.
 
 ![Analytics](images/doc-43-analytics.png)
 
-**Analytics** reports agent runs and terminal sessions together — total spend, cost per session and per
-million tokens, cache hit rate, daily and monthly trends, spend by agent and by project, and the most
-expensive runs. Claude terminal sessions are priced from their transcripts; Copilot sessions report no
-cost.
-
-![Analytics — one project](images/doc-44-analytics-project.png)
-
-Clicking a project drills down to that project's spend by item type, its terminal sessions, and its most
-expensive Tasks; clicking a Task drills further into its sub-tasks.
+**Analytics** is one page of four numbers over a window you pick (7, 30 or 90 days, or this month):
+Tasks shipped, PRs merged, median cycle time and spend — agent runs plus terminal sessions — with one
+chart of what shipped and what it cost per day (per week over 90 days). Each number's info button says
+exactly what it counts. Claude terminal sessions are priced from their transcripts; Copilot sessions
+report no cost.
 
 ![Reminders](images/doc-45-reminders.png)
 

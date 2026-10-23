@@ -72,8 +72,6 @@ This folder is the **single source of truth for application behavior** — what 
 - [`pages/28-marketplace-detail.md`](pages/28-marketplace-detail.md) — `/agents/marketplace/:id`
 - [`pages/29-mcp-tools.md`](pages/29-mcp-tools.md) — `/agents/mcp-tools`
 - [`pages/30-analytics.md`](pages/30-analytics.md) — `/analytics`
-- [`pages/31-analytics-project.md`](pages/31-analytics-project.md) — `/analytics/project/:projectId`
-- [`pages/32-analytics-task.md`](pages/32-analytics-task.md) — `/analytics/task/:taskId`
 - [`pages/36-fleet-performance.md`](pages/36-fleet-performance.md) — `/agents/performance`
 - [`pages/37-run-detail.md`](pages/37-run-detail.md) — `/runs/:runId`
 

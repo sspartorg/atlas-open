@@ -1874,9 +1874,9 @@ export interface IAgentBundleManifest {
     published_at: string;
 }
 
-// ── Analytics (delivery + workflow insight endpoints) ──────────────────────
+// ── Analytics ──────────────────────
 
-/** `?window=` on every `/api/analytics*` summary. `month` = this calendar month in the viewer's tz. */
+/** `?window=` on `/api/analytics`. `month` = this calendar month in the viewer's tz. */
 export const ANALYTICS_WINDOWS = ['7d', '30d', '90d', 'month'] as const;
 export type AnalyticsWindow = (typeof ANALYTICS_WINDOWS)[number];
 
@@ -1908,11 +1908,7 @@ export const WORKFLOW_PARK_KINDS = [
 ] as const;
 export type WorkflowParkKind = (typeof WORKFLOW_PARK_KINDS)[number];
 
-/**
- * The span a response covers, resolved in the viewer's tz. `previous_*` is the
- * span its deltas compare against: the N days before for a rolling window, the
- * same number of days into last month for `month`.
- */
+/** The span a response covers, resolved in the viewer's tz. */
 export interface IAnalyticsPeriod {
     window: AnalyticsWindow;
     tz: string;
@@ -1920,187 +1916,19 @@ export interface IAnalyticsPeriod {
     bucket: 'day' | 'week';
     start: string;
     end: string;
-    previous_start: string;
-    previous_end: string;
 }
 
-export interface IAnalyticsSpread {
-    /** How many Tasks the percentiles are over. */
-    count: number;
-    p50_s: number | null;
-    p90_s: number | null;
-}
-
-/**
- * One headline number with its trend: this window (`cur`), the previous
- * equal-length window (`prev`, null when it has no data to compare) and the
- * per-bucket series behind a sparkline (aligned with `buckets`, null where a
- * bucket has nothing to measure).
- */
-export interface IAnalyticsTrend {
-    cur: number | null;
-    prev: number | null;
-    series: Array<number | null>;
-}
-
-export type AnalyticsDeliveryTrendKey =
-    | 'tasks_shipped'
-    | 'lead_p50_s'
-    | 'cycle_p50_s'
-    | 'wip'
-    | 'waiting_s'
-    | 'reopen_rate'
-    | 'prs_merged'
-    | 'time_to_pr_s'
-    | 'flow_efficiency'
-    | 'owner_response_p50_s'
-    | 'weekly_throughput'
-    | 'rework_rate'
-    | 'first_attempt_merge_rate';
-
-export type AnalyticsWorkflowsTrendKey = 'success_rate' | 'runs' | 'gate_pass_rate' | 'retries' | 'retries_per_task';
-
-export type AnalyticsSpendTrendKey = 'spend' | 'cost_per_task' | 'cache_savings' | 'cache_hit_rate';
-
-export interface IAnalyticsDelivery {
+/** `GET /api/analytics`: the /analytics page. Agent-test items are left out of every number. */
+export interface IAnalytics {
     period: IAnalyticsPeriod;
-    /** Bucket keys (`YYYY-MM-DD`, Monday for weeks) every `trends[*].series` is aligned with. */
-    buckets: string[];
-    trends: Record<AnalyticsDeliveryTrendKey, IAnalyticsTrend>;
-    /**
-     * Flow over the shipped Tasks: time In progress or In review (worked) vs
-     * every other status before Done (waiting), the Owner's answer time to
-     * workflow parks, and Tasks shipped per Monday week.
-     */
-    flow: {
-        efficiency: number | null;
-        active_s: number;
-        waiting_s: number;
-        owner_response: { answered: number; unanswered: number; p50_s: number | null; p90_s: number | null };
-        weekly_throughput: number | null;
-        weekly: Array<{ bucket: string; tasks: number }>;
-    };
-    /** Tasks shipped in the window that later left Done (by the window's end). */
-    rework: { shipped: number; reopened: number; rate: number | null };
-    /** Task runs whose every PR merged, and how many got there with no retried step and no park. */
-    first_attempt: { merged_runs: number; clean: number; rate: number | null };
-    /** Items whose first move into Done falls in the window. */
-    shipped: { tasks: number; sub_tasks: number };
-    /** One row per bucket, zero-filled. `cycle_p50_s` is over the bucket's Tasks. */
-    throughput: Array<{ bucket: string; tasks: number; sub_tasks: number; cycle_p50_s: number | null }>;
-    /** Task created → first Done. */
-    lead_time: IAnalyticsSpread;
-    /** Task's first In progress → first Done. Tasks that never entered In progress are left out. */
-    cycle_time: IAnalyticsSpread;
-    cycle_histogram: Array<{ label: string; min_s: number; max_s: number | null; count: number }>;
-    /** Shipped Tasks' time in each status before Done, averaged over every shipped Task. */
-    time_in_status: Array<{ status: IssueStatus; avg_s: number; items: number }>;
-    /** Moves into Waiting for info that started in the window, open ones measured to the window's end. */
-    waiting: { parks: number; total_s: number; median_s: number | null; still_waiting: number };
-    /** Distinct items moved out of Done vs into Done, in the window. */
-    reopens: { reopened: number; done: number; rate: number | null };
-    /** Tasks in progress, waiting for info or in review right now (not windowed). */
-    wip: {
-        count: number;
-        aging: number;
-        aging_after_s: number;
-        oldest: Array<{ id: string; title: string; status: IssueStatus; project_id: string; age_s: number }>;
-    };
-    by_priority: Array<{ priority: IssuePriority; shipped: number; cycle_p50_s: number | null }>;
-    by_project: Array<{
-        project_id: string;
-        project_name: string;
-        shipped: number;
-        cycle_p50_s: number | null;
-        lead_p50_s: number | null;
-    }>;
-    /** Shipped Tasks with a Jira issue link vs without. */
-    source_mix: { jira: number; native: number };
-    /** The fleet page's delivery maths (`agent-scorecard.ts`) over runs started in the window. */
-    prs: { opened: number; merged: number; merge_rate: number | null; median_s_to_pr: number | null };
-    previous: { tasks_shipped: number; cycle_p50_s: number | null; prs_merged: number };
-}
-
-export interface IAnalyticsWorkflowRow {
-    workflow_id: string;
-    name: string;
-    runs: number;
-    completed: number;
-    /** Completed ÷ finished (completed, cancelled, error). */
-    success_rate: number | null;
-    /** Completed runs only. */
-    median_duration_s: number | null;
-    avg_loops: number;
-    avg_gate_rounds: number;
-    cost_per_run_usd: number | null;
-}
-
-/** One agent's row: the fleet page's numbers (`shapeAgent`), in name order, no ranking (ADR 0023). */
-export interface IAnalyticsAgentRow {
-    agent_id: string;
-    name: string;
-    accent_color: string | null;
-    steps: number;
-    first_pass: { applied: number; rejected: number; parked: number };
-    loops: number;
-    gate_catch: number;
-    cost_usd: number;
-    per_step_usd: number | null;
-    p95_s: number | null;
-}
-
-export interface IAnalyticsWorkflows {
-    period: IAnalyticsPeriod;
-    /** Bucket keys every `trends[*].series` is aligned with. */
-    buckets: string[];
-    trends: Record<AnalyticsWorkflowsTrendKey, IAnalyticsTrend>;
-    /** Agent-run retries ÷ the Tasks that had an agent run in the window. */
-    retries_per_task: { retries: number; tasks: number; rate: number | null };
-    /** Failed Script-step checks in the window by script, most failures first. */
-    gate_failures: Array<{ script_id: string; name: string; failures: number; runs: number; last_at: string }>;
-    /** Top-level runs started in the window, agent tests left out. */
-    runs: {
-        total: number;
-        completed: number;
-        cancelled: number;
-        error: number;
-        waiting_for_owner: number;
-        running: number;
-        success_rate: number | null;
-    };
-    by_workflow: IAnalyticsWorkflowRow[];
-    /** Script-step verdicts in the window. `pass_rate` = pass ÷ (pass + fail). */
-    gates: { pass: number; fail: number; unavailable: number; needs_review: number; pass_rate: number | null };
-    /** Parks in the window by `park_kind`; `reason` is its label (`WORKFLOW_PARK_KIND_LABELS`). */
-    park_reasons: Array<{ kind: WorkflowParkKind; reason: string; count: number }>;
-    /** Agent dispatches that retried an earlier run (`agent_runs.parent_run_id`). */
-    retries: { retries: number; dispatches: number; rate: number | null };
-    agents: IAnalyticsAgentRow[];
-    previous: { runs: number; success_rate: number | null };
-}
-
-/**
- * One row of cost efficiency: what the workflow runs started in the window
- * cost (every step of the run tree), the PRs they opened, and the Tasks among
- * theirs that shipped in the window.
- */
-export interface IAnalyticsCostEfficiencyRow {
-    runs: number;
-    cost_usd: number;
-    prs: number;
-    shipped_tasks: number;
-    per_pr_usd: number | null;
-    per_task_usd: number | null;
-}
-
-/** The trend and cost-efficiency part of `GET /api/analytics` (the Spend tab). */
-export interface IAnalyticsSpendInsight {
-    /** Bucket keys every `trends[*].series` is aligned with. */
-    buckets: string[];
-    trends: Record<AnalyticsSpendTrendKey, IAnalyticsTrend>;
-    cost_efficiency: {
-        by_workflow: Array<IAnalyticsCostEfficiencyRow & { workflow_id: string; name: string }>;
-        /** A model's spend in the run trees it worked in, over those trees' PRs and shipped Tasks. */
-        by_model: Array<IAnalyticsCostEfficiencyRow & { model: string | null; cli: string | null }>;
-    };
+    /** Tasks (not sub-tasks) whose first move into Done falls in the window. */
+    tasks_shipped: number;
+    /** PRs opened by Task runs started in the window, merged as last checked on GitHub. */
+    prs_merged: number;
+    /** Median of a shipped Task's first In progress → first Done. Null when none has one. */
+    cycle_p50_s: number | null;
+    /** Completed agent runs plus closed terminal sessions in the window. */
+    spend_usd: number;
+    /** One row per bucket (`YYYY-MM-DD`, Monday for weeks), zero-filled. */
+    series: Array<{ bucket: string; tasks_shipped: number; spend_usd: number }>;
 }
