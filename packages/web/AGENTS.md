@@ -4,7 +4,7 @@
 
 React 19 + Vite SPA on port 4300 (dev) / 5300 (prod). Owns:
 - All UI components (MUI-based)
-- 38 page routes + a catch-all (React Router v7) — `App.tsx` is the inventory, mirrored in `.agents/routes-map.md`
+- 36 page routes + a catch-all (React Router v7) — `App.tsx` is the inventory, mirrored in `.agents/routes-map.md`
 - Data fetching (TanStack Query + typed fetch client)
 - SSE subscription (EventSource)
 - Atlas design system implementation (theme + tokens)

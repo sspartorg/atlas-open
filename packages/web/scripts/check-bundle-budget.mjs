@@ -61,8 +61,6 @@ const BUDGET_ROUTE_GZ = 290 * 1024;
 // Routes that carry a heavy library on purpose (~5% over measured).
 const BUDGET_ROUTE_EXCEPTIONS_GZ = {
     // recharts
-    'src/pages/AnalyticsProject.tsx': 375 * 1024,
-    'src/pages/AnalyticsTask.tsx': 375 * 1024,
     'src/pages/FleetPerformance.tsx': 365 * 1024,
     'src/pages/Analytics.tsx': 365 * 1024,
     // xterm.js

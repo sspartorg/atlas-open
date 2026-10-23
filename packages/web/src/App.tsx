@@ -67,11 +67,6 @@ const Reminders = lazyNamed(() => import('./pages/Reminders.js'), 'Reminders');
 const Settings = lazyNamed(() => import('./pages/Settings.js'), 'Settings');
 const Credentials = lazyNamed(() => import('./pages/Credentials.js'), 'Credentials');
 const AnalyticsPage = lazyNamed(() => import('./pages/Analytics.js'), 'Analytics');
-const AnalyticsProjectPage = lazyNamed(
-    () => import('./pages/AnalyticsProject.js'),
-    'AnalyticsProject'
-);
-const AnalyticsTaskPage = lazyNamed(() => import('./pages/AnalyticsTask.js'), 'AnalyticsTask');
 
 // Freshness model: SSE drives invalidation on every server-side mutation
 // (see `useSSE`), so explicit re-fetch on every mount was pure waste — it
@@ -487,22 +482,6 @@ export function App() {
                                 element={
                                     <Wrap name="Analytics">
                                         <AnalyticsPage />
-                                    </Wrap>
-                                }
-                            />
-                            <Route
-                                path="/analytics/project/:projectId"
-                                element={
-                                    <Wrap name="AnalyticsProject">
-                                        <AnalyticsProjectPage />
-                                    </Wrap>
-                                }
-                            />
-                            <Route
-                                path="/analytics/task/:taskId"
-                                element={
-                                    <Wrap name="AnalyticsTask">
-                                        <AnalyticsTaskPage />
                                     </Wrap>
                                 }
                             />

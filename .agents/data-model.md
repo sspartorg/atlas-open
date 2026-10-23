@@ -217,7 +217,7 @@ Fields: `id, issue_type, issue_id, author, body, created_at` — `issue_type` �
 
 Since 2026-09-12 `create()` resolves a missing `agent_id` from the item's live run (`agent_runs` where `status IN ('queued','in_progress')`), which migration `003_active_run_invariant.ts` constrains to at most one row per item via a partial UNIQUE index. `create()` mirrors the resolved id into the `comment_added` event's `actor_agent_id`, so the same fix stops the activity feed attributing agent actions to the Owner. Rows written before the fix are repaired by migration `031_backfill_agent_comment_attribution.ts`; a comment with no run covering its timestamp stays null and still renders as `"Agent"` - deliberately, since guessing would put a wrong name in an audit trail.
 
-`comments_agent_id_fkey` is `ON DELETE SET NULL`, so deleting an agent still erases its name from every comment it ever wrote. A denormalized `author_name` column is the only durable answer (`counts.ts` / `routes/analytics.ts` already denormalize `a.name as agent_name` for the dashboard); not shipped - it needs a migration + backfill of its own.
+`comments_agent_id_fkey` is `ON DELETE SET NULL`, so deleting an agent still erases its name from every comment it ever wrote. A denormalized `author_name` column is the only durable answer (`counts.ts` already denormalizes `a.name as agent_name` for the dashboard); not shipped - it needs a migration + backfill of its own.
 
 **Owner reply resumes a parked run.** When the Owner comments on a Task whose run is `waiting_for_owner`, `create()` claims the run inside the comment's transaction (run → `running`, item → `in_progress`, `status_changed` event with `detail='resumed_by_owner_reply'`), broadcasts `counts_changed` after commit, and calls `workflow-engine.continueResumedRun` in the background: a run parked on a failed delivery retries it; otherwise the agent re-runs and reads the reply in the thread. Agent comments never trigger it; an item without a parked run is left alone.
 
@@ -288,7 +288,7 @@ Fields: `id, issue_type, issue_id, event_type, actor_agent_id, field, from_value
 - `link_created` / `link_deleted` events are emitted on BOTH endpoints of the link (so each item's activity tab shows the change). `to_value` holds the other item's id; `detail` encodes direction + relation_type like `depends_on â†’ ATL-3` (outgoing) or `depends_on â† ATL-2` (incoming).
 - `deleted` is emitted by each entity service's `delete()` immediately before the underlying item row is removed. The event row survives the cascade because `issue_events.item_id` has no FK; the deleted item's history stays queryable.
 
-Status events are also the source of the Analytics **Delivery** tab (`services/analytics-delivery.ts`, response type `IAnalyticsDelivery`): first Done / first In progress per item, and per-status intervals paired with `LEAD(created_at) OVER (PARTITION BY item_id ORDER BY created_at, id)`. An item's first interval opens at `items.created_at` in its first event's `from_value`.
+Status events are also the source of Analytics' Tasks shipped and median cycle time (`services/analytics.ts`, response type `IAnalytics`): an item's first Done and first In progress.
 
 Read via `GET /api/issues/:type/:id/activity`, which returns a merged `IActivityItem[]` (each item is either `{ kind: 'comment', data: IComment }` or `{ kind: 'event', data: IIssueEvent }`).
 

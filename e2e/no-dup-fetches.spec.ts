@@ -370,42 +370,6 @@ test.describe('/terminal/:id/history — no dup API calls on terminal history', 
 });
 
 // -----------------------------------------------------------------------
-// Analytics drill-down routes.
-// -----------------------------------------------------------------------
-
-test.describe('/analytics/project/:projectId — no dup API calls', () => {
-    test('first analytics project page passes dup audit', async ({ page }) => {
-        await goto(page, '/analytics');
-        const projectLink = page.locator('a[href^="/analytics/project/"]').first();
-        if ((await projectLink.count()) === 0) {
-            test.skip(true, 'no project has cost rows to link from Analytics — genuinely absent, not a failed lookup');
-            return;
-        }
-        const href = await projectLink.getAttribute('href');
-        if (!href) return;
-
-        const fetches = await captureApiFetches(page, () => goto(page, href));
-        const dups = findDuplicatesWithinWindow(fetches);
-        expect(dups, `Duplicate API calls on ${href}: ${JSON.stringify(dups)}`).toEqual([]);
-
-        const fanout = findFanout(fetches);
-        expect(fanout, `Fan-out on ${href}: ${JSON.stringify(fanout)}`).toEqual([]);
-    });
-});
-
-test.describe('/analytics/task/:taskId — no dup API calls', () => {
-    test('seeded analytics task page passes dup audit', async ({ page }) => {
-        const href = '/analytics/task/ETM-1';
-        const fetches = await captureApiFetches(page, () => goto(page, href));
-        const dups = findDuplicatesWithinWindow(fetches);
-        expect(dups, `Duplicate API calls on ${href}: ${JSON.stringify(dups)}`).toEqual([]);
-
-        const fanout = findFanout(fetches);
-        expect(fanout, `Fan-out on ${href}: ${JSON.stringify(fanout)}`).toEqual([]);
-    });
-});
-
-// -----------------------------------------------------------------------
 // W8 — Targeted hook-cluster audits (not tied to specific page navigation).
 // -----------------------------------------------------------------------
 //

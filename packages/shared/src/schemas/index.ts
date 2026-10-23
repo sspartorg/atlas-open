@@ -1005,7 +1005,7 @@ export const CliSessionStandaloneCreateSchema = z
     })
     .strict();
 
-// `GET /api/analytics/delivery` and `/workflows`. A bad tz is a 400 here rather
+// `GET /api/analytics`. A bad tz is a 400 here rather
 // than Postgres's "time zone not recognized" 500.
 export const AnalyticsQuerySchema = z
     .object({
