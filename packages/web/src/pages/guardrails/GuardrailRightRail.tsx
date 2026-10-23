@@ -45,7 +45,7 @@ export function GuardrailRightRail() {
                     {`- `}
                     <span className="c-block">{`[BLOCK]`}</span>
                     {` Never run `}
-                    <span className="c-code">{`\`git\n  push --force\``}</span>
+                    <span className="c-code">{`\`git\n  push\``}</span>
                     {`.\n\nAgent output is then\nchecked against these\nbefore the run finishes.`}
                 </Box>
             </RailCard>

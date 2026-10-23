@@ -481,8 +481,7 @@ export function RunsTabContent({ agent, runs }: Props) {
                         <Box component="strong" sx={{ color: ATLAS_PALETTE.slate }}>
                             ready
                         </Box>{' '}
-                        and clear the assignee so the next dispatcher tick can pick it up again. Any
-                        reviewer child run is removed too.
+                        and clear the assignee so the next dispatcher tick can pick it up again.
                     </Typography>
                     {pendingDelete?.issue_id ? (
                         <Typography

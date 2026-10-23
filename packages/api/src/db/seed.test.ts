@@ -1,10 +1,8 @@
-import { execFile, execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import { GUARDRAIL_SCRIPT_SEEDS, runSeed } from './seed.js';
 import { db } from './kysely-client.js';
 import { marketplaceService } from '../services/marketplace.js';
@@ -115,31 +113,17 @@ describe('runSeed — agents table is owned by marketplace install, not the seed
     });
 });
 
-// Phase 3 — 6 per-agent SDLC validation scripts land in
-// `guardrail_scripts`. The `constitution-assembler` pipeline writes
-// them as `.atlas/scripts/{bash,powershell}/check-<id>.{sh,ps1}` per
-// worktree; the per-agent slash-command bodies invoke them before
-// emitting `outcome: done`. Idempotent via ON CONFLICT (id) DO UPDATE.
-describe('GUARDRAIL_SCRIPT_SEEDS — Phase 3 per-agent validators', () => {
+// The seeded `guardrail_scripts` rows. `constitution-assembler` writes each
+// as `.atlas/scripts/{bash,powershell}/check-<id>.{sh,ps1}` per worktree.
+// Idempotent via ON CONFLICT (id) DO UPDATE.
+describe('GUARDRAIL_SCRIPT_SEEDS', () => {
     const EXPECTED_IDS = [
         'prereqs',
-        'po-writer-output',
-        'architect-spec-md',
-        'qa-writer-csv',
-        // 2026-06-09 — Automation Engineer gate added (the prompt referenced
-        // this script for months, but the seed was missing it; both
-        // agent-automation and agent-automation-reviewer were silently
-        // substituting `pnpm typecheck + pnpm lint`).
-        'check-automation-tests',
-        // `commit-discipline` was dropped with ADR 0015's edit-only rule:
-        // agents no longer commit, so there is no agent commit to check.
-        // 2026-09-25 (ADR 0024) — `coder-tests-green` and the four `gate-*`
-        // scripts were deleted. Each of them guessed at the customer's stack:
-        // a UI file-extension allowlist, a 95% coverage floor Atlas invented,
-        // 100ms/200ms budgets, package-manager detection by lockfile. A gate
-        // node now dispatches a checker agent that reads the repo and names
-        // the command, and the engine runs that. Everything still in this list
-        // checks an ATLAS artifact and assumes nothing about the project.
+        // Gone: commit-discipline (002, agents never commit); po-writer-output,
+        // architect-spec-md, qa-writer-csv, check-automation-tests (003, the
+        // pipeline roles they checked do not exist in this edition);
+        // coder-tests-green and the gate-* scripts (ADR 0024, they guessed at
+        // the customer's stack).
     ] as const;
 
     it('exports every seed with the canonical ids', () => {
@@ -166,183 +150,32 @@ describe('GUARDRAIL_SCRIPT_SEEDS — Phase 3 per-agent validators', () => {
             }
         }
     });
-
-
-
-    // Async exec: the fake Atlas API below lives in THIS process, so a sync
-    // exec would block the event loop the server needs to answer curl.
-    async function runGate(
-        id: string,
-        cwd: string,
-        arg: string,
-        env: Record<string, string | undefined> = {},
-    ): Promise<{ code: number; out: string }> {
-        const body = GUARDRAIL_SCRIPT_SEEDS.find((s) => s.id === id)?.body_sh ?? '';
-        writeFileSync(join(cwd, `${id}.sh`), body);
-        return new Promise((done) => {
-            execFile('bash', [`${id}.sh`, arg], { cwd, env: { ...process.env, ...env } }, (err, stdout) =>
-                done({ code: err ? ((err as { code?: number }).code ?? 1) : 0, out: stdout }),
-            );
-        });
-    }
-
-    describe.skipIf(process.platform === 'win32')("po-writer-output verifies the Task's sub-tasks via the Atlas API", () => {
-        type SubTask = { id: string; title: string; acceptance_criteria: string; labels: string[] };
-        let subTasks: SubTask[] = [];
-        let links: Record<string, Array<{ relation_type: string; direction: string; item_id: string }>> = {};
-        let server: Server;
-        let apiUrl = '';
-        const cwd = mkdtempSync(join(tmpdir(), 'po-gate-'));
-
-        beforeAll(async () => {
-            server = createServer((req, res) => {
-                const task = /^\/api\/tasks\/ATL-1\/full$/.exec(req.url ?? '');
-                const link = /^\/api\/issues\/sub_task\/([^/]+)\/links$/.exec(req.url ?? '');
-                if (!task && !link) {
-                    res.statusCode = 404;
-                    return res.end('{}');
-                }
-                res.setHeader('content-type', 'application/json');
-                // reason: `link` is non-null whenever `task` is null (checked above).
-                res.end(JSON.stringify(task ? { task: { id: 'ATL-1' }, sub_tasks: subTasks } : (links[link![1]!] ?? [])));
-            });
-            await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-            apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-        });
-        afterAll(() => new Promise<void>((r) => server.close(() => r())));
-
-        beforeEach(() => {
-            subTasks = [
-                // A complete set under the v2 contract: the dev sub-task carries
-                // `dev` plus exactly one layer label, and has BOTH twins.
-                { id: 'ATL-2', title: 'Sign in', acceptance_criteria: '- Given x', labels: ['dev', 'fullstack'] },
-                { id: 'ATL-3', title: 'Sign in [QA]', acceptance_criteria: '- Given x', labels: ['qa'] },
-                { id: 'ATL-5', title: 'Sign in [DOC]', acceptance_criteria: '- Given x', labels: ['doc'] },
-            ];
-            // tested_by is created QA -> dev, so it is incoming on the dev sub-task.
-            links = { 'ATL-2': [{ relation_type: 'tested_by', direction: 'incoming', item_id: 'ATL-3' }] };
-        });
-
-        it('passes a complete dev + [QA] twin set', async () => {
-            expect(await runGate('po-writer-output', cwd, 'ATL-1', { ATLAS_API_URL: apiUrl })).toEqual({ code: 0, out: '' });
-        });
-
-        it('fails with a clear gap when ATLAS_API_URL is unset', async () => {
-            const r = await runGate('po-writer-output', cwd, 'ATL-1', { ATLAS_API_URL: undefined });
-            expect(r.code).toBe(1);
-            expect(r.out).toContain('ATLAS_API_URL is not set');
-        });
-
-        it('fails when the task has no dev sub-tasks', async () => {
-            subTasks = [];
-            const r = await runGate('po-writer-output', cwd, 'ATL-1', { ATLAS_API_URL: apiUrl });
-            expect(r.code).toBe(1);
-            expect(r.out).toContain('no dev sub-tasks');
-        });
-
-        it('lists every gap: empty AC, missing labels, missing twin link, missing twins', async () => {
-            subTasks[0]!.acceptance_criteria = '  ';
-            subTasks[1]!.labels = [];
-            subTasks.push({ id: 'ATL-4', title: 'Sign out', acceptance_criteria: '- Given y', labels: [] });
-            links = {};
-            const r = await runGate('po-writer-output', cwd, 'ATL-1', { ATLAS_API_URL: apiUrl });
-            expect(r.code).toBe(1);
-            expect(r.out).toMatch(/ATL-2 has empty acceptance_criteria/);
-            expect(r.out).toMatch(/ATL-3 is missing the qa label/);
-            expect(r.out).toMatch(/ATL-4 is missing the dev label/);
-            expect(r.out).toMatch(/ATL-2 has no tested_by link/);
-            expect(r.out).toMatch(/ATL-4 has no \[QA\] twin/);
-            // A missing [QA] twin used to `continue` past the [DOC] check, so a
-            // sub-task with neither reported one gap per round instead of both.
-            expect(r.out).toMatch(/ATL-4 has no \[DOC\] twin/);
-            expect(r.out).toMatch(/ATL-4 must carry exactly one layer label/);
-        });
-
-        it('rejects a dev sub-task with no layer label, or with two', async () => {
-            subTasks[0]!.labels = ['dev'];
-            let r = await runGate('po-writer-output', cwd, 'ATL-1', { ATLAS_API_URL: apiUrl });
-            expect(r.code).toBe(1);
-            expect(r.out).toMatch(/ATL-2 must carry exactly one layer label \(be\|fe\|fullstack\); it has none/);
-
-            subTasks[0]!.labels = ['dev', 'be', 'fe'];
-            r = await runGate('po-writer-output', cwd, 'ATL-1', { ATLAS_API_URL: apiUrl });
-            expect(r.code).toBe(1);
-            expect(r.out).toMatch(/it has be, fe/);
-        });
-
-        it('rejects a dev sub-task with no [DOC] twin', async () => {
-            subTasks = subTasks.filter((s) => !s.title.endsWith('[DOC]'));
-            const r = await runGate('po-writer-output', cwd, 'ATL-1', { ATLAS_API_URL: apiUrl });
-            expect(r.code).toBe(1);
-            expect(r.out).toMatch(/ATL-2 has no \[DOC\] twin/);
-        });
-
-        it('rejects a [DOC] twin that is missing the doc label', async () => {
-            subTasks[2]!.labels = [];
-            const r = await runGate('po-writer-output', cwd, 'ATL-1', { ATLAS_API_URL: apiUrl });
-            expect(r.code).toBe(1);
-            expect(r.out).toMatch(/ATL-5 is missing the doc label/);
-        });
-
-        it('accepts the tested_by link from either direction', async () => {
-            links = { 'ATL-2': [{ relation_type: 'tested_by', direction: 'outgoing', item_id: 'ATL-3' }] };
-            expect((await runGate('po-writer-output', cwd, 'ATL-1', { ATLAS_API_URL: apiUrl })).code).toBe(0);
-        });
-    });
-
-    describe.skipIf(process.platform === 'win32')('QA CSV gates use the Jira-importable schema', () => {
-        const HEADER = 'Summary,Description,Issue Type,Priority,Labels,Components';
-        const row = (summary: string, labels: string) =>
-            `"${summary}","## Steps\n1. Open, then submit\n\n## Expected\nIt works\n\nAC: ac-1",Test,normal,${labels},`;
-
-        function qaRepo(csv: string, changed: Record<string, string> = {}, touchCsvLast = true): string {
-            const dir = mkdtempSync(join(tmpdir(), 'qa-gate-'));
-            const sh = (cmd: string) => execSync(cmd, { cwd: dir, stdio: 'pipe' });
-            sh('git init -q -b main && git config user.email t@t && git config user.name t');
-            writeFileSync(join(dir, 'README.md'), 'x');
-            sh('git add -A && git commit -qm base && git update-ref refs/remotes/origin/main HEAD');
-            for (const [p, body] of Object.entries(changed)) writeFileSync(join(dir, p), body);
-            if (Object.keys(changed).length) sh('git add -A && git commit -qm tests');
-            mkdirSync(join(dir, 'tests', 'qa'), { recursive: true });
-            writeFileSync(join(dir, 'tests', 'qa', 'ATL-3.csv'), csv);
-            sh('git add -A && git commit -qm csv');
-            if (!touchCsvLast) {
-                writeFileSync(join(dir, 'other.txt'), 'y');
-                sh('git add -A && git commit -qm later');
+    describe.skipIf(process.platform === 'win32')('prereqs', () => {
+        const runPrereqs = (cwd: string) => {
+            const body = GUARDRAIL_SCRIPT_SEEDS.find((s) => s.id === 'prereqs')?.body_sh ?? '';
+            writeFileSync(join(cwd, 'prereqs.sh'), body);
+            try {
+                return { code: 0, out: execFileSync('bash', ['prereqs.sh', 'ATL-1'], { cwd, encoding: 'utf8' }) };
+            } catch (err) {
+                const e = err as { status?: number; stdout?: string };
+                return { code: e.status ?? 1, out: e.stdout ?? '' };
             }
-            return dir;
-        }
+        };
 
-        it('qa-writer-csv passes the Jira header + a multi-line quoted row committed at HEAD', async () => {
-            const dir = qaRepo(`${HEADER}\n${row('Sign in, valid creds', 'ac-1;automation-yes;kind-functional')}\n`);
-            expect(await runGate('qa-writer-csv', dir, 'ATL-3')).toEqual({ code: 0, out: '' });
+        // Agents never commit, so the tree is dirty at the end of every run
+        // that changed something. The gate must not call that a gap.
+        it('passes on a dirty tree once the run is staged', () => {
+            const dir = mkdtempSync(join(tmpdir(), 'prereqs-'));
+            execSync('git init -q && touch changed.txt', { cwd: dir });
+            mkdirSync(join(dir, '.atlas'));
+            writeFileSync(join(dir, '.atlas', 'constitution.md'), '# Constitution\n');
+            expect(runPrereqs(dir)).toEqual({ code: 0, out: '' });
         });
 
-        it('qa-writer-csv rejects the retired test-id header, a header-only file, and a stale HEAD', async () => {
-            const old = await runGate('qa-writer-csv', qaRepo('test-id,criterion-id,kind,automation-yes-no,scenario,expected\nT1,AC1,f,yes,s,e\n'), 'ATL-3');
-            expect(old.code).toBe(1);
-            expect(old.out).toContain('header mismatch');
-            const empty = await runGate('qa-writer-csv', qaRepo(`${HEADER}\n\n`), 'ATL-3');
-            expect(empty.out).toContain('no test rows');
-            const stale = await runGate('qa-writer-csv', qaRepo(`${HEADER}\n${row('A', 'ac-1;automation-no;kind-edge')}\n`, {}, false), 'ATL-3');
-            expect(stale.out).toContain('HEAD commit does not touch');
-        });
-
-        it('check-automation-tests passes when every automation-yes Summary is in a changed test file', async () => {
-            const csv = `${HEADER}\n${row('Rejects bad password, shows error', 'ac-1;automation-yes;kind-edge')}\n${row('Manual visual check', 'ac-1;automation-no;kind-e2e')}\n`;
-            const ts = qaRepo(csv, { 'login.test.ts': "it('Rejects bad password, shows error', () => {});" });
-            expect(await runGate('check-automation-tests', ts, 'ATL-3')).toEqual({ code: 0, out: '' });
-            const py = qaRepo(csv, { 'test_login.py': 'def test_x():\n    """Rejects bad password, shows error"""' });
-            expect((await runGate('check-automation-tests', py, 'ATL-3')).code).toBe(0);
-        });
-
-        it('check-automation-tests fails for an uncovered automation-yes row and ignores automation-no rows', async () => {
-            const csv = `${HEADER}\n${row('Locks after five attempts', 'ac-2;automation-yes;kind-edge')}\n`;
-            const r = await runGate('check-automation-tests', qaRepo(csv, { 'a.test.js': "it('other', () => {});" }), 'ATL-3');
+        it('fails when the constitution was not staged', () => {
+            const r = runPrereqs(mkdtempSync(join(tmpdir(), 'prereqs-')));
             expect(r.code).toBe(1);
-            expect(r.out).toContain('Locks after five attempts');
-            const manualOnly = qaRepo(`${HEADER}\n${row('Manual only', 'ac-1;automation-no;kind-e2e')}\n`);
-            expect((await runGate('check-automation-tests', manualOnly, 'ATL-3')).code).toBe(0);
+            expect(r.out).toContain('.atlas/constitution.md missing');
         });
     });
 

@@ -549,7 +549,7 @@ export function Agents() {
                         fullWidth
                         value={newAgent.name}
                         onChange={(e) => setNewAgent((p) => ({ ...p, name: e.target.value }))}
-                        placeholder="e.g. PO Writer · Frontend"
+                        placeholder="e.g. Solo Engineer · Backend"
                         autoFocus
                     />
                     <FormControl fullWidth>

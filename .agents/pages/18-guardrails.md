@@ -53,7 +53,7 @@ Default tab is `rules`. Switching tabs is purely local state; there is no URL ch
 - Validation / server error alert. A failed delete keeps the modal open with the error (it used to close silently)
 - **Cancel** / **Add rule** (+ icon) or **Save changes** (no icon) — calls `POST /api/guardrails` or `PATCH /api/guardrails/:id`
 
-**Scripts tab (`GuardrailScriptsTab`)** — script cards are native buttons → `ScriptModal`; "Loading…" while loading; `ScriptModal` **Delete** asks "Delete this script?" before deleting.
+**Scripts tab (`GuardrailScriptsTab`)** — intro "Shell scripts staged into every worktree at .atlas/scripts/ for agents to run as evidence checks. N scripts configured." (one seeded: `prereqs`); script cards are native buttons → `ScriptModal`; "Loading…" while loading; `ScriptModal` **Delete** asks "Delete this script?" before deleting.
 
 ## Hooks used
 - `useGuardrails` (`GET /guardrails`)

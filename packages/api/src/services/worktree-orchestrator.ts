@@ -483,7 +483,7 @@ async function ensureWorktreeInner(
         throw new WorktreeProvisioningError(
             'missing_worktree_branch',
             item
-                ? `Item ${item.id} has no worktree_branch — PO Writer is expected to set this before downstream agents are dispatched.`
+                ? `Item ${item.id} has no worktree_branch and the caller passed no branch.`
                 : 'ensureWorktree was called with no item and no branch — project-scope callers must supply `branch`.',
             item ? { item_id: item.id } : {},
         );

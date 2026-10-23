@@ -237,8 +237,8 @@ function renderDescription(name: string): string {
     // in Copilot's prompt list.
     const safe = name.replace(/"/g, '\\"');
     return (
-        `Atlas SDLC agent — ${safe}. Reads .atlas/{constitution,current-task,outcome}.md, ` +
-        `fills the relevant .atlas/templates/<x>.md, runs .atlas/scripts/bash/check-<agent>.sh, ` +
-        `then posts the structured comment + emits outcome.`
+        `Atlas agent — ${safe}. Reads .atlas/{constitution,current-task,outcome}.md, ` +
+        `works the Task in this worktree, then ends with an atlas-outcome block. ` +
+        `Atlas commits, pushes and opens the pull request.`
     );
 }

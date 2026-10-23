@@ -150,7 +150,7 @@ export function TestForm({
                             label="Item kind"
                             value={issueType}
                             onChange={(e) => setIssueType(e.target.value as 'task')}
-                            helperText="Most agents accept one kind. PO Writer takes Tasks, Coder takes sub-tasks."
+                            helperText="The kind of item the test creates for the agent to work."
                         >
                             <MenuItem value="task">Task</MenuItem>
                             <MenuItem value="sub_task">Sub-task</MenuItem>

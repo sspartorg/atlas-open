@@ -1,9 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, beforeAll } from 'vitest';
+import Knex from 'knex';
 import { sql } from 'kysely';
 import { testDb, truncateAll } from '../../tests/_pg-db.js';
 import { runSeed } from '../db/seed.js';
 import { loadCatalog } from '../marketplace/catalog-loader.js';
 import { marketplaceService } from '../services/marketplace.js';
+import { RETIRED_SCRIPT_IDS, RETIRED_TEMPLATE_IDS, RULE_REWRITES, up } from './migrations/003_drop_pipeline_leftovers.js';
 
 // 2026-06-09 — Migrations rebase. The 17 historical files (001_baseline +
 // 16 deltas at 070-086) are collapsed into a single source-of-truth
@@ -351,5 +355,58 @@ describe('Workstream #4 — model registry alignment', () => {
                 .execute();
             expect(rows).toHaveLength(ENGINEERING_AGENTS.length);
         });
+    });
+});
+
+describe('migration 003 — pipeline leftovers', () => {
+    const baseline = readFileSync(join(__dirname, 'migrations', '001_baseline.sql'), 'utf8');
+
+    it('matches every rewritten rule against its baseline text', () => {
+        // The UPDATE matches the baseline verbatim; a drifted `from` would make it a silent no-op.
+        for (const r of RULE_REWRITES) {
+            expect(baseline, r.id).toContain(`('${r.id}', `);
+            expect(baseline, r.id).toContain(r.from.rule_text);
+            expect(baseline, r.id).toContain(r.from.detail);
+        }
+    });
+
+    it('deletes the role gates and templates, rewrites unedited rules, keeps Owner edits', async () => {
+        await truncateAll();
+        const [edited, ...rest] = RULE_REWRITES;
+        if (!edited) throw new Error('no rewrites');
+        await testDb
+            .insertInto('guardrail_rules')
+            .values([
+                ...rest.map((r, i) => ({ id: r.id, category: 'git_branches', sort_order: i, ...r.from })),
+                { id: edited.id, category: 'git_branches', sort_order: 9, ...edited.from, rule_text: 'Owner wrote this.' },
+            ])
+            .execute();
+        await testDb
+            .insertInto('guardrail_scripts')
+            .values(['prereqs', ...RETIRED_SCRIPT_IDS].map((id) => ({ id, name: id, description: '', body_sh: 'x', body_ps1: 'x' })))
+            .execute();
+        await testDb
+            .insertInto('agent_templates')
+            .values(RETIRED_TEMPLATE_IDS.map((id) => ({ id, filename: `${id}.md`, description: '', body_md: 'x' })))
+            .onConflict((oc) => oc.column('id').doNothing())
+            .execute();
+
+        const knex = Knex({ client: 'pg', connection: process.env['DATABASE_URL'], pool: { min: 0, max: 1 } });
+        try {
+            await up(knex);
+        } finally {
+            await knex.destroy();
+        }
+
+        const scripts = await testDb.selectFrom('guardrail_scripts').select('id').execute();
+        expect(scripts.map((s) => s.id)).toEqual(['prereqs']);
+        const templates = await testDb.selectFrom('agent_templates').select('id').where('id', 'in', RETIRED_TEMPLATE_IDS).execute();
+        expect(templates).toEqual([]);
+        const rules = new Map(
+            (await testDb.selectFrom('guardrail_rules').select(['id', 'rule_text', 'severity']).execute()).map((r) => [r.id, r]),
+        );
+        for (const r of rest) expect(rules.get(r.id)).toMatchObject({ rule_text: r.to.rule_text, severity: r.to.severity });
+        expect(rules.get(edited.id)?.rule_text).toBe('Owner wrote this.');
+        await truncateAll();
     });
 });

@@ -498,10 +498,9 @@ prompt on its next run.
 A project can add its own rules and scripts on its **Guard-rails** tab, with a switch to turn them all off
 for that project.
 
-**Scripts** are executable checks staged into every worktree at `.atlas/scripts/`. The six that ship check
-only Atlas's own artifacts — worktree prerequisites, PO Writer's output, the Architect's `spec.md`, the
-QA test-plan CSV, the automation coverage report, and `Co-Authored-By` commit discipline. Agents run them
-and report the result. Whether *your project's* tests, lint or build pass is not a guard-rail script: the
+**Scripts** are executable checks staged into every worktree at `.atlas/scripts/`. The one that ships,
+**Worktree prereqs**, checks only Atlas's own staging: that `.atlas/` and its constitution are in the
+worktree. Add your own on this tab; agents run them and report the result. Whether *your project's* tests, lint or build pass is not a guard-rail script: the
 agent runs the project's own commands before it reports `done`.
 
 ---

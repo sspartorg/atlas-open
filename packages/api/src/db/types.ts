@@ -402,9 +402,8 @@ export interface ProjectGuardrailScriptsTable {
     updated_at: UpdatedAt;
 }
 
-// Phase 2 — `/commands` framework. Five artifact templates
-// (`spec`, `plan`, `tasks`, `sub-task`, `qa-plan`) that the templates-
-// assembler writes to `<worktree>/.atlas/templates/<filename>` per
+// Phase 2 — `/commands` framework. Artifact templates (none seeded since
+// migration 003) that the templates-assembler writes to `<worktree>/.atlas/templates/<filename>` per
 // run. Same id-primary-key shape as `guardrail_scripts`. Owner-editable
 // via direct DB writes for now; a Settings tab follows.
 export interface AgentTemplatesTable {

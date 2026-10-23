@@ -46,7 +46,7 @@ describe('runRepos', () => {
         const md = repositoriesMarkdown(r.repos, BRANCH);
         expect(md).toContain('| `./core` | https://github.com/o/core | `main` |');
         expect(md).toContain('| `./web` (first) | https://github.com/o/web | `main` |');
-        expect(md).toContain('Put Task-wide files (specs, QA CSVs) in the first repo, `./web`');
+        expect(md).toContain('Put Task-wide files (notes, docs) in the first repo, `./web`');
         // F-013 — the workspace tempts agents into `../<other-repo>/...`
         // imports that resolve only inside the run. ATL-5 shipped a test
         // doing exactly that; it can never pass after teardown.

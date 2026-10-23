@@ -158,7 +158,7 @@ export function GuardrailScriptsTab() {
                 sx={{ mb: 3 }}
             >
                 <Typography sx={{ fontSize: 13, color: ATLAS_PALETTE.slate60 }}>
-                    Shell scripts the reviewer runs as machine-verified evidence checks.{' '}
+                    Shell scripts staged into every worktree at .atlas/scripts/ for agents to run as evidence checks.{' '}
                     {scripts.length} {scripts.length === 1 ? 'script' : 'scripts'} configured.
                 </Typography>
                 <Button
@@ -195,7 +195,7 @@ export function GuardrailScriptsTab() {
                         No scripts yet
                     </Typography>
                     <Typography variant="body2" sx={{ mb: 2 }}>
-                        Add a shell script the reviewer will run to verify compliance. Each script
+                        Add a shell script agents will run to verify compliance. Each script
                         needs a paired bash + PowerShell body.
                     </Typography>
                     <Button

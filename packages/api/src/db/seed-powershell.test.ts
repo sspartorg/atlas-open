@@ -57,40 +57,21 @@ function runGate(id: string, dir: string, arg = 'ATL-1'): { code: number; out: s
 }
 
 describe.skipIf(!pwsh)('PowerShell guardrail bodies, executed', () => {
-    // ADR 0024 deleted the five scripts that guessed at the customer's stack,
-    // and with them the three describes that lived here. What is left checks
-    // Atlas's own artifacts, and this harness still has a job: it exists
-    // because a `.ps1` once ran two of the nine checks its bash sibling ran,
-    // and nothing caught it until a human read the file.
-    describe('architect-spec-md', () => {
-        // The one script here whose PowerShell half does real parsing: it
-        // walks `specs/**` and checks six headers. Verified against
-        // PowerShell 7.4 before it was written down.
-        it('names every section a partial spec is missing', () => {
-            const dir = repoWith({
-                'specs/1-thing/spec.md': '# Spec\n\n## Feasibility\nok\n',
-            });
-            const r = runGate('architect-spec-md', dir);
-            expect(r.code).toBe(1);
-            expect(r.out).toContain('missing section: ## Test scenarios');
-            // The one it HAS must not be reported, or the check is just a
-            // list of every header it knows about.
-            expect(r.out).not.toContain('missing section: ## Feasibility');
-        });
-    });
-
+    // Only `prereqs` ships (migration 003 retired the pipeline-role gates).
+    // This harness exists because a `.ps1` once ran two of the nine checks
+    // its bash sibling ran, and nothing caught it until a human read the file.
     describe('prereqs', () => {
-        // A dirty worktree is the one state every later script misreads: the
-        // diff it inspects is not the diff that will be pushed.
-        it('reports a dirty worktree', () => {
-            const dir = repoWith({ 'a.js': 'const added = 1;\n' });
+        // Agents never commit, so a dirty tree is the normal end of a run.
+        it('passes on a dirty tree once the run is staged', () => {
+            const dir = repoWith({ '.atlas/constitution.md': '# Constitution\n' });
             writeFileSync(join(dir, 'uncommitted.txt'), 'x');
-            const r = runGate('prereqs', dir);
+            expect(runGate('prereqs', dir)).toEqual({ code: 0, out: '' });
+        });
+
+        it('names the missing constitution', () => {
+            const r = runGate('prereqs', repoWith({ 'a.js': 'const added = 1;\n' }));
             expect(r.code).toBe(1);
-            // Named, not just non-zero: a missing `.atlas` also exits 1 here,
-            // so the code alone would pass whether or not the dirty-tree check
-            // survived.
-            expect(r.out).toContain('dirty working tree');
+            expect(r.out).toContain('.atlas/constitution.md missing');
         });
     });
 });

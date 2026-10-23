@@ -131,7 +131,9 @@ describe('assembleCommands', () => {
 
         // Frontmatter present with description line.
         expect(claudeBody.startsWith('---\n')).toBe(true);
-        expect(claudeBody).toContain('description: "Atlas SDLC agent — Architect.');
+        expect(claudeBody).toContain('description: "Atlas agent — Architect.');
+        // No per-agent check script or template exists to point at.
+        expect(claudeBody).not.toMatch(/check-<agent>|\.atlas\/templates/);
         // Preamble is auto-prepended for every agent.
         expect(claudeBody).toContain('You are agent `agent-architect`.');
         expect(claudeBody).toContain('.atlas/outcome.md');
@@ -205,7 +207,7 @@ describe('assembleCommands', () => {
         );
         // The frontmatter description contains the escaped form,
         // never the raw double-quote.
-        expect(body).toContain('description: "Atlas SDLC agent — Say \\"hello\\".');
+        expect(body).toContain('description: "Atlas agent — Say \\"hello\\".');
         // Sanity: the raw sequence `"hello"` (unescaped) must NOT appear
         // on the description line — that would signal YAML corruption.
         const descLine = body.split('\n').find((l) => l.startsWith('description:'))!;
@@ -324,7 +326,7 @@ describe('assembleCommands — Phase 4 user-level Copilot agent write', () => {
         const fileBody = readFileSync(userAgentPath, 'utf8');
         // Frontmatter + the active agent's verbatim prompt.
         expect(fileBody.startsWith('---\n')).toBe(true);
-        expect(fileBody).toContain('description: "Atlas SDLC agent — Architect.');
+        expect(fileBody).toContain('description: "Atlas agent — Architect.');
         expect(fileBody).toContain(promptBody);
         // The OTHER agent's body must not leak into the active-run file.
         expect(fileBody).not.toContain('should-not-leak');

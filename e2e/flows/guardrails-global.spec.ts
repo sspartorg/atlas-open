@@ -189,7 +189,7 @@ test.describe('Scripts tab', () => {
     test('a script is added, edited (slug locked) and deleted after a confirm; bad input is refused', async ({ page, request }) => {
         await goto(page, '/guardrails');
         await page.getByRole('tab', { name: /^Scripts/ }).click();
-        await expect(page.getByText(/Shell scripts the reviewer runs as machine-verified evidence checks\. \d+ scripts? configured\./)).toBeVisible();
+        await expect(page.getByText(/Shell scripts staged into every worktree at \.atlas\/scripts\/ for agents to run as evidence checks\. \d+ scripts? configured\./)).toBeVisible();
         await page.getByRole('button', { name: 'Add script', exact: true }).click();
         const dialog = page.getByRole('dialog', { name: 'Add script' });
         await dialog.getByLabel('Slug (id)').fill('E2E Bad Slug');
