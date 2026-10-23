@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { registerAgentTools } from './agents.js';
+import { z } from 'zod';
+import { AGENT_TOOLS, registerAgentTools } from './agents.js';
 import type { IApiClient, IAgentComposite } from '../api-client.js';
 import type { IAgent } from '@atlas/shared';
 
@@ -213,7 +214,7 @@ describe('registerAgentTools', () => {
             expect(parseToolResult(result)).toEqual(memory);
         });
 
-        it("op='update' defaults mode='replace' and source='ai-generated'", async () => {
+        it("op='update' defaults mode='replace'", async () => {
             const { server, tools } = captureServer();
             const updateAgentMemory = vi.fn().mockResolvedValue({
                 ...memory,
@@ -225,11 +226,10 @@ describe('registerAgentTools', () => {
             expect(updateAgentMemory).toHaveBeenCalledWith('a1', {
                 body_md: '# new',
                 mode: 'replace',
-                source: 'ai-generated',
             });
         });
 
-        it("op='update' passes mode='append' + manual-edit source through", async () => {
+        it("op='update' passes mode='append' through", async () => {
             const { server, tools } = captureServer();
             const updateAgentMemory = vi.fn().mockResolvedValue(memory);
             registerAgentTools(server, makeFakeApiClient({ updateAgentMemory }));
@@ -238,12 +238,10 @@ describe('registerAgentTools', () => {
                 id: 'a1',
                 body_md: '- lesson',
                 mode: 'append',
-                source: 'manual-edit',
             });
             expect(updateAgentMemory).toHaveBeenCalledWith('a1', {
                 body_md: '- lesson',
                 mode: 'append',
-                source: 'manual-edit',
             });
         });
 
@@ -328,5 +326,19 @@ describe('registerAgentTools', () => {
                 tools.get('marketplace_agent')!.handler({ op: 'get' }),
             ).rejects.toThrow(/`id` is required for op='get'/);
         });
+    });
+});
+
+describe('crud_agent payload schema', () => {
+    const schema = z.object(AGENT_TOOLS.find((t) => t.name === 'crud_agent')!.inputSchema as z.ZodRawShape);
+
+    it('declares the fields the API accepts', () => {
+        const payload = { effort: 'high', memory_cadence: 5, kind_slug: 'custom', settings_json: { a: 1 } };
+        expect(schema.safeParse({ op: 'update', id: 'a1', payload }).success).toBe(true);
+    });
+
+    it('rejects unknown keys instead of passing them through', () => {
+        const payload = { schedule_cron: '* * * * *' };
+        expect(schema.safeParse({ op: 'update', id: 'a1', payload }).success).toBe(false);
     });
 });

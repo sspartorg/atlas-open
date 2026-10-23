@@ -531,7 +531,7 @@ describe('POST /api/issues/:type/:id/links — all error reason branches (CMNT-L
             payload: { to_type: 'sub_task', to_id: 'ATL-8888' },
         });
         expect(res.statusCode).toBe(400);
-        expect(JSON.parse(res.body).error).toMatch(/Target sub_task not found/);
+        expect(JSON.parse(res.body).error).toMatch(/Target item ATL-8888 not found/);
         expect(JSON.parse(res.body).reason).toBe('not_found');
     });
 
@@ -988,7 +988,7 @@ describe('GET /api/comments — multiple comments listing (CMNT-EXTRA)', () => {
 // Regression — 2026-09-12. An agent comment written without an `agent_id`
 // rendered as the literal string "Agent" in the activity feed, and made the
 // issue_events actor fall back to the OWNER. The MCP add_comment path has no
-// bound identity (ATLAS_AGENT_ID is never set; the MCP host is shared
+// bound identity (the MCP host is shared
 // in-process across every agent), so `agent_id` is an optional argument the
 // model frequently omits. commentsService.create now resolves it from the
 // item's live run, which migration 003 guarantees is unique per item.

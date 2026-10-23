@@ -250,7 +250,7 @@ describe('createApiClient — sub-task endpoints', () => {
     });
 });
 
-describe('createApiClient — agent lifecycle gaps (delete + memory + runs)', () => {
+describe('createApiClient — agent lifecycle (delete + memory)', () => {
     it('deleteAgent issues a DELETE with the token header', async () => {
         const fetchSpy = vi
             .spyOn(globalThis, 'fetch')
@@ -281,7 +281,6 @@ describe('createApiClient — agent lifecycle gaps (delete + memory + runs)', ()
         await createApiClient(config).updateAgentMemory('a1', {
             body_md: '## section\n- note',
             mode: 'append',
-            source: 'ai-generated',
         });
         const [url, init] = fetchSpy.mock.calls[0]!;
         expect(url).toBe('http://api.test/api/agents/a1/memory');
@@ -293,15 +292,6 @@ describe('createApiClient — agent lifecycle gaps (delete + memory + runs)', ()
         expect(headers['X-Atlas-Token']).toBe('unit-secret');
     });
 
-    it('listAgentRuns GETs /runs', async () => {
-        const fetchSpy = vi
-            .spyOn(globalThis, 'fetch')
-            .mockResolvedValueOnce(okJson([{ id: 'r1', agent_id: 'a1' }]));
-        const out = await createApiClient(config).listAgentRuns('a1');
-        expect(out).toEqual([{ id: 'r1', agent_id: 'a1' }]);
-        const [url] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/agents/a1/runs');
-    });
 });
 
 describe('createApiClient — marketplace', () => {
@@ -346,7 +336,7 @@ describe('createApiClient — marketplace', () => {
 describe('createApiClient — issue create endpoints', () => {
     it('createTask POSTs to /api/tasks with the payload', async () => {
         const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({ id: 'T1' }));
-        await createApiClient(config).createTask({ project_id: 'p1', title: 'New' });
+        await createApiClient(config).createTask({ project_id: 'p1', title: 'New' }, null);
         const [url, init] = fetchSpy.mock.calls[0]!;
         expect(url).toBe('http://api.test/api/tasks');
         expect((init as RequestInit).method).toBe('POST');
@@ -359,95 +349,52 @@ describe('createApiClient — issue create endpoints', () => {
     });
 });
 
-describe('createApiClient — comments + reply', () => {
-    it('addComment defaults author=agent and agent_id=null when not given', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({ id: 1 }));
-        await createApiClient(config).addComment({
-            issue_type: 'task',
-            issue_id: 'S1',
-            body: 'hi',
-        });
+describe('createApiClient — comments', () => {
+    it('addComment always posts author=agent with the given agent_id', async () => {
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => okJson({ id: 1 }));
+        const client = createApiClient(config);
+        await client.addComment({ issue_type: 'task', issue_id: 'S1', body: 'hi', agent_id: null });
+        await client.addComment({ issue_type: 'task', issue_id: 'S1', body: 'hi', agent_id: 'a1' });
         const [url, init] = fetchSpy.mock.calls[0]!;
         expect(url).toBe('http://api.test/api/comments');
         expect((init as RequestInit).method).toBe('POST');
-        const body = JSON.parse((init as RequestInit).body as string);
-        expect(body).toEqual({
+        expect(JSON.parse((init as RequestInit).body as string)).toEqual({
             author: 'agent',
             agent_id: null,
             issue_type: 'task',
             issue_id: 'S1',
             body: 'hi',
         });
-    });
-
-    it('addComment forwards author + agent_id when given', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({ id: 1 }));
-        await createApiClient(config).addComment({
-            issue_type: 'task',
-            issue_id: 'S1',
-            body: 'hi',
-            author: 'owner',
-            agent_id: 'a1',
-        });
-        const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string);
-        expect(body.author).toBe('owner');
-        expect(body.agent_id).toBe('a1');
-    });
-
-    it('listComments builds GET URL with type + id query', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson([]));
-        await createApiClient(config).listComments('task', 'S 1');
-        const [url] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/comments?issue_type=task&issue_id=S%201');
-    });
-
-    it('getReplyContext GETs /reply-context with encoded ids', async () => {
-        const fetchSpy = vi
-            .spyOn(globalThis, 'fetch')
-            .mockResolvedValueOnce(okJson({ item: { id: 'S1' } }));
-        await createApiClient(config).getReplyContext('task', 'S/1');
-        const [url] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/issues/task/S%2F1/reply-context');
-    });
-
-    it('postReply POSTs body + author + agent_id (default owner / null)', async () => {
-        const fetchSpy = vi
-            .spyOn(globalThis, 'fetch')
-            .mockResolvedValueOnce(okJson({ comment: {}, context: {} }));
-        await createApiClient(config).postReply({
-            issue_type: 'task',
-            issue_id: 'S1',
-            body: 'reply',
-        });
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/issues/task/S1/reply');
-        expect((init as RequestInit).method).toBe('POST');
-        const body = JSON.parse((init as RequestInit).body as string);
-        expect(body).toEqual({ body: 'reply', author: 'owner', agent_id: null });
+        const second = JSON.parse((fetchSpy.mock.calls[1]![1] as RequestInit).body as string);
+        expect(second.author).toBe('agent');
+        expect(second.agent_id).toBe('a1');
     });
 });
 
 describe('createApiClient — items (getItemFull / search / projects / links)', () => {
-    it('getItemFull maps issue_type to the right route segment and merges comments into the envelope', async () => {
-        // Tool consolidation 2026-07: get_item is "always full payload" —
-        // the api-client fans out the /full + /comments reads in parallel
-        // and splices `comments` into the response so callers see one
-        // envelope per round-trip. No API-side schema change needed.
+    it('getItemFull maps issue_type to the route segment and splices comments + project repos into the envelope', async () => {
         const fetchSpy = vi.spyOn(globalThis, 'fetch');
         fetchSpy.mockImplementation(async (url) => {
             if (typeof url === 'string' && url.includes('/api/comments')) {
                 return okJson([{ id: 1, body: 'hi' }]);
             }
-            return okJson({ stub: true });
+            if (typeof url === 'string' && url.endsWith('/repos')) return okJson([{ id: 'r1' }]);
+            return okJson({ stub: true, project: { id: 'p 1' } });
         });
         const client = createApiClient(config);
         const out = await client.getItemFull('task', 'S1');
         const urls = fetchSpy.mock.calls.map((c) => c[0] as string).sort();
         expect(urls).toEqual([
             'http://api.test/api/comments?issue_type=task&issue_id=S1',
+            'http://api.test/api/projects/p%201/repos',
             'http://api.test/api/tasks/S1/full',
         ]);
-        expect(out).toEqual({ stub: true, comments: [{ id: 1, body: 'hi' }] });
+        expect(out).toEqual({
+            stub: true,
+            project: { id: 'p 1' },
+            repos: [{ id: 'r1' }],
+            comments: [{ id: 1, body: 'hi' }],
+        });
     });
 
     it('getItemFull URL-encodes issue ids for both fanout calls', async () => {
@@ -461,38 +408,30 @@ describe('createApiClient — items (getItemFull / search / projects / links)', 
         ]);
     });
 
-    it('searchItems builds query string with q + top_k', async () => {
+    it('searchItems sends the cap as `limit`, the param /api/search reads', async () => {
         const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson([]));
         await createApiClient(config).searchItems('foo bar', 7);
         const [url] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/search?q=foo+bar&top_k=7');
+        expect(url).toBe('http://api.test/api/search?q=foo+bar&limit=7');
     });
 
-    it('searchItems omits top_k when not provided', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson([]));
-        await createApiClient(config).searchItems('foo');
-        const [url] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/search?q=foo');
-    });
-
-    it('listProjects + getProject hit the projects routes', async () => {
+    it('listProjects + getProject hit the projects routes; getProject adds the repos', async () => {
         const fetchSpy = vi.spyOn(globalThis, 'fetch');
-        fetchSpy.mockResolvedValueOnce(okJson([])).mockResolvedValueOnce(okJson({ id: 'p1' }));
+        fetchSpy.mockImplementation(async (url) => {
+            if (url === 'http://api.test/api/projects') return okJson([]);
+            if (typeof url === 'string' && url.endsWith('/repos')) return okJson([{ id: 'r1' }]);
+            return okJson({ id: 'p 1' });
+        });
         const client = createApiClient(config);
         await client.listProjects();
-        await client.getProject('p 1');
-        const urls = fetchSpy.mock.calls.map((c) => c[0] as string);
+        const project = await client.getProject('p 1');
+        expect(project).toEqual({ id: 'p 1', repos: [{ id: 'r1' }] });
+        const urls = fetchSpy.mock.calls.map((c) => c[0] as string).sort();
         expect(urls).toEqual([
             'http://api.test/api/projects',
             'http://api.test/api/projects/p%201',
+            'http://api.test/api/projects/p%201/repos',
         ]);
-    });
-
-    it('listItemLinks GETs /api/issues/:type/:id/links', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson([]));
-        await createApiClient(config).listItemLinks('task', 'S1');
-        const [url] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/issues/task/S1/links');
     });
 
     it('createItemLink POSTs to from-item links endpoint', async () => {
@@ -502,7 +441,7 @@ describe('createApiClient — items (getItemFull / search / projects / links)', 
             from_id: 'S1',
             to_id: 'S2',
             relation_type: 'depends_on',
-        });
+        }, null);
         const [url, init] = fetchSpy.mock.calls[0]!;
         expect(url).toBe('http://api.test/api/issues/task/S1/links');
         expect((init as RequestInit).method).toBe('POST');
@@ -513,7 +452,7 @@ describe('createApiClient — items (getItemFull / search / projects / links)', 
 
     it('deleteItemLink DELETEs by linkId', async () => {
         const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okEmpty());
-        await createApiClient(config).deleteItemLink(42);
+        await createApiClient(config).deleteItemLink(42, null);
         const [url, init] = fetchSpy.mock.calls[0]!;
         expect(url).toBe('http://api.test/api/issues/links/42');
         expect((init as RequestInit).method).toBe('DELETE');
@@ -558,108 +497,14 @@ describe('createApiClient — items (getItemFull / search / projects / links)', 
             'agent-po-writer',
         );
         await client.deleteItemLink(5, 'agent-po-writer');
-        await client.createItemExternalLink(
-            {
-                issue_type: 'task',
-                issue_id: 'S1',
-                link_kind: 'pull_request',
-                url: 'https://github.com/o/r/pull/3',
-            },
-            'agent-po-writer',
-        );
         await client.updateItem('task', 'S1', { title: 'x' }, 'agent-po-writer');
         await client.createTask({ project_id: 'p1', title: 'T' }, null);
         const agentHeaders = fetchSpy.mock.calls.map(
             ([, init]) => ((init as RequestInit).headers as Record<string, string>)['x-atlas-agent-id'],
         );
-        expect(agentHeaders).toEqual([...Array(6).fill('agent-po-writer'), undefined]);
+        expect(agentHeaders).toEqual([...Array(5).fill('agent-po-writer'), undefined]);
     });
 
-    it('listItemExternalLinks GETs /api/issues/:type/:id/external-links', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson([]));
-        await createApiClient(config).listItemExternalLinks('task', 'S1');
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/issues/task/S1/external-links');
-        expect((init as RequestInit).method).toBe('GET');
-    });
-
-    it('createItemExternalLink POSTs to /api/issues/:type/:id/external-links', async () => {
-        const fetchSpy = vi
-            .spyOn(globalThis, 'fetch')
-            .mockResolvedValueOnce(okJson({ id: 1, url: 'https://github.com/o/r/pull/3' }));
-        await createApiClient(config).createItemExternalLink({
-            issue_type: 'task',
-            issue_id: 'S1',
-            link_kind: 'pull_request',
-            url: 'https://github.com/o/r/pull/3',
-            title: 'feat: thing',
-        });
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/issues/task/S1/external-links');
-        expect((init as RequestInit).method).toBe('POST');
-        const body = JSON.parse((init as RequestInit).body as string);
-        expect(body.link_kind).toBe('pull_request');
-        expect(body.url).toBe('https://github.com/o/r/pull/3');
-        expect(body.title).toBe('feat: thing');
-    });
-
-    it('createItemExternalLink coerces missing title to null', async () => {
-        const fetchSpy = vi
-            .spyOn(globalThis, 'fetch')
-            .mockResolvedValueOnce(okJson({ id: 2, url: 'u' }));
-        await createApiClient(config).createItemExternalLink({
-            issue_type: 'task',
-            issue_id: 'E1',
-            link_kind: 'pull_request',
-            url: 'https://github.com/o/r/pull/9',
-        });
-        const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string);
-        expect(body.title).toBeNull();
-    });
-
-    it('deleteItemExternalLink DELETEs by linkId', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okEmpty());
-        await createApiClient(config).deleteItemExternalLink(77);
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/issues/external-links/77');
-        expect((init as RequestInit).method).toBe('DELETE');
-    });
-});
-
-describe('createApiClient — guardrails (workspace)', () => {
-    it('listGuardrails GETs /api/guardrails', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson([]));
-        await createApiClient(config).listGuardrails();
-        expect(fetchSpy.mock.calls[0]![0]).toBe('http://api.test/api/guardrails');
-    });
-
-    it('createGuardrail POSTs payload', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({ id: 'g1' }));
-        await createApiClient(config).createGuardrail({
-            category: 'general',
-            rule_text: 'rule',
-            severity: 'warn',
-        });
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/guardrails');
-        expect((init as RequestInit).method).toBe('POST');
-    });
-
-    it('updateGuardrail PATCHes by id', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({ id: 'g1' }));
-        await createApiClient(config).updateGuardrail('g1', { rule_text: 'new' });
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/guardrails/g1');
-        expect((init as RequestInit).method).toBe('PATCH');
-    });
-
-    it('deleteGuardrail DELETEs by id', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okEmpty());
-        await createApiClient(config).deleteGuardrail('g1');
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/guardrails/g1');
-        expect((init as RequestInit).method).toBe('DELETE');
-    });
 });
 
 describe('createApiClient — reminders + notifications', () => {
@@ -743,7 +588,7 @@ describe('createApiClient — item mutation (polymorphic)', () => {
         await createApiClient(config).updateItem('task', 'S1', {
             title: 'new',
             spec_md: '## spec',
-        });
+        }, null);
         const [url, init] = fetchSpy.mock.calls[0]!;
         expect(url).toBe('http://api.test/api/tasks/S1');
         expect((init as RequestInit).method).toBe('PATCH');
@@ -751,9 +596,9 @@ describe('createApiClient — item mutation (polymorphic)', () => {
         expect(body.spec_md).toBe('## spec');
     });
 
-    it('transitionItemStatus PATCHes /status without override query when override=false/undefined', async () => {
+    it('transitionItemStatus PATCHes /status (never with ?override)', async () => {
         const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({}));
-        await createApiClient(config).transitionItemStatus('task', 'S1', 'in_progress');
+        await createApiClient(config).transitionItemStatus('task', 'S1', 'in_progress', null);
         const [url, init] = fetchSpy.mock.calls[0]!;
         expect(url).toBe('http://api.test/api/tasks/S1/status');
         expect((init as RequestInit).method).toBe('PATCH');
@@ -761,36 +606,13 @@ describe('createApiClient — item mutation (polymorphic)', () => {
         expect(body).toEqual({ status: 'in_progress' });
     });
 
-    it('transitionItemStatus adds ?override=1 and requested_by_agent_id when supplied', async () => {
+    it('transitionItemStatus adds requested_by_agent_id when supplied', async () => {
         const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({}));
-        await createApiClient(config).transitionItemStatus(
-            'task',
-            'S1',
-            'done',
-            true,
-            'agent-po-reviewer',
-        );
+        await createApiClient(config).transitionItemStatus('task', 'S1', 'done', 'agent-po-reviewer');
         const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/tasks/S1/status?override=1');
+        expect(url).toBe('http://api.test/api/tasks/S1/status');
         const body = JSON.parse((init as RequestInit).body as string);
         expect(body).toEqual({ status: 'done', requested_by_agent_id: 'agent-po-reviewer' });
-    });
-
-    it('assignItem PATCHes /assign with assignee_agent_id (string or null)', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch');
-        fetchSpy.mockImplementation(async () => okJson({}));
-        const client = createApiClient(config);
-        await client.assignItem('task', 'S1', 'agent-coder');
-        await client.assignItem('task', 'S1', null, 'agent-po-reviewer');
-        const [, init1] = fetchSpy.mock.calls[0]!;
-        expect(JSON.parse((init1 as RequestInit).body as string)).toEqual({
-            assignee_agent_id: 'agent-coder',
-        });
-        const [, init2] = fetchSpy.mock.calls[1]!;
-        expect(JSON.parse((init2 as RequestInit).body as string)).toEqual({
-            assignee_agent_id: null,
-            requested_by_agent_id: 'agent-po-reviewer',
-        });
     });
 
     it('deleteItem DELETEs the per-type route', async () => {
@@ -803,104 +625,16 @@ describe('createApiClient — item mutation (polymorphic)', () => {
 
     it('updateItem maps task → /api/tasks/:id', async () => {
         const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({ id: 'T1' }));
-        await createApiClient(config).updateItem('task', 'T1', { title: 'renamed' });
+        await createApiClient(config).updateItem('task', 'T1', { title: 'renamed' }, null);
         const [url] = fetchSpy.mock.calls[0]!;
         expect(url).toBe('http://api.test/api/tasks/T1');
     });
 
     it('updateItem maps sub_task → /api/sub-tasks/:id', async () => {
         const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({ id: 'ST1' }));
-        await createApiClient(config).updateItem('sub_task', 'ST1', { title: 'done' });
+        await createApiClient(config).updateItem('sub_task', 'ST1', { title: 'done' }, null);
         const [url] = fetchSpy.mock.calls[0]!;
         expect(url).toBe('http://api.test/api/sub-tasks/ST1');
-    });
-});
-
-describe('createApiClient — project guardrails (per-project)', () => {
-    it('listProjectGuardrails GETs the per-project route', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson([]));
-        await createApiClient(config).listProjectGuardrails('p1');
-        expect(fetchSpy.mock.calls[0]![0]).toBe('http://api.test/api/projects/p1/guardrails');
-    });
-
-    it('createProjectGuardrail POSTs to the per-project route', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({ id: 'g1' }));
-        await createApiClient(config).createProjectGuardrail('p1', {
-            title: 't',
-            body_md: 'b',
-        });
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/projects/p1/guardrails');
-        expect((init as RequestInit).method).toBe('POST');
-    });
-
-    it('updateProjectGuardrail PATCHes the rule under its project', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({ id: 'g1' }));
-        await createApiClient(config).updateProjectGuardrail('p1', 'g1', { title: 'x' });
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/projects/p1/guardrails/g1');
-        expect((init as RequestInit).method).toBe('PATCH');
-    });
-
-    it('toggleProjectGuardrail PATCHes /toggle with enabled flag', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({ id: 'g1' }));
-        await createApiClient(config).toggleProjectGuardrail('p1', 'g1', 0);
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/projects/p1/guardrails/g1/toggle');
-        const body = JSON.parse((init as RequestInit).body as string);
-        expect(body).toEqual({ enabled: 0 });
-    });
-
-    it('deleteProjectGuardrail DELETEs the rule under its project', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okEmpty());
-        await createApiClient(config).deleteProjectGuardrail('p1', 'g1');
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/projects/p1/guardrails/g1');
-        expect((init as RequestInit).method).toBe('DELETE');
-    });
-});
-
-describe('createApiClient — schedules', () => {
-    it('listSchedules GETs /api/schedules', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson([]));
-        await createApiClient(config).listSchedules();
-        expect(fetchSpy.mock.calls[0]![0]).toBe('http://api.test/api/schedules');
-    });
-
-    it('upsertProjectSchedule PUTs the schedule payload', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okJson({}));
-        await createApiClient(config).upsertProjectSchedule('p1', {
-            enabled: true,
-            preset: 'daily',
-            time_of_day: '09:00',
-            weekday: null,
-            cron_expression: '0 9 * * *',
-            skip_if_dirty: false,
-            pause_while_agents_active: false,
-            conflict_policy: 'skip',
-        });
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/projects/p1/schedule');
-        expect((init as RequestInit).method).toBe('PUT');
-    });
-
-    it('deleteProjectSchedule DELETEs the schedule', async () => {
-        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(okEmpty());
-        await createApiClient(config).deleteProjectSchedule('p1');
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/projects/p1/schedule');
-        expect((init as RequestInit).method).toBe('DELETE');
-    });
-
-    it('triggerProjectAutoFetch POSTs to /schedule/fire', async () => {
-        const fetchSpy = vi
-            .spyOn(globalThis, 'fetch')
-            .mockResolvedValueOnce(okJson({ autofetch_id: 'af1' }));
-        const out = await createApiClient(config).triggerProjectAutoFetch('p1');
-        expect(out.autofetch_id).toBe('af1');
-        const [url, init] = fetchSpy.mock.calls[0]!;
-        expect(url).toBe('http://api.test/api/projects/p1/schedule/fire');
-        expect((init as RequestInit).method).toBe('POST');
     });
 });
 

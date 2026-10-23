@@ -133,7 +133,8 @@ try {
             if (project.id !== projects[0].id) {
                 throw new Error(`getProject returned id=${project.id}, expected ${projects[0].id}`);
             }
-            console.log(`[smoke] getProject ${project.id}: ${project.name}`);
+            if (!Array.isArray(project.repos)) throw new Error('getProject did not return `repos`');
+            console.log(`[smoke] getProject ${project.id}: ${project.name}, ${project.repos.length} repo(s)`);
         }
 
         const agents = await call('crud_agent', { op: 'search' }, 'crud_agent search');
@@ -160,7 +161,8 @@ try {
             if (full[issue_type]?.id !== issue_id) {
                 throw new Error(`get_item ${issue_type} ${issue_id} did not return the item under \`${issue_type}\``);
             }
-            console.log(`[smoke] get_item ${issue_type} ${issue_id}: ${full.comments.length} comment(s)`);
+            if (!Array.isArray(full.repos)) throw new Error('get_item did not return `repos`');
+            console.log(`[smoke] get_item ${issue_type} ${issue_id}: ${full.comments.length} comment(s), ${full.repos.length} repo(s)`);
         }
         console.log('[smoke] OK ✓');
     } else {

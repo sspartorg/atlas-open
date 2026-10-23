@@ -116,11 +116,10 @@ export const commentsService = {
         /* v8 ignore next */
         const type = data.issue_type ?? (await lookupItemType(data.issue_id)) ?? 'task';
         // Agent comments arrive without an identity more often than not. The
-        // MCP `update_item({action:'add_comment'})` path resolves the author
-        // from `ATLAS_AGENT_ID`, which nothing sets — the MCP is hosted
-        // in-process on one shared port for every agent (plugins/mcp-host.ts
-        // hardcodes `boundAgentId: ''`), so the only other source is an
-        // OPTIONAL tool argument the model may omit. A null agent_id renders
+        // MCP `update_item({action:'add_comment'})` path has no bound
+        // identity — the MCP is hosted in-process on one shared port for
+        // every agent (plugins/mcp-host.ts) — so its only source is an
+        // OPTIONAL `agent_id` tool argument the model may omit. A null agent_id renders
         // as the literal "Agent" in the activity feed, and makes the
         // issue_events actor fall back to the OWNER — mis-attributing agent
         // work to the human.

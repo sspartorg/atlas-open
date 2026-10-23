@@ -57,7 +57,7 @@ The Inspector defaults to **6274** (UI) + **6277** (proxy). If either is already
 
 ## Option B — Scripted smoke test (no browser)
 
-`packages/mcp/scripts/smoke-test.mjs` boots the server **from source** over stdio (`node --import tsx src/index.ts`, like `examples/claude-desktop-config.json`; no build needed — `@atlas/shared` ships raw TypeScript, so `node dist/index.js` can't load it), does the JSON-RPC handshake, and checks `tools/list` against the 13 tools `src/tools/*.ts` register. With `LIVE_API=1` it also round-trips the **read-only** tools against a running API: `listProjects` → `getProject`, `crud_agent op=search` → `op=get`, `search_item` → `get_item`. It never writes, so pointing it at a dev stack with real data is safe.
+`packages/mcp/scripts/smoke-test.mjs` boots the server **from source** over stdio (`node --import tsx src/index.ts`, like `examples/claude-desktop-config.json`; no build needed — `@atlas/shared` ships raw TypeScript, so `node dist/index.js` can't load it), does the JSON-RPC handshake, and checks `tools/list` against the 13 tools `src/tools/*.ts` register. With `LIVE_API=1` it also round-trips the **read-only** tools against a running API: `listProjects` → `getProject` (checks `repos`), `crud_agent op=search` → `op=get`, `search_item` → `get_item`. It never writes, so pointing it at a dev stack with real data is safe.
 
 ```bash
 # Tool surface only — no API needed
@@ -86,19 +86,21 @@ Non-zero exit means the handshake, the tool surface, or a tool call failed. A to
 |---|---|---|
 | `ATLAS_API_BASE` | `http://127.0.0.1:4301` | Where the MCP tools send their HTTP calls |
 | `ATLAS_MCP_TIMEOUT_MS` | `15000` | Per-API-request timeout in ms |
+| `ATLAS_MCP_TOKEN` | _(empty)_ | Sent as `X-Atlas-Token` on writes; must match the API's `ATLAS_MCP_TOKEN` (root `.env`) or every write returns 401. The smoke test only reads, so it doesn't need it |
 
 ---
 
 ## Wiring into a real AI client
 
-Sample config at `packages/mcp/examples/claude-desktop-config.json`. Replace `<absolute-path-to-repo>` with your local repo path. After restarting the AI client (Claude Desktop / Claude Code / Cursor), the 10 tools appear in its tool picker.
+Sample config at `packages/mcp/examples/claude-desktop-config.json`. Replace `<absolute-path-to-repo>` with your local repo path. After restarting the AI client (Claude Desktop / Claude Code / Cursor), the 13 tools appear in its tool picker. Set `ATLAS_MCP_TOKEN` in its `env` block for writes.
 
 ---
 
 ## Common gotchas
 
 - **Tools list is empty / Connect fails in Inspector** → the Inspector was pointed at `dist/index.js`; it can't load `@atlas/shared`'s TypeScript. Use `node --import tsx packages/mcp/src/index.ts`.
+- **Every write errors with `[atlas-api-401]`** → `ATLAS_MCP_TOKEN` is unset or doesn't match the API's.
 - **Every tool call errors with `fetch failed` or `ECONNREFUSED 127.0.0.1:4301`** → `@atlas/api` isn't running.
 - **Port already in use** → use the `CLIENT_PORT` / `SERVER_PORT` env-var override shown above.
 - **Inspector opens, but server log says nothing on stdout** → that is correct. The server writes JSON-RPC to stdout (consumed by the transport) and all diagnostics to stderr. `console.log` would corrupt the stream.
-- **`list_projects` returns an empty array** → your local DB has no seeded projects, not an MCP error. Check the `atlas_open` database on `localhost:5600`.
+- **`listProjects` returns an empty array** → your local DB has no seeded projects, not an MCP error. Check the `atlas_open` database on `localhost:5600`.

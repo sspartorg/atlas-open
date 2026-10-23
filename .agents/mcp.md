@@ -1,164 +1,117 @@
-# `@atlas/mcp` â€” MCP server for agent + item operations
+# `@atlas/mcp` — MCP server for agent + item operations
 
 The `@atlas/mcp` package exposes the Atlas tool surface to MCP clients
-(Claude Code, Cursor, Claude Desktop). It has **two** transports:
+(Claude Code, Cursor, Claude Desktop, and the CLI agents Atlas spawns). Both
+transports register the same tools (`createServer()` → `registerAllTools()`):
 
-- **HTTP (recommended, single-entry config)** â€” hosted in-process by
-  `@atlas/api` on the fixed loopback port `127.0.0.1:4600`. Boot path:
-  `packages/api/src/plugins/mcp-host.ts` â†’ `packages/mcp/src/http-handler.ts`.
-  One entry in `~/.claude.json` (`atlas` â†’ `url: http://127.0.0.1:4600/mcp`)
-  serves both the dev (`pnpm dev`) and prod (`pnpm prod`) local stacks â€”
-  whichever is currently running owns the port.
-- **stdio (legacy / standalone)** â€” `packages/mcp/src/index.ts`. AI clients
-  spawn `node packages/mcp/dist/index.js` and pass `ATLAS_API_BASE` as an
-  env var. Kept for CI, sandbox testing, and environments where the API
-  process can't host the MCP listener.
+- **HTTP (recommended)** — hosted in-process by `@atlas/api` on loopback
+  `127.0.0.1:4600/mcp` (`ATLAS_MCP_PORT` overrides). Boot path:
+  `packages/api/src/plugins/mcp-host.ts` → `packages/mcp/src/http-handler.ts`.
+  One `~/.claude.json` entry serves whichever local stack (dev or prod) is up.
+- **stdio (standalone)** — `packages/mcp/src/index.ts`, run from source through
+  tsx (`pnpm --filter @atlas/mcp start`, or the `node --import <tsx loader>
+  src/index.ts` line in `packages/mcp/examples/claude-desktop-config.json`).
+  There is no usable `dist/` entry: `@atlas/shared` ships raw TypeScript.
 
-The server itself holds **no state** and touches **no database**. It is a thin
-tool layer that calls `@atlas/api` over HTTP â€” at `http://127.0.0.1:4301`
-(dev) or `http://127.0.0.1:4301` (prod), driven by whichever API process is
-hosting it.
+The server holds **no state** and touches **no database**. It is a thin tool
+layer over `@atlas/api` REST routes — `http://127.0.0.1:4301` (dev) or
+`http://127.0.0.1:5301` (prod).
 
 ---
 
-## Why this package exists
+## Tool surface — 13 tools in 5 groups
 
-When the Owner or an agent runs a task, the AI client needs both **context**
-(the parent Task, sibling sub-tasks, related comments) and **write access** (file
-a sub-task, transition a Task, reply with context). The MCP server gives the
-model a tool surface to pull exactly the slice of context it needs and apply
-mutations through the same audited API path the UI uses.
+Registrations live in `packages/mcp/src/tools/<group>.ts` (`<GROUP>_TOOLS`
+arrays), concatenated in `registrations.ts` (`ALL_TOOL_REGISTRATIONS`). The
+API's `services/tool-catalog-sync.ts` copies name / group / description into
+`tool_catalog` at boot, which the in-app **MCP Tools** page reads
+(`GET /api/tool-catalog`) — one source, no drift. Route-level detail is in
+`.agents/api-surface.md` → **MCP tool catalogue**.
 
-Guardrails and auto-fetch schedules are deliberately **not** on the MCP
-surface â€” both are one-time Owner setup (the workspace constitution and
-project cron cadence), and exposing them to agents risks self-modification
-of the very rules that bind them. Guardrails are still applied to every
-agent run via the constitution baked into the system prompt by
-`buildConstitutionMarkdown()` in `packages/api/src/services/prompt-builder.ts`.
+| Group | Tool | Ops |
+|---|---|---|
+| AGENTS | `crud_agent` | `op`: search \| get \| create \| update \| delete. Strict `payload` declaring the API's writable fields (incl. `effort`, `kind_slug`, `settings_json`; `memory_cadence` update-only). Delete cascades prompt versions, checklists, memory, tests and agent runs |
+| AGENTS | `agent_memory` | `op`: get \| update (`mode`: replace \| append) |
+| AGENTS | `marketplace_agent` | `op`: search (filters `query`, `category`, `kind_slug` — the shared `AgentKindSlugSchema` — `limit`) \| get |
+| ITEMS | `search_item` | FTS over title + description; `top_k` 1-20 (default 10, sent as `limit`); a query under 2 chars returns `[]` |
+| ITEMS | `create_item` | `issue_type`: task \| sub_task; `payload` is a per-kind strict union (task: `project_id`, `title`, …, `repo_ids`; sub-task: `task_id`, `title`, …, `status`), re-checked against `issue_type` in the handler. No assignee |
+| ITEMS | `get_item` | Full envelope: item + parent / sub-tasks + project + `repos` + comments + related_links + external_links + activity + agents |
+| ITEMS | `update_item` | `action`: patch_fields \| change_status \| add_comment \| add_link \| remove_link \| remove_history |
+| ITEMS | `delete_item` | Deleting a Task deletes its sub-tasks |
+| PROJECTS | `listProjects` | Project rows (no git fields) |
+| PROJECTS | `getProject` | Project + its `repos` (`GET /api/projects/:id/repos`) |
+| REMINDERS | `crud_reminder` | `op`: create \| update \| cancel \| pause \| resume \| snooze (`minutes`) |
+| REMINDERS | `search_reminder` | Optional `status`, `channel`, `since` |
+| NOTIFICATIONS | `sendExternalNotification` | Held through quiet hours, event-key toggle applies; logged in the Notification Log, never the in-app feed. Returns `{ok, sent, held, notification_id, external_status}` |
 
----
+### What agents cannot do through MCP
 
-## Live tool catalogue
+Agents never route work, commit, push or record PRs. So there is no MCP op to
+assign an item (`update_item` `assign` was removed, and `create_item` takes no
+`assignee_agent_id`), to attach or remove external links (`add_external_link`
+/ `remove_external_link` removed), or to set `pr_url` / `worktree_branch`
+(removed from `patch_fields`). The Owner assigns in the UI; the Task run
+commits, pushes, opens the PR and records it. `change_status` stays, but never
+sends `?override` (the status-machine override is the Owner's escape hatch in
+the web UI), and the API answers 409 while a running Task run holds the Task
+(`services/workflow-lock.ts`) — the agent reports via its `atlas-outcome` block.
 
-The authoritative tool list â€” name, route, group, sort_order â€” lives in
-`.agents/api-surface.md` under the **MCP tool catalogue** section. The MCP
-server registers tools from `packages/mcp/src/registrations.ts`
-(`ALL_TOOL_REGISTRATIONS`); the API's `services/tool-catalog-sync.ts` projects
-the same list into the Allowed Tools picker (A06 â€” one source, no drift).
+Also not exposed: guardrails (workspace + project), auto-fetch schedules,
+project lifecycle, settings, model registry, comment edit, run spawning.
+Guardrails reach agents through the constitution (`buildConstitutionMarkdown()`
+in `services/prompt-builder.ts`), not MCP.
 
-Current surface (consolidation 2026-07-01): **13 tools registered**, all in
-the picker. The previous 35-tool surface was collapsed into enum-parameterized
-tools so low-context CLIs (Copilot CLI, Gemini, anything without semantic tool
-search) pay a much smaller schema-load tax per prompt.
-
-| Group | Count | File | Tools |
-|---|---|---|---|
-| AGENTS | 3 | `tools/agents.ts` | `crud_agent` (op: search\|get\|create\|update\|delete) + `agent_memory` (op: get\|update) + `marketplace_agent` (op: search\|get) |
-| ITEMS | 5 | `tools/items.ts` | `search_item` + `create_item` (issue_type: task\|sub_task; a sub-task needs `payload.task_id`) + `get_item` (always full envelope: the item under `task` / `sub_task` + parent `task` or child `sub_tasks` + project + comments + related_links + external_links + activity) + `update_item` (action: patch_fields\|change_status\|assign\|add_comment\|add_link\|remove_link\|add_external_link\|remove_external_link) + `delete_item` |
-| PROJECTS | 2 | `tools/projects.ts` | `listProjects`, `getProject` |
-| REMINDERS | 2 | `tools/reminders.ts` | `crud_reminder` (op: create\|update\|cancel\|pause\|resume\|snooze — snooze takes `minutes`) + `search_reminder` (optional filters: status\|channel\|since) |
-| NOTIFICATIONS | 1 | `tools/notifications.ts` | `sendExternalNotification` (A09) — held through quiet hours (sent when the window ends), event-key toggle applies (also to a held send), logged in the Notification Log as `mcp_external` but never in the in-app feed. Returns `{ok, sent, held, notification_id, external_status}` |
-
-Deleted outright in the consolidation: `listAgentRuns` (zero agent-prompt
-refs; the REST route `GET /api/agents/:id/runs` stays for the Activity tab).
-The legacy per-action tool names (`listAgents`, `addCommentToItem`,
-`transitionItemStatus`, `assignItem`, `updateItem`, etc.) are all replaced
-by the consolidated tools above.
-
-Adding a new tool = one entry in the relevant `<GROUP>_TOOLS` array; the
-picker + MCP server both pick it up on the next boot.
-
----
-
-## Transport
-
-Two transports, share the same tool registrations (`registerAllTools()`):
-
-### HTTP (recommended)
-
-- Listener: `127.0.0.1:4600/mcp`, bound by the API process via
-  `startMcpHost()` (`packages/api/src/plugins/mcp-host.ts`).
-- Uses `StreamableHTTPServerTransport` from
-  `@modelcontextprotocol/sdk/server/streamableHttp.js` in stateless mode
-  (`sessionIdGenerator: undefined`) â€” each request is independent, no
-  in-memory session table to leak across API restarts.
-- **First-boot-wins.** Whichever API instance (dev or prod) calls
-  `listen(4600)` first owns the port. The second instance catches
-  `EADDRINUSE`, logs `[mcp] port 4600 in use â€” running API-only`, and
-  serves its own `/api/*` traffic without MCP. To hand MCP over, stop the
-  owning instance and start the other.
-- Opt-out via `ATLAS_HOST_MCP=false` on a given instance â€” useful when
-  running a second stack headless or in CI.
-- `ATLAS_MCP_PORT` moves the listener off 4600 for a second stack that needs its own MCP (a test stack whose agents must reach its own database). Item-attached agent runs receive the port via `--mcp-config`; runs using the Owner's `~/.claude.json` still reach 4600.
-- Loopback only. No LAN exposure regardless of `ATLAS_LAN_ACCESS`.
-- MCP â†’ API loopback HTTP still carries `X-Atlas-Token` per the existing
-  `api-client.ts`; the token is the `ATLAS_MCP_TOKEN` from `.env` /
-  `.env.prod` of the owning stack.
-
-### stdio (legacy)
-
-- `packages/mcp/src/index.ts` + `StdioServerTransport`. AI client spawns it
-  as a child process.
-- Diagnostic logs go to `stderr` (the stdio transport owns `stdout`).
-  `console.log` inside the server would corrupt the JSON-RPC stream â€” code
-  uses `console.error` instead.
-- The `ATLAS_API_BASE` env var pins the API it talks to. Without the
-  HTTP transport's "follow whichever stack is up" behaviour, switching
-  between dev and prod under stdio requires a config edit.
+`crud_agent` create / update / delete are not caller-checked by the API — the
+Owner uses them from Claude Desktop. Agents are told not to by the
+constitution's "Forbidden Atlas MCP tool calls" clause (`FORBIDDEN_TOOLS_SECTION`).
 
 ---
 
-## Patterns the tool surface supports
+## Identity and attribution
 
-The MCP layer spans read + write. Patterns external AI clients run against Atlas:
+There is no bound agent identity. The in-process HTTP host serves every agent
+on one port, and nothing sets a per-agent env var. Item tools take an
+optional, self-declared `agent_id` argument:
 
-### An agent working its Task
-`get_item { issue_type: 'task', id }` — returns the Task + project + its
-`sub_tasks` + comments + related_links + external_links + activity in one
-round trip (the envelope is *always* the full payload; there is no partial
-get) → `search_item { query }` (substring on title / description) to spot
-prior duplicates → `update_item { action: 'add_comment', ... }` for any note
-worth keeping. The agent does not move state or record the PR: it ends with
-the `atlas-outcome` block, and Atlas commits, pushes and opens the PR
-(ADR 0015).
+- `create_item`, `patch_fields`, `add_link`, `remove_link`, `remove_history`
+  send it as `x-atlas-agent-id`; the API (`services/request-actor.ts`) keeps it
+  only if it names a real agent, else attributes the write to the Owner.
+  On create it is also the default `reporter_agent_id`.
+- `change_status` sends it as `requested_by_agent_id`.
+- `add_comment` always posts `author: 'agent'` (an MCP caller can't prove it
+  is the Owner) with `agent_id`; when that is null, `commentsService.create`
+  attributes the comment to the item's live run, if any.
 
-### Owner-led item maintenance via Claude
-Every mutation is one `update_item` call with an `action` discriminator:
-- `action: 'patch_fields'` for description / priority / spec edits (per-type
-  Zod validation on the API route). Tasks also accept `spec_md`, `pr_url`,
-  `reporter_agent_id` and `worktree_branch` (`atlas/<role>/<id>`); the
-  sub-task route's `.strict()` schema rejects them.
-- `action: 'change_status'` for status transitions (with optional `override`
-  for Owner corrections).
-- `action: 'assign'` to reassign (active-agent guard on the API).
-- Both are Owner-facing: an agent inside a Task run must not use them to
-  route work. The API returns 409 while a run holds the item, and the
-  tool description tells agents to report via the `atlas-outcome` block.
-- `action: 'add_link' / 'remove_link'` for `depends_on` / `relates_to` /
-  `tested_by` graph edits (optional `agent_id` credits the link event).
-- `action: 'add_external_link' / 'remove_external_link'` for off-platform
-  refs (GitHub PR URLs today).
-- `delete_item` for outright removal (deleting a Task drops its sub-tasks).
+Catalog prompts tell each agent to pass its own id.
 
-### Search-driven traversal
-`search_item { query }` â†’ `get_item` on the top hit. The envelope's
-`description` field on each search result is populated, so callers can do
-follow-up substring checks for dedup without a second tool call.
+---
 
-### Replying with context
-`get_item { issue_type, id }` returns the full envelope (comments thread,
-linked items, recent activity). Compose your reply with that context, then
-`update_item { action: 'add_comment', body, ... }` to post.
+## Transport details
 
-### Agent maintenance
-`crud_agent { op: 'search' }` / `{ op: 'get', id }` for read paths;
-`{ op: 'create' / 'update' / 'delete' }` are reserved for Owner via the UI
-and forbidden in agent prompts (constitution `FORBIDDEN_TOOLS_SECTION`).
-`get` returns `{ agent, checklists }`. Schedules, handoff rules and git flags
-are not agent fields.
-`agent_memory { op: 'get' / 'update' }` is the procedural memory channel.
-`marketplace_agent { op: 'search' / 'get' }` for catalog discovery + install
-chains.
+### HTTP
+
+- `StreamableHTTPServerTransport`, stateless: a fresh server + transport per
+  request (the SDK's stateless transport can't be reused).
+- **First boot wins** port 4600; a second stack logs that the port is in use
+  and runs API-only. `ATLAS_HOST_MCP=false` disables the listener;
+  `ATLAS_MCP_PORT` moves it (a test stack that must reach its own DB).
+- Loopback only, 1 MiB body cap. The host passes the stack's
+  `ATLAS_MCP_TOKEN` into the MCP config, so MCP → API writes carry
+  `X-Atlas-Token` and the client needs no auth header.
+
+### stdio
+
+- Diagnostics go to stderr; `console.log` would corrupt the JSON-RPC stream.
+- `ATLAS_API_BASE` pins the API — switching dev ↔ prod means editing the
+  client config. Set `ATLAS_MCP_TOKEN` for writes.
+
+### How agent runs reach it
+
+Item-attached Claude-dialect runs are isolated from the Owner's config
+(`claudeIsolationArgs` in `services/agent-runner.ts`): `--setting-sources
+project,local --strict-mcp-config --mcp-config '{"mcpServers":{"atlas":{"type":"http","url":"http://127.0.0.1:4600/mcp"}}}'`
+(the URL follows `ATLAS_MCP_PORT`). Runs with no item (the scout agents)
+keep the Owner's MCP servers. `allowedToolsFor()` grants `mcp__atlas`.
 
 ---
 
@@ -166,145 +119,45 @@ chains.
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `ATLAS_API_BASE` | `http://127.0.0.1:4301` | Base URL of the `@atlas/api` server |
-| `ATLAS_MCP_TIMEOUT_MS` | `15000` | Per-request HTTP timeout |
-| `ATLAS_MCP_TOKEN` | _(generated at API boot)_ | Sent as `X-Atlas-Token` on every non-GET request. The API's `requireMcpToken` preHandler rejects mutating calls when this header is missing on protected routes. |
+| `ATLAS_API_BASE` | `http://127.0.0.1:4301` | Base URL of `@atlas/api` |
+| `ATLAS_MCP_TIMEOUT_MS` | `15000` | Per-request HTTP timeout (min 1000) |
+| `ATLAS_MCP_TOKEN` | _(empty)_ | Sent as `X-Atlas-Token` on every non-GET request; must match the API's (generated into the root `.env` at first boot). Empty → writes 401 unless the API runs open |
 
-The MCP server expects the API server to already be running. If the API is
-down, individual tool calls return an error carrying the HTTP status and a
-response snippet.
+If the API is down, a tool call returns the error with the HTTP status and a
+response snippet (4xx prefixed `[atlas-api-NNN]`).
 
 ---
 
 ## Registering with an AI client
 
-### HTTP (recommended)
-
-Start the API at least once (`pnpm dev` or `pnpm prod`) so port 4600 is live.
-Then add ONE entry to `~/.claude.json` â€” never edit it again:
+HTTP (start the API once so 4600 is live):
 
 ```json
-{
-  "mcpServers": {
-    "atlas": {
-      "url": "http://127.0.0.1:4600/mcp"
-    }
-  }
-}
+{ "mcpServers": { "atlas": { "url": "http://127.0.0.1:4600/mcp" } } }
 ```
 
-Restart Claude Code. All 31 picker tools appear in the tool list. The same
-config follows whichever stack you have running: stop dev, start prod, and
-the next MCP call lands on prod without touching `~/.claude.json`.
-
-### stdio (legacy)
-
-Build the package: `pnpm --filter @atlas/mcp build`. Entry point is
-`packages/mcp/dist/index.js`. Example config:
-
-```json
-{
-  "mcpServers": {
-    "atlas": {
-      "command": "node",
-      "args": ["<absolute-path-to-repo>/packages/mcp/dist/index.js"],
-      "env": { "ATLAS_API_BASE": "http://127.0.0.1:4301" }
-    }
-  }
-}
-```
-
-Switch the env var to `http://127.0.0.1:5301` (prod) by editing this file
-and restarting the client â€” stdio doesn't auto-follow the running stack.
-
----
-
-## How agent runs see this server
-
-The `@atlas/api` server **does not** pass `--mcp-config` or `--tools` when it
-spawns Claude / Copilot CLI for an agent run. The spawned process inherits
-Owner's user-level MCP config â€” whatever Owner has connected via
-`claude mcp add` (Atlas + Atlassian + Playwright + anything else).
-
-To connect Atlas at the user level:
-
-```bash
-claude mcp add atlas node <repo>/packages/mcp/dist/index.js
-```
-
-After that, every spawned agent run can call Atlas MCP tools alongside any
-other MCP server Owner has connected. There is no per-agent allowlist â€” the
-prompt is the safety boundary, and the system constitution
-(`buildConstitutionMarkdown` in `packages/api/src/services/prompt-builder.ts`)
-carries an explicit "Forbidden Atlas MCP tool calls" clause that forbids
-`crud_agent` with `op` in `{create, update, delete}` and any project /
-guardrail / global-settings mutation.
-
-**Attribution.** The in-process MCP host has no bound agent id, so a write
-is credited to an agent only when the call passes `agent_id`; catalog prompts
-tell the agent to pass its own id on every `create_item` / `update_item` call. `create_item` (top-level `agent_id`) and
-`update_item` `patch_fields` / `add_link` / `remove_link` / `add_external_link` forward it as
-the `x-atlas-agent-id` header; the create routes credit it as the `created`
-event actor (and default `reporter_agent_id`), the item-link routes as the
-`link_created` / `link_deleted` actor on both endpoints. An id that is not a
-real agent is ignored (Owner attribution). Catalog prompts that create items
-or links (PO Writer, Jira Importer) pass their literal id. `patch_fields`
-field events still carry no actor.
-
-The `tool_catalog` table (read-only directory at `GET /api/tool-catalog`)
-still lists every Atlas MCP tool the server exposes. It's informational â€”
-useful for discoverability â€” but no longer drives enforcement.
+stdio: see `packages/mcp/examples/claude-desktop-config.json` and
+`.agents/testing-mcp.md`.
 
 ---
 
 ## Hard rules (from `packages/mcp/AGENTS.md`)
 
-- No direct DB access. The package never imports `better-sqlite3` or `pg`. All data flows through `@atlas/api`.
-- No imports from `@atlas/api` or `@atlas/web`. The only workspace dep is `@atlas/shared`.
-- No `console.log` â€” corrupts JSON-RPC. Use `console.error` for diagnostics.
-- No HTTP server, no port binding. Transport is stdio only.
-- Writes go through API routes that already validate via the shared Zod schemas; the MCP layer does not duplicate validation logic, only documents the writable fields per tool.
+- No DB access, no imports from `@atlas/api` / `@atlas/web`; only `@atlas/shared`.
+- Every input schema is Zod; descriptions say exactly what the handler does.
+- No `console.log`. No retries, caching or circuit breakers.
 
 ---
 
-## Tool consolidation (2026-07-01)
+## History
 
-The 35-tool surface (audited 2026-05-28) was collapsed to **13 tools** to cut
-the upfront schema-load cost in low-context CLIs (Copilot CLI, Gemini, etc.)
-by ~63%. Mapping:
-
-- `listAgents` / `getAgent` / `createAgent` / `updateAgent` / `deleteAgent` â†’ `crud_agent { op }`
-- `getAgentMemory` / `updateAgentMemory` â†’ `agent_memory { op }`
-- `search_marketplace_agents` / `get_full_marketplace_agent` â†’ `marketplace_agent { op }`
-- `listAgentRuns` â†’ **deleted** (REST route `GET /api/agents/:id/runs` stays for the Activity tab)
-- `searchItems` â†’ `search_item`
-- `createEpic` / `createStory` / `createSubTask` / `createSubBug` / `createBug` â†’ `create_item { issue_type, payload }` (kinds narrowed to `task` / `sub_task` by ADR 0015)
-- `getEpic` / `getItemFull` / `listComments` / `listItemLinks` / `listItemExternalLinks` / `replyToItem` (read-context mode) â†’ `get_item` (always full envelope)
-- `updateItem` / `transitionItemStatus` / `assignItem` / `addCommentToItem` / `replyToItem` (write mode) / `createItemLink` / `deleteItemLink` / `createItemExternalLink` / `deleteItemExternalLink` â†’ `update_item { action }`
-- `deleteItem` â†’ `delete_item`
-- `setReminder` / `updateReminder` / `cancelReminder` â†’ `crud_reminder { op }`
-- `listReminders` â†’ `search_reminder { status?, channel?, since? }`
-
-Unchanged: `listProjects`, `getProject`, `sendExternalNotification`.
-
-Marketplace catalog prompts were rewritten to use the new surface; each
-agent's `manifest.json` version was bumped so installed Owners see one
-Accept-Upgrade banner per agent. The constitution's `FORBIDDEN_TOOLS_SECTION`
-was updated to forbid `crud_agent` actions instead of the now-deleted
-per-action tool names.
-
-## Removed from MCP surface (2026-05-28)
-
-- **Workspace guardrails** (`listGuardrails`, `createGuardrail`, `updateGuardrail`, `deleteGuardrail`) â€” removed. Guardrails are the constitution that binds every agent; exposing CRUD to the same agents lets a hallucination or prompt injection erase the safety rules. Guardrails continue to flow into every agent prompt via `buildConstitutionMarkdown()`; REST routes (`/api/guardrails*`) stay for the web UI.
-- **Project guardrails** (`listProjectGuardrails`, `createProjectGuardrail`, `updateProjectGuardrail`, `toggleProjectGuardrail`, `deleteProjectGuardrail`) â€” removed for the same reason; per-project rules are Owner-curated in the UI.
-- **Auto-fetch schedules** (`listSchedules`, `upsertProjectSchedule`, `deleteProjectSchedule`, `triggerProjectAutoFetch`) â€” removed. Schedules are one-time project setup; agents have no business reshaping their own cron or firing manual auto-fetches. REST routes (`/api/schedules*`, `/api/projects/:id/schedule*`) stay for the web UI.
-
-## What's deferred (C03 scope boundary, 2026-05-27)
-
-- **Comment edit** â€” `PATCH /api/comments/:id` exists but no MCP tool; audit-trail concern. Revisit if Owner asks.
-- **Run spawning** â€” `POST /api/run` exists but no MCP tool; a Task runs when its assigned agent is dispatched, not through ad-hoc MCP spawns.
-- **Project lifecycle** â€” clone / connect / reclone / delete project are onboarding flows; stay Owner-only.
-- **Workspace settings**, **model registry**, **notification settings** â€” explicitly excluded by `requirments_new.md` L19.
-
-MCP `resources/*` (subscribable feeds) and HTTP transport remain deferred â€”
-the stdio child-process model serves every current consumer.
+- **2026-07-01 consolidation** — the 35-tool surface became 13 enum-parameterized
+  tools (e.g. `listAgents` … `deleteAgent` → `crud_agent`, `createItemLink` /
+  `assignItem` / … → `update_item`, `setReminder` → `crud_reminder`);
+  `listAgentRuns` was deleted.
+- **2026-05-28** — guardrail and schedule tools removed (Owner-only setup).
+- **2026-10 audit** — descriptions and schemas aligned with handlers; routing
+  and PR ops removed (`assign`, `add_external_link`, `remove_external_link`,
+  `pr_url`, `worktree_branch`, create-time assignee); `override`, comment
+  `author` and memory `source` params dropped; `search_item` now honours
+  `top_k`; `get_item` / `getProject` carry the project's repos.

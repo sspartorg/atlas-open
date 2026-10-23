@@ -2,51 +2,52 @@
 
 ## Responsibility
 
-Standalone MCP (Model Context Protocol) server. Owns:
-- A stdio JSON-RPC server that AI clients (Claude Code, Cursor, Claude Desktop) spawn as a child process.
-- A small **agent authoring** tool surface: list / get / create / update `agents`. The Owner connects this MCP to Claude to let Claude rewrite agent prompts, checklists and memory on their behalf (running a Task is not an MCP tool: assigning an agent to it queues it) — instead of hand-editing the web UI.
+MCP (Model Context Protocol) server exposing Atlas to AI clients: the Owner's
+Claude Desktop / Claude Code / Cursor, and the CLI agents Atlas spawns for Task
+runs. **13 tools in 5 groups** (AGENTS, ITEMS, PROJECTS, REMINDERS,
+NOTIFICATIONS) — the full list and per-op contract is in `.agents/mcp.md`.
 
-This package does **not** open a network port, does **not** access Postgres directly, and does **not** spawn agents. It is a thin tool layer that calls `@atlas/api` over HTTP.
+Two transports over the same `createServer()`:
+- **stdio** — `src/index.ts`, spawned by a client as a child process.
+- **HTTP** — `src/http-handler.ts`, mounted by `@atlas/api`
+  (`packages/api/src/plugins/mcp-host.ts`) on `127.0.0.1:4600/mcp`.
+
+The package does **not** access Postgres and does **not** spawn agents. It is a
+thin tool layer that calls `@atlas/api` over HTTP.
 
 ---
 
-## File Structure Rules
+## File Structure
 
 ```
 src/
-├── index.ts              → Entry point. Instantiate StdioServerTransport and start the server.
-├── server.ts             → createServer(): wires the MCP SDK with the tool registry.
-├── config.ts             → Reads ATLAS_API_BASE, ATLAS_MCP_TIMEOUT_MS, ATLAS_MCP_TOKEN from env.
-├── api-client.ts         → Thin typed fetch wrapper. The ONLY file that knows about API URLs.
+├── index.ts          → stdio entry: StdioServerTransport + createServer().
+├── http-handler.ts   → HTTP entry: stateless StreamableHTTPServerTransport, one server per request.
+├── server.ts         → createServer(config): McpServer + api client + registerAllTools().
+├── config.ts         → Reads ATLAS_API_BASE, ATLAS_MCP_TIMEOUT_MS, ATLAS_MCP_TOKEN.
+├── api-client.ts     → Typed fetch wrapper. The ONLY file that knows API URLs.
+├── registrations.ts  → ToolRegistration type + ALL_TOOL_REGISTRATIONS (read by the API's tool-catalog-sync).
 └── tools/
-    ├── index.ts          → registerAllTools(server): registers every tool.
-    └── agents.ts         → The four agent-authoring tools.
+    ├── index.ts         → registerAllTools(server, client).
+    ├── agents.ts        → crud_agent, agent_memory, marketplace_agent.
+    ├── items.ts         → search_item, create_item, get_item, update_item, delete_item.
+    ├── projects.ts      → listProjects, getProject.
+    ├── reminders.ts     → crud_reminder, search_reminder.
+    └── notifications.ts → sendExternalNotification.
+scripts/smoke-test.mjs   → stdio JSON-RPC smoke test (EXPECTED_TOOLS must match the registrations).
 ```
 
 ---
 
 ## Hard Rules
 
-- **No direct DB access.** This package never imports a DB driver. All data flows through `@atlas/api`. Enforced by AGENTS.md root rule "DB access is ONLY from packages/api".
-- **No imports from `@atlas/api` or `@atlas/web`.** The only workspace dependency is `@atlas/shared` (types + status machine + Zod schemas).
-- **All tool input schemas are Zod schemas.** Validate at the tool boundary. Return helpful errors on bad input.
-- **Tool responses are JSON-serialized via `JSON.stringify`** and returned in the `content[0].text` field per MCP spec. Don't invent new content shapes.
-- **No stdout writes outside the MCP transport.** `console.log` corrupts the JSON-RPC stream. Use `console.error` for any diagnostic logging.
-- **Writes go through `X-Atlas-Token`.** Every POST/PATCH request sends `X-Atlas-Token: <ATLAS_MCP_TOKEN>`. The API rejects writes with 401 if the header is missing or mismatched. GETs are unauthenticated (same as before).
-- **No delete tool.** The API still exposes `DELETE /api/agents/:id` for the web UI list page, but the MCP layer deliberately does not surface it. Removing agents is an Owner-only action via the UI.
-
----
-
-## Tool Naming
-
-- camelCase verb-noun for agent-authoring tools: `listAgents`, `getAgent`, `createAgent`, `updateAgent`. (The earlier snake_case read-only tools — `list_epics`, `get_epic`, `search_items`, etc. — were removed.)
-- The `epic.read` / `story.write` tool-catalog names in the database are **capability grants for Atlas's own agent runner** and are a separate abstraction — do not reuse them as MCP tool names.
-
----
-
-## What NOT to Do
-
-- No HTTP server. No port binding. Transport is stdio only.
-- No `console.log` — it corrupts stdio JSON-RPC. Use `console.error` for diagnostics.
-- No retries, no caching, no circuit breakers. If the API is down, return the error to the client.
-- No delete capability. See above.
+- **No direct DB access**, no imports from `@atlas/api` or `@atlas/web`. The only workspace dependency is `@atlas/shared`; reuse its Zod schemas/enums instead of re-declaring them.
+- **Descriptions and schemas must match the handler exactly.** Every documented param is in the input schema and used; every returned field named in a description is really returned. Payload objects are `.strict()` so a typo is a validation error, not a silent drop.
+- **The SDK needs an object-shaped input schema** (`ZodRawShape`). Per-kind shapes go on a nested field (see `create_item`'s `payload` union) and the handler re-checks the kind.
+- **Agents never route work or record PRs.** No assign op, no create-time assignee, no external-link writes, no `pr_url` / `worktree_branch`. Never send `?override` on status changes. The Task run commits, pushes and opens the PR; agents never commit or push.
+- **Identity is self-declared**: an optional `agent_id` argument forwarded as `x-atlas-agent-id` (or `requested_by_agent_id` / comment `agent_id`). There is no bound identity — don't document one.
+- **Responses** are `JSON.stringify`'d into `content[0].text`.
+- **Writes carry `X-Atlas-Token: <ATLAS_MCP_TOKEN>`**; GETs don't.
+- **No `console.log`** — it corrupts stdio JSON-RPC. Use `console.error`.
+- **No retries, caching or circuit breakers.** If the API is down, return the error.
+- Changing a tool or op → update `.agents/mcp.md`, the MCP section of `.agents/api-surface.md`, and `scripts/smoke-test.mjs` if the tool list changes.

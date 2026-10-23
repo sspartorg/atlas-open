@@ -7,7 +7,6 @@ import {
     IssueStatusSchema,
     IssueTypeSchema,
     ItemLabelsOptionalSchema,
-    WORKTREE_BRANCH_RE_SOURCE,
 } from '@atlas/shared';
 import type { IssueType } from '@atlas/shared';
 import type { ToolRegistration } from '../registrations.js';
@@ -18,57 +17,56 @@ function toToolResult(payload: unknown): CallToolResult {
     };
 }
 
-// Bound agent identity (Batch-5 audit follow-up). When the agent-runner
-// spawns a CLI + MCP subshell it MUST set `ATLAS_AGENT_ID=<slug>` in the
-// child env. Every write-time audit-log attribution then uses this bound
-// id, ignoring any caller-supplied `agent_id` in the tool args. This
-// closes the impersonation gap where a malicious/buggy agent could stamp
-// activity rows with another agent's chip. Read fresh on every call so
-// tests can set/clear the env between cases; the cost is a property read.
-function resolveAgentId(callerAgentId: string | undefined): string | null {
-    const bound = (process.env['ATLAS_AGENT_ID'] ?? '').trim();
-    if (bound) return bound;
-    // Degraded / backward-compat: no env set → fall back to caller-supplied
-    // value. The audit-runner rollout will set the env; this branch keeps
-    // existing standalone-MCP invocations working until then.
-    return callerAgentId ?? null;
-}
+// Identity is self-declared: the optional `agent_id` tool argument, forwarded
+// as `x-atlas-agent-id` (or `requested_by_agent_id` / the comment's
+// `agent_id`). There is no bound identity — the API's in-process MCP host
+// (packages/api/src/plugins/mcp-host.ts) serves every agent on one port, and
+// nothing sets a per-agent env var. The API drops ids that aren't real agents,
+// and `commentsService.create` attributes an id-less agent comment to the
+// item's live run.
 
 // Tool consolidation 2026-07: the 17-tool items surface collapsed into FIVE:
 //   * search_item  — full-text search
 //   * create_item  — issue_type discriminator (task / sub_task)
-//   * get_item     — always returns full envelope (item + parent + project + children + comments + related_links + external_links + activity); replaces getEpic / getItemFull / listComments / listItemLinks / listItemExternalLinks / replyToItem's read-context mode
-//   * update_item  — `action` discriminator (replaces updateItem / transitionItemStatus / assignItem / addCommentToItem / replyToItem's write mode / createItemLink / deleteItemLink / createItemExternalLink / deleteItemExternalLink)
+//   * get_item     — full envelope (item + parent/children + project + repos + comments + links + activity)
+//   * update_item  — `action` discriminator
 //   * delete_item  — issue_type + id
+// Agents never route work or record PRs (no assign, no external links, no
+// pr_url / worktree_branch, no assignee at create): the Task run owns those.
 
-const CreateItemPayloadSchema = z
+const RelationTypeSchema = z.enum(['relates_to', 'depends_on', 'tested_by']);
+
+// `.strict()` at the MCP boundary surfaces typos as validation errors instead
+// of forwarding them for the API to reject (or strip).
+const CommonCreateFields = {
+    title: z.string().min(1).max(500),
+    description: z.string().optional(),
+    acceptance_criteria: z.string().optional(),
+    priority: IssuePrioritySchema.optional(),
+    reporter_agent_id: z.string().nullable().optional(),
+    labels: ItemLabelsOptionalSchema,
+};
+
+const CreateTaskPayloadSchema = z
     .object({
-        // Task-only
-        project_id: z.string().min(1).optional(),
-        // Sub-task-only (under its task)
-        task_id: z.string().min(1).optional(),
-        status: IssueStatusSchema.optional(),
-        // Common
-        title: z.string().min(1).max(500),
-        description: z.string().optional(),
-        priority: IssuePrioritySchema.optional(),
-        acceptance_criteria: z.string().optional(),
-        assignee_agent_id: z.string().nullable().optional(),
-        reporter_agent_id: z.string().nullable().optional(),
-        // Free-form labels — cap of 20 labels per item, 40 chars each.
-        // The API accepts labels on every item type; exposing here so
-        // the MCP surface can tag items at create time instead of
-        // needing a follow-up update_item call.
-        labels: ItemLabelsOptionalSchema,
+        project_id: z.string().min(1),
+        ...CommonCreateFields,
+        repo_ids: z.array(z.string().min(1)).max(20).optional(),
     })
-    // The MCP boundary is an untrusted-input surface (arbitrary caller
-    // with the MCP token). `.passthrough()` silently forwarded unknown
-    // keys to the API-side per-type schemas, some of which use `.strip()`
-    // and would silently drop them. `.strict()` here surfaces typos and
-    // future migration-added columns as 400s at the boundary — safer
-    // default. Downstream API schemas remain the source of truth for
-    // which fields ARE writable per issue type.
     .strict();
+
+const CreateSubTaskPayloadSchema = z
+    .object({
+        task_id: z.string().min(1),
+        ...CommonCreateFields,
+        status: IssueStatusSchema.optional(),
+    })
+    .strict();
+
+const CREATE_PAYLOAD_SCHEMAS = {
+    task: CreateTaskPayloadSchema,
+    sub_task: CreateSubTaskPayloadSchema,
+} as const;
 
 const UpdatePatchSchema = z
     .object({
@@ -78,31 +76,32 @@ const UpdatePatchSchema = z
         acceptance_criteria: z.string().optional(),
         // Task-only (UpdateTaskSchema); the sub-task route rejects them.
         spec_md: z.string().nullable().optional(),
-        pr_url: z.string().nullable().optional(),
-        worktree_branch: z.string().regex(new RegExp(WORKTREE_BRANCH_RE_SOURCE)).nullable().optional(),
         reporter_agent_id: z.string().nullable().optional(),
-        // Free-form labels — cap of 20 labels per item, 40 chars each.
-        // Sending `labels` in a patch replaces the full array (matches
-        // API semantics); to append, callers should read via get_item,
-        // merge, and send the full set back.
+        // Full replacement, matching the API.
         labels: ItemLabelsOptionalSchema,
     })
-    // See CreateItemPayloadSchema above — `.strict()` at the MCP boundary
-    // rejects unknown keys instead of silently forwarding them.
     .strict();
+
+type UpdateAction =
+    | 'patch_fields'
+    | 'change_status'
+    | 'add_comment'
+    | 'add_link'
+    | 'remove_link'
+    | 'remove_history';
 
 export const ITEM_TOOLS: ToolRegistration[] = [
     {
         name: 'search_item',
         title: 'Full-text search across items',
         description: [
-            'Postgres tsvector FTS across item titles, descriptions, and spec_md (task / sub_task).',
+            'Postgres full-text search over item titles and descriptions (tasks and sub-tasks; spec_md and comments are not searched). Title matches rank above description matches.',
             '',
-            'Use this for dedup-by-source-tag (substring-check `description` for a tag string) or general keyword lookup. Returns up to 20 ranked items as `[{issue_type, issue_id, title, description, rank}]`.',
+            'Returns up to `top_k` items, best match first, as `[{issue_type, issue_id, title, description, status, project_id, assignee_agent_id, updated_at, rank}]`. A `query` shorter than 2 characters (after trimming) returns `[]`.',
             '',
             'Parameters:',
             '- `query` (required): keyword(s) to search for.',
-            '- `top_k` (optional, 1-20): cap on results returned (the endpoint already caps at 20).',
+            '- `top_k` (optional, 1-20, default 10): how many results to return.',
         ].join('\n'),
         group_name: 'ITEMS',
         sort_order: 20,
@@ -112,43 +111,51 @@ export const ITEM_TOOLS: ToolRegistration[] = [
         },
         handler: async (args, { client }) => {
             const { query, top_k } = args as { query: string; top_k?: number };
-            return toToolResult(await client.searchItems(query, top_k));
+            return toToolResult(await client.searchItems(query, top_k ?? 10));
         },
     },
     {
         name: 'create_item',
         title: 'Create an item (task / sub_task)',
         description: [
-            'Create a new item under its proper parent. `issue_type` selects the kind:',
+            'Create a new item. `issue_type` selects the kind, and `payload` must be that kind\'s shape (unknown keys are rejected):',
             '',
-            "- `issue_type: 'task'` → requires `project_id` + `title` in `payload`. The top-level unit of work; assigning an agent (`assignee_agent_id`) queues it, and that agent runs it end to end.",
-            "- `issue_type: 'sub_task'` → requires `task_id` + `title`. A piece of its Task's work. Optional: `status` (default `draft`).",
+            "- `issue_type: 'task'` → `payload`: `project_id` + `title` required. Optional: `description`, `acceptance_criteria`, `priority` (default `normal`), `reporter_agent_id`, `labels`, `repo_ids` (ids of the project's repos the Task works on, from `getProject` → `repos[].id`; may be omitted when the project has exactly one repo, otherwise the API rejects the create). The Task is created `draft` and unassigned — only the Owner assigns it, which queues it.",
+            "- `issue_type: 'sub_task'` → `payload`: `task_id` (the parent Task) + `title` required. Optional: `description`, `acceptance_criteria`, `priority` (default `normal`), `reporter_agent_id`, `labels`, `status` (default `draft`).",
             '',
-            'Common optional fields: `description`, `acceptance_criteria`, `priority` (default `normal`), `assignee_agent_id`, `reporter_agent_id`, `labels` (array of strings, up to 20 labels / 40 chars each — e.g. `["backend", "qa"]`).',
+            '`labels`: array of strings, up to 20 labels / 40 chars each — e.g. `["backend", "qa"]`.',
             '',
-            'Optional top-level `agent_id` (string, your own agent id): credits the `created` activity event to you and defaults `reporter_agent_id` to you when the payload does not set it. Without it the create is recorded as the Owner.',
+            'Optional top-level `agent_id` (your own agent id): credits the `created` activity event to you and defaults `reporter_agent_id` to you when the payload does not set it. Without it the create is recorded as the Owner.',
+            '',
+            'Returns the created task or sub-task row.',
         ].join('\n'),
         group_name: 'ITEMS',
         sort_order: 21,
         inputSchema: {
             issue_type: IssueTypeSchema,
-            payload: CreateItemPayloadSchema,
+            // The SDK needs an object at the top level, so the per-kind union
+            // lives on `payload`; the handler checks it matches `issue_type`.
+            payload: z.union([CreateTaskPayloadSchema, CreateSubTaskPayloadSchema]),
             agent_id: z.string().min(1).optional(),
         },
         handler: async (args, { client }) => {
             const { issue_type, payload, agent_id } = args as {
                 issue_type: IssueType;
-                payload: Record<string, unknown>;
+                payload: unknown;
                 agent_id?: string;
             };
-            const actor = resolveAgentId(agent_id);
+            const parsed = CREATE_PAYLOAD_SCHEMAS[issue_type].safeParse(payload);
+            if (!parsed.success) {
+                const needs = issue_type === 'task' ? '`project_id`' : '`task_id`';
+                throw new Error(
+                    `create_item: payload is not a valid ${issue_type} payload (it needs ${needs} + \`title\`): ${parsed.error.message}`,
+                );
+            }
+            const actor = agent_id ?? null;
             return toToolResult(
                 issue_type === 'task'
-                    ? await client.createTask(payload as unknown as Parameters<IApiClient['createTask']>[0], actor)
-                    : await client.createSubTask(
-                          payload as unknown as Parameters<IApiClient['createSubTask']>[0],
-                          actor,
-                      ),
+                    ? await client.createTask(parsed.data as z.infer<typeof CreateTaskPayloadSchema>, actor)
+                    : await client.createSubTask(parsed.data as z.infer<typeof CreateSubTaskPayloadSchema>, actor),
             );
         },
     },
@@ -156,18 +163,17 @@ export const ITEM_TOOLS: ToolRegistration[] = [
         name: 'get_item',
         title: 'Read an item with its full context',
         description: [
-            'Fetch the complete payload for an item — everything an agent needs to act in one round-trip:',
+            'Fetch everything about one item in one call. Returns an object with:',
             '',
-            '- the item itself under its kind key: `task` or `sub_task` (title, description, status, assignee, etc.)',
-            '- on a sub-task, `task` is its parent Task; on a task, `sub_tasks` lists its children',
-            '- `project` (id, name, default_branch, git_path…)',
-            '- `comments` — full thread, oldest first',
-            '- `related_links` — every depends_on / relates_to / tested_by link touching this item, both directions',
-            '- `external_links` — off-platform refs (e.g. GitHub PR URLs)',
-            '- `activity` — recent issue_events (status_changed, assigned, comment_added, etc.)',
-            '- `agents` for UI / orchestrator',
-            '',
-            'There is **no partial-get tool**. Always call this when you need any of the above. Cheaper than the prior four+ tool calls.',
+            '- the item under its kind key: `task` or `sub_task` (title, description, status, priority, assignee_agent_id, labels, …; a task also carries spec_md, repo_ids, worktree_branch, pr_url)',
+            '- on a sub-task, `task` is its parent Task; on a task, `sub_tasks` lists its sub-tasks in run order',
+            '- `project` — id, name, issue_key_prefix, description, status, guardrails_md, team_managed, jira_status_map, created_at, updated_at, last_activity_at',
+            "- `repos` — the project's git repos (id, name, git_url, git_path, default_branch, clone_status, …); none is primary",
+            '- `comments` — the full thread, oldest first',
+            '- `related_links` — every depends_on / relates_to / tested_by link touching this item, both directions (`id` is what `remove_link` takes)',
+            '- `external_links` — off-platform refs Atlas recorded (pull requests the Task run opened, Jira issues)',
+            '- `activity` — recent activity events (status_changed, assigned, comment_added, …)',
+            '- `agents` — every agent (prompt_md blanked), for resolving ids to names',
             '',
             'Required: `issue_type` (task / sub_task) + `id`.',
         ].join('\n'),
@@ -184,34 +190,23 @@ export const ITEM_TOOLS: ToolRegistration[] = [
     },
     {
         name: 'update_item',
-        title: 'Update any aspect of an item (fields, status, assignee, comments, links)',
+        title: 'Update an item (fields, status, comments, links, history)',
         description: [
-            'Single entry point for every write-side operation on an existing item. The `action` enum selects what to do; required payload fields vary per action.',
+            'Single entry point for writes on an existing item. Required: `issue_type` (task / sub_task), `id`, `action`. Other fields depend on the action. Optional `agent_id` (your own agent id) credits the write to you in the activity log; without it the write is recorded as the Owner.',
             '',
-            'Common required fields:',
-            '- `issue_type` (task / sub_task)',
-            '- `id` (the item id)',
-            '- `action` (one of the values below)',
+            "- `action: 'patch_fields'` → `patch` (required) accepts `title`, `description`, `priority`, `acceptance_criteria`, `labels` (full replacement — to append, get_item → merge → send the full array). Task-only: `spec_md`, `reporter_agent_id` (the sub-task route rejects them). Returns the updated item.",
             '',
-            'Actions and their payload fields:',
+            "- `action: 'change_status'` → `status` (required) — one of draft, ready, in_progress, waiting_for_info, in_review, done. Only legal status-machine moves are accepted; a Task can't go `done` while any of its sub-tasks isn't done. While a Task run is working a Task, the API refuses that Task's status change with 409 — the agent running a Task reports through its `atlas-outcome` block instead. Returns the updated item.",
             '',
-            "- `action: 'patch_fields'` → patch core fields. `payload` accepts: `title`, `description`, `priority`, `acceptance_criteria`, `labels` (full replacement — send the full array; to append, get_item → merge → send). Task extras: `spec_md`, `pr_url`, `reporter_agent_id`, `worktree_branch` (must match `atlas/<role>/<id>`, e.g. `atlas/wf/ATL-2`). Per-type Zod schema rejects fields that don't apply.",
+            "- `action: 'add_comment'` → `body` (required). Always posted as an agent comment; `agent_id` sets its author chip (without it, the agent of the run currently working the item, if any). Returns the comment.",
             '',
-            "- `action: 'change_status'` → move item to a new status. Required: `status` (string). Optional: `override` (boolean, Owner-only — bypasses status-machine guard), `agent_id` (string — credit the change to a specific agent). Status-machine guard rejects illegal transitions unless `override` is true. Owner-facing flow: the agent running a Task must NOT use this on that Task — the API returns 409 while its run holds the item; report through the `atlas-outcome` block instead.",
+            "- `action: 'add_link'` → `to_id` (the other item's id) + `relation_type` ('depends_on' | 'relates_to' | 'tested_by') required. This item is the `from` side. `depends_on` is directed (cycles rejected); `relates_to` is undirected; `tested_by` is directed (from = the QA item). Self-links are rejected. Returns the link row.",
             '',
-            "- `action: 'assign'` → set/clear the assignee. On a draft Task, assigning an agent queues it (Ready) for that agent to run. Required: `assignee_agent_id` (string or null to unassign). Optional: `agent_id` (string — credit the reassignment to a specific agent). Server rejects assignment to inactive agents. Owner-facing flow: the agent running a Task must NOT use this on that Task — the API returns 409 while its run holds the item; report through the `atlas-outcome` block instead.",
+            "- `action: 'remove_link'` → `link_id` (required) — the `id` from `get_item` → `related_links[]`, as returned (a numeric string) or as a number. Returns `{ deleted: true, link_id }`.",
             '',
-            "- `action: 'add_comment'` → post a comment. Required: `body` (string). Optional: `author` ('owner' | 'agent', default 'agent'), `agent_id` (string — the comment's avatar / chip).",
+            "- `action: 'remove_history'` → `before_time` (required, ISO 8601 with offset, at least 1 hour in the past). Hard-deletes every agent-authored comment and every activity event on this item created strictly before it; Owner comments are always kept. Writes a `history_pruned` audit event. Returns `{ comments_deleted, events_deleted, owner_comments_preserved }`. Destructive and not recoverable — for pruning long-lived tracking items an automation agent comments on repeatedly.",
             '',
-            "- `action: 'add_link'` → link two items. Required: `to_id` (string, the other item's id), `relation_type` ('depends_on' | 'relates_to' | 'tested_by'). The current item is the `from`. `depends_on` is directed (cycles rejected); `relates_to` is undirected; `tested_by` is directed QA→dev. Idempotent. Optional: `agent_id` (string — credit the link event to a specific agent; otherwise it is recorded as the Owner).",
-            '',
-            "- `action: 'remove_link'` → delete an item-link row by numeric id. Required: `link_id` (number). Get link ids from `get_item` → `related_links[].id`. Optional: `agent_id` (string — credit the unlink event).",
-            '',
-            "- `action: 'add_external_link'` → attach an off-platform URL. Required: `link_kind` ('pull_request'), `url` (must match https://github.com/<owner>/<repo>/pull/<number>). Optional: `title`, `agent_id` (string — forwarded as the acting agent). Idempotent on (item, url).",
-            '',
-            "- `action: 'remove_external_link'` → delete an external-link row. Required: `link_id` (number). Get from `get_item` → `external_links[].id`.",
-            '',
-            "- `action: 'remove_history'` → hard-delete every AGENT-authored comment plus every issue-events (activity) row on this item whose `created_at` is strictly before the supplied cutoff. Owner-authored comments are ALWAYS PRESERVED. Required: `before_time` (ISO 8601 datetime string, e.g. '2026-06-01T00:00:00Z'), must be at least 1 hour in the past. Returns `{ comments_deleted, events_deleted, owner_comments_preserved }`. Writes a `history_pruned` audit event attributed to the calling agent so the operation stays traceable. Use for pruning long-lived tracking items where an automation agent accumulates weekly noise. Rows exactly at the boundary are preserved. Destructive and non-recoverable for agent content — pick the cutoff carefully.",
+            'Assigning, linking pull requests and setting branches are not available here: the Owner assigns, and the Task run records its branch and PR.',
         ].join('\n'),
         group_name: 'ITEMS',
         sort_order: 23,
@@ -221,138 +216,60 @@ export const ITEM_TOOLS: ToolRegistration[] = [
             action: z.enum([
                 'patch_fields',
                 'change_status',
-                'assign',
                 'add_comment',
                 'add_link',
                 'remove_link',
-                'add_external_link',
-                'remove_external_link',
                 'remove_history',
             ]),
-            patch: UpdatePatchSchema.optional(),
-            // change_status / assign / add_comment / add_link / remove_link /
-            // add_external_link / remove_history credit field
-            status: z.string().min(1).optional(),
-            override: z.boolean().optional(),
             agent_id: z.string().min(1).optional(),
-            // assign
-            assignee_agent_id: z.string().nullable().optional(),
-            // add_comment
+            patch: UpdatePatchSchema.optional(),
+            status: IssueStatusSchema.optional(),
             body: z.string().min(1).optional(),
-            author: z.enum(['owner', 'agent']).optional(),
-            // add_link
             to_id: z.string().min(1).optional(),
-            relation_type: z.enum(['relates_to', 'depends_on', 'tested_by']).optional(),
-            // remove_link / remove_external_link
-            link_id: z.number().int().positive().optional(),
-            // add_external_link
-            link_kind: z.enum(['pull_request']).optional(),
-            url: z.string().url().max(2_000).optional(),
-            title: z.string().max(500).optional(),
-            // remove_history
+            relation_type: RelationTypeSchema.optional(),
+            // Postgres bigint ids come back from get_item as strings.
+            link_id: z.union([z.number().int().positive(), z.string().regex(/^[1-9]\d*$/)]).optional(),
             before_time: z.string().datetime({ offset: true }).optional(),
         },
         handler: async (args, { client }) => {
             const a = args as {
                 issue_type: IssueType;
                 id: string;
-                action:
-                    | 'patch_fields'
-                    | 'change_status'
-                    | 'assign'
-                    | 'add_comment'
-                    | 'add_link'
-                    | 'remove_link'
-                    | 'add_external_link'
-                    | 'remove_external_link'
-                    | 'remove_history';
+                action: UpdateAction;
+                agent_id?: string;
                 patch?: Record<string, unknown>;
                 status?: string;
-                override?: boolean;
-                agent_id?: string;
-                assignee_agent_id?: string | null;
                 body?: string;
-                author?: 'owner' | 'agent';
                 to_id?: string;
-                relation_type?: 'relates_to' | 'depends_on' | 'tested_by';
-                link_id?: number;
-                link_kind?: 'pull_request';
-                url?: string;
-                title?: string;
+                relation_type?: z.infer<typeof RelationTypeSchema>;
+                link_id?: number | string;
                 before_time?: string;
             };
+            const actor = a.agent_id ?? null;
             switch (a.action) {
                 case 'patch_fields': {
                     if (!a.patch)
                         throw new Error("update_item: `patch` is required for action='patch_fields'");
-                    return toToolResult(
-                        await client.updateItem(a.issue_type, a.id, a.patch, resolveAgentId(a.agent_id)),
-                    );
+                    return toToolResult(await client.updateItem(a.issue_type, a.id, a.patch, actor));
                 }
                 case 'change_status': {
                     if (!a.status)
-                        throw new Error(
-                            "update_item: `status` is required for action='change_status'",
-                        );
-                    // Security: `override` bypasses the status-machine
-                    // guard AND the P16 `assertChildrenDone` invariant.
-                    // The tool description already promises this is
-                    // "Owner-only", but the MCP server has no way to
-                    // authenticate as the Owner — any caller with the
-                    // MCP token can currently set `override: true`. Until
-                    // per-caller identity ships, reject it at the MCP
-                    // boundary. Owner-driven overrides still work via
-                    // the Web UI (which calls the API route directly).
-                    if (a.override === true) {
-                        throw new Error(
-                            "update_item: `override` is Owner-only and not permitted via the MCP surface. Use the Web UI for status overrides.",
-                        );
-                    }
+                        throw new Error("update_item: `status` is required for action='change_status'");
                     return toToolResult(
-                        await client.transitionItemStatus(
-                            a.issue_type,
-                            a.id,
-                            a.status,
-                            false,
-                            resolveAgentId(a.agent_id),
-                        ),
-                    );
-                }
-                case 'assign': {
-                    if (a.assignee_agent_id === undefined)
-                        throw new Error(
-                            "update_item: `assignee_agent_id` is required for action='assign' (use null to unassign)",
-                        );
-                    return toToolResult(
-                        await client.assignItem(
-                            a.issue_type,
-                            a.id,
-                            a.assignee_agent_id,
-                            resolveAgentId(a.agent_id),
-                        ),
+                        await client.transitionItemStatus(a.issue_type, a.id, a.status, actor),
                     );
                 }
                 case 'add_comment': {
                     if (!a.body)
-                        throw new Error(
-                            "update_item: `body` is required for action='add_comment'",
-                        );
-                    // Security: force `author: 'agent'` at the MCP
-                    // boundary. Previously any caller with the MCP token
-                    // could post a comment claiming to be the Owner
-                    // (`author: 'owner'`), which the UI renders with the
-                    // Owner chip and any downstream automation keyed to
-                    // owner sign-off treats as genuine. The MCP surface
-                    // is called by CLI agents, not the Owner. If a real
-                    // Owner comment is needed, it comes through the Web
-                    // UI which calls the API route directly.
+                        throw new Error("update_item: `body` is required for action='add_comment'");
+                    // Always 'agent': an MCP caller can't prove it is the
+                    // Owner, and an Owner-chip comment is trusted downstream.
                     return toToolResult(
                         await client.addComment({
                             issue_type: a.issue_type,
                             issue_id: a.id,
                             body: a.body,
-                            author: 'agent',
-                            agent_id: resolveAgentId(a.agent_id),
+                            agent_id: actor,
                         }),
                     );
                 }
@@ -369,58 +286,23 @@ export const ITEM_TOOLS: ToolRegistration[] = [
                                 to_id: a.to_id,
                                 relation_type: a.relation_type,
                             },
-                            resolveAgentId(a.agent_id),
+                            actor,
                         ),
                     );
                 }
                 case 'remove_link': {
                     if (a.link_id === undefined)
-                        throw new Error(
-                            "update_item: `link_id` is required for action='remove_link'",
-                        );
-                    await client.deleteItemLink(a.link_id, resolveAgentId(a.agent_id));
-                    return toToolResult({ deleted: true, link_id: a.link_id });
-                }
-                case 'add_external_link': {
-                    if (!a.link_kind || !a.url)
-                        throw new Error(
-                            "update_item: `link_kind` + `url` are required for action='add_external_link'",
-                        );
-                    const ext: Parameters<IApiClient['createItemExternalLink']>[0] = {
-                        issue_type: a.issue_type,
-                        issue_id: a.id,
-                        link_kind: a.link_kind,
-                        url: a.url,
-                    };
-                    if (a.title !== undefined) ext.title = a.title;
-                    return toToolResult(
-                        await client.createItemExternalLink(ext, resolveAgentId(a.agent_id)),
-                    );
-                }
-                case 'remove_external_link': {
-                    if (a.link_id === undefined)
-                        throw new Error(
-                            "update_item: `link_id` is required for action='remove_external_link'",
-                        );
-                    await client.deleteItemExternalLink(a.link_id);
-                    return toToolResult({ deleted: true, link_id: a.link_id });
+                        throw new Error("update_item: `link_id` is required for action='remove_link'");
+                    await client.deleteItemLink(Number(a.link_id), actor);
+                    return toToolResult({ deleted: true, link_id: Number(a.link_id) });
                 }
                 case 'remove_history': {
                     if (!a.before_time)
                         throw new Error(
                             "update_item: `before_time` is required for action='remove_history'",
                         );
-                    // Forward the bound agent identity for the audit event
-                    // that historyPruneService writes inside its transaction.
-                    // Without this, actor_agent_id on the `history_pruned`
-                    // row is null and Owner can't tell who pruned what.
                     return toToolResult(
-                        await client.pruneItemHistory(
-                            a.issue_type,
-                            a.id,
-                            a.before_time,
-                            resolveAgentId(a.agent_id),
-                        ),
+                        await client.pruneItemHistory(a.issue_type, a.id, a.before_time, actor),
                     );
                 }
             }
@@ -430,13 +312,11 @@ export const ITEM_TOOLS: ToolRegistration[] = [
         name: 'delete_item',
         title: 'Delete an item (cascade on children)',
         description: [
-            'Permanently delete an item. Cascade semantics per the API:',
-            '- Deleting a task drops its sub-tasks.',
-            '- A sub-task has no children to cascade.',
+            'Permanently delete an item. Deleting a task also deletes its sub-tasks and removes its run checkouts; a sub-task has no children.',
             '',
             'Returns `{ deleted: true, issue_type, id }`.',
             '',
-            "Use sparingly — the activity log loses the item context once it is gone. Required: `issue_type` + `id`.",
+            'Use sparingly — the activity log loses the item context once it is gone. Required: `issue_type` + `id`.',
         ].join('\n'),
         group_name: 'ITEMS',
         sort_order: 24,

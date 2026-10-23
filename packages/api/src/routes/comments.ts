@@ -206,7 +206,7 @@ export async function commentsRoutes(app: FastifyInstance) {
                       ? `Source ${type} not found`
                       : result.reason === 'cycle'
                         ? 'Would create a dependency cycle'
-                        : `Target ${parsed.to_type} not found`;
+                        : `Target item ${parsed.to_id} not found`;
             return reply.status(400).send({ error: message, reason: result.reason });
         }
         return reply.status(201).send(result.link);
