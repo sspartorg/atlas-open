@@ -38,7 +38,8 @@ describe('AgentSidebar', () => {
         renderWithProviders(
             <AgentSidebar agent={agent} stats={makeStats()} onEditColor={onEditColor} />
         );
-        await userEvent.click(await screen.findByText('#FF0000'));
+        expect(await screen.findByText('#FF0000')).toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: 'Edit accent color' }));
         expect(onEditColor).toHaveBeenCalledOnce();
     });
 
@@ -83,13 +84,12 @@ describe('AgentSidebar', () => {
 
     it('renders without onEditColor prop (cursor default branch)', async () => {
         server.use(...defaultHandlers);
-        // Without onEditColor, cursor is 'default' (the falsy branch of onEditColor ternary)
+        // Without handlers the triggers are disabled buttons, not dead clickable text
         const agent = makeAgent({ accent_color: '#AABBCC' });
         renderWithProviders(<AgentSidebar agent={agent} stats={makeStats()} />);
-        // Color still renders; clicking it does nothing (no handler)
         expect(await screen.findByText('#AABBCC')).toBeInTheDocument();
-        await userEvent.click(screen.getByText('#AABBCC'));
-        expect(document.body).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Edit accent color' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Replace glyph' })).toBeDisabled();
     });
 
     it('calls onReplaceGlyph when Replace… link is clicked', async () => {
@@ -99,8 +99,8 @@ describe('AgentSidebar', () => {
         renderWithProviders(
             <AgentSidebar agent={agent} stats={makeStats()} onReplaceGlyph={onReplaceGlyph} />
         );
-        const replaceLink = await screen.findByText('Replace…');
-        await userEvent.click(replaceLink);
+        expect(await screen.findByText('Replace…')).toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: 'Replace glyph' }));
         expect(onReplaceGlyph).toHaveBeenCalledOnce();
     });
 

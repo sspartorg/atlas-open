@@ -1,58 +1,30 @@
 import { test, expect } from '@playwright/test';
 import { goto } from '../helpers/nav.js';
 
-// GlyphPickerModal is opened from the Agent Detail edit flow. The icon/glyph
-// for the agent can be changed via a picker dialog that lists Material icon
-// names. The e2e seed installs Solo Engineer from the marketplace.
-// We never submit — Cancel or Esc only.
+// GlyphPickerModal opens from the Glyph row ("Replace…") of the Identity panel
+// in the Agent Detail sidebar (AgentSidebar). The e2e seed installs Solo
+// Engineer. We never submit — Cancel or Esc only.
 
 test.describe('GlyphPickerModal', () => {
-    test('glyph picker opens from agent detail edit', async ({ page }) => {
+    test.beforeEach(async ({ page }) => {
         await goto(page, '/agents/agent-solo');
-        await expect(page.getByRole('button', { name: /Run now/i })).toBeVisible();
-
-        // The glyph / icon picker may be triggered from an "Edit" button,
-        // clicking the agent avatar/icon, or a dedicated icon button.
-        const glyphBtn = page
-            .getByRole('button', { name: /icon|glyph|emoji/i })
-            .first();
-        const hasGlyph = await glyphBtn.isVisible().catch(() => false);
-        test.skip(!hasGlyph, 'no glyph picker button on agent detail — deferring');
-
-        await glyphBtn.click();
-        const dialog = page.getByRole('dialog');
-        await expect(dialog).toBeVisible();
+        await page.getByRole('button', { name: 'Replace glyph' }).click();
     });
 
-    test('glyph picker shows a search input or icon grid', async ({ page }) => {
-        await goto(page, '/agents/agent-solo');
-        await expect(page.getByRole('button', { name: /Run now/i })).toBeVisible();
-
-        const glyphBtn = page
-            .getByRole('button', { name: /icon|glyph|emoji/i })
-            .first();
-        const hasGlyph = await glyphBtn.isVisible().catch(() => false);
-        test.skip(!hasGlyph, 'no glyph picker button — deferring');
-
-        await glyphBtn.click();
-        const dialog = page.getByRole('dialog');
+    test('opens from the sidebar with a grid of glyph choices, closes with Cancel', async ({ page }) => {
+        const dialog = page.getByRole('dialog', { name: 'Replace glyph' });
         await expect(dialog).toBeVisible();
+        // Exactly one glyph tile is pressed: the agent's current glyph.
+        await expect(dialog.locator('[role="button"][aria-pressed="true"]')).toHaveCount(1);
+        expect(await dialog.locator('[role="button"][aria-pressed]').count()).toBeGreaterThan(1);
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(dialog).toBeHidden();
+    });
 
-        // Should contain a search input or a grid of icon choices
-        const searchOrGrid = dialog.getByRole('textbox').first();
-        const hasSearch = await searchOrGrid.isVisible().catch(() => false);
-        if (hasSearch) {
-            await expect(searchOrGrid).toBeVisible();
-        }
-
-        // Cancel without picking
-        const cancelBtn = dialog.getByRole('button', { name: /Cancel/i });
-        const hasCancel = await cancelBtn.isVisible().catch(() => false);
-        if (hasCancel) {
-            await cancelBtn.click();
-        } else {
-            await page.keyboard.press('Escape');
-        }
-        await expect(dialog).not.toBeVisible();
+    test('closes with Esc', async ({ page }) => {
+        const dialog = page.getByRole('dialog', { name: 'Replace glyph' });
+        await expect(dialog).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
     });
 });
