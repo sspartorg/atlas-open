@@ -1,58 +1,34 @@
 import { test, expect } from '@playwright/test';
 import { goto } from '../helpers/nav.js';
 
-// PromptPreviewDialog is opened from the Agent Detail → Prompt tab.
-// It shows a read-only preview of the full agent prompt markdown.
-// The e2e seed installs Solo Engineer from the marketplace, so the
-// Prompt tab is always available.
-// We never submit — Esc or Cancel only.
+// PromptPreviewDialog opens from "Preview prompt" inside RunNowDialog, which
+// "Run now" on Agent Detail opens. Preview only compiles the prompt
+// (POST /api/agents/:id/compile-prompt — no AI, nothing queued). We never
+// press the dialog's own "Run now".
 
 test.describe('PromptPreviewDialog', () => {
-    test('Prompt tab is visible on agent detail page', async ({ page }) => {
-        await goto(page, '/agents/agent-solo?tab=prompt');
-        await expect(page.getByRole('tab').filter({ hasText: 'Prompt' }).first()).toBeVisible();
-    });
+    test('Preview prompt compiles and shows the prompt without starting a run', async ({ page }) => {
+        await goto(page, '/agents/agent-solo');
+        await page.getByRole('button', { name: 'Run now' }).click();
+        const runDialog = page.getByRole('dialog', { name: /^Run / });
+        await expect(runDialog).toBeVisible();
 
-    test('Preview button on Prompt tab opens PromptPreviewDialog', async ({ page }) => {
-        await goto(page, '/agents/agent-solo?tab=prompt');
-        // Wait for the Prompt tab to be active
-        await expect(page.getByRole('tab').filter({ hasText: 'Prompt' }).first()).toBeVisible();
+        const compiled = page.waitForResponse(
+            (r) => r.url().endsWith('/api/agents/agent-solo/compile-prompt') && r.request().method() === 'POST',
+        );
+        await runDialog.getByRole('button', { name: 'Preview prompt' }).click();
+        expect((await compiled).status()).toBe(200);
 
-        // Look for a "Preview" or "Full preview" button on the Prompt tab
-        const previewBtn = page
-            .getByRole('button', { name: /Preview|Full preview|View full/i })
-            .first();
-        const hasPreview = await previewBtn.isVisible().catch(() => false);
-        test.skip(!hasPreview, 'no Preview button on Prompt tab — deferring PromptPreviewDialog smoke');
+        const preview = page.getByRole('dialog', { name: 'Prompt preview' });
+        await expect(preview).toBeVisible();
+        await expect(preview.getByText('freedom run · no item')).toBeVisible();
+        await expect(preview.getByText(/Nothing was queued or written/)).toBeVisible();
 
-        await previewBtn.click();
-        const dialog = page.getByRole('dialog');
-        await expect(dialog).toBeVisible();
-    });
-
-    test('preview dialog shows prompt text content', async ({ page }) => {
-        await goto(page, '/agents/agent-solo?tab=prompt');
-        await expect(page.getByRole('tab').filter({ hasText: 'Prompt' }).first()).toBeVisible();
-
-        const previewBtn = page
-            .getByRole('button', { name: /Preview|Full preview|View full/i })
-            .first();
-        const hasPreview = await previewBtn.isVisible().catch(() => false);
-        test.skip(!hasPreview, 'no Preview button — deferring');
-
-        await previewBtn.click();
-        const dialog = page.getByRole('dialog');
-        await expect(dialog).toBeVisible();
-
-        // The dialog should contain some text (the prompt content)
-        const contentArea = dialog.locator('pre, [role="document"], textarea').first();
-        const hasContent = await contentArea.isVisible().catch(() => false);
-        if (hasContent) {
-            await expect(contentArea).toBeVisible();
-        }
-
-        // Close without modifying
+        // Esc closes only the top-most dialog; the Run dialog stays open.
         await page.keyboard.press('Escape');
-        await expect(dialog).not.toBeVisible();
+        await expect(preview).toBeHidden();
+        await expect(runDialog).toBeVisible();
+        await runDialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(runDialog).toBeHidden();
     });
 });

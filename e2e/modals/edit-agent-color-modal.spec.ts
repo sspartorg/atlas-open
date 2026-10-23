@@ -1,52 +1,27 @@
 import { test, expect } from '@playwright/test';
 import { goto } from '../helpers/nav.js';
 
-// EditAgentColorModal is opened from the Agent Detail page. It may be
-// accessible via the agent hero / avatar area or via an edit / color action.
-// The e2e seed installs Solo Engineer from the marketplace.
+// EditAgentColorModal opens from the Color row of the Identity panel in the
+// Agent Detail sidebar (AgentSidebar). The e2e seed installs Solo Engineer.
 // We never submit — Cancel or Esc only.
 
 test.describe('EditAgentColorModal', () => {
-    test('color picker opens from agent detail', async ({ page }) => {
+    test.beforeEach(async ({ page }) => {
         await goto(page, '/agents/agent-solo');
-        await expect(page.getByRole('button', { name: /Run now/i })).toBeVisible();
-
-        // The color action could be a button labeled "Color", "Edit color", or
-        // a swatch-style clickable element near the agent avatar.
-        const colorBtn = page
-            .getByRole('button', { name: /color|palette/i })
-            .first();
-        const hasColor = await colorBtn.isVisible().catch(() => false);
-        test.skip(!hasColor, 'no color picker button on agent detail — deferring');
-
-        await colorBtn.click();
-        const dialog = page.getByRole('dialog');
-        await expect(dialog).toBeVisible();
+        await page.getByRole('button', { name: 'Edit accent color' }).click();
     });
 
-    test('color modal shows color swatches or a color input', async ({ page }) => {
-        await goto(page, '/agents/agent-solo');
-        await expect(page.getByRole('button', { name: /Run now/i })).toBeVisible();
-
-        const colorBtn = page
-            .getByRole('button', { name: /color|palette/i })
-            .first();
-        const hasColor = await colorBtn.isVisible().catch(() => false);
-        test.skip(!hasColor, 'no color picker button — deferring');
-
-        await colorBtn.click();
-        const dialog = page.getByRole('dialog');
+    test('opens from the sidebar color swatch and closes with Cancel', async ({ page }) => {
+        const dialog = page.getByRole('dialog', { name: 'Edit accent color' });
         await expect(dialog).toBeVisible();
-        // Dialog should contain a color-related heading or color swatches
-        await expect(dialog.getByText(/color|Color/i).first()).toBeVisible();
-        // Cancel without saving
-        const cancelBtn = dialog.getByRole('button', { name: /Cancel/i });
-        const hasCancel = await cancelBtn.isVisible().catch(() => false);
-        if (hasCancel) {
-            await cancelBtn.click();
-        } else {
-            await page.keyboard.press('Escape');
-        }
-        await expect(dialog).not.toBeVisible();
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(dialog).toBeHidden();
+    });
+
+    test('closes with Esc', async ({ page }) => {
+        const dialog = page.getByRole('dialog', { name: 'Edit accent color' });
+        await expect(dialog).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
     });
 });

@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import Box from '@mui/material/Box';
+import ButtonBase from '@mui/material/ButtonBase';
 import Typography from '@mui/material/Typography';
 import type { IAgent } from '@atlas/shared';
 import { ATLAS_PALETTE, TYPOGRAPHY } from '../../theme/tokens.js';
@@ -55,7 +56,10 @@ export const AgentSidebar = memo(function AgentSidebar({
                     </Box>
                 </InfoRow>
                 <InfoRow label="Color">
-                    <Box
+                    <ButtonBase
+                        disableRipple
+                        disabled={!onEditColor}
+                        aria-label="Edit accent color"
                         onClick={onEditColor}
                         sx={{
                             display: 'flex',
@@ -88,10 +92,13 @@ export const AgentSidebar = memo(function AgentSidebar({
                         >
                             {agent.accent_color.toUpperCase()}
                         </Typography>
-                    </Box>
+                    </ButtonBase>
                 </InfoRow>
                 <InfoRow label="Glyph">
-                    <Box
+                    <ButtonBase
+                        disableRipple
+                        disabled={!onReplaceGlyph}
+                        aria-label="Replace glyph"
                         onClick={onReplaceGlyph}
                         sx={{
                             display: 'flex',
@@ -99,6 +106,7 @@ export const AgentSidebar = memo(function AgentSidebar({
                             gap: 0.5,
                             color: ATLAS_PALETTE.brandBlue,
                             cursor: 'pointer',
+                            fontFamily: 'inherit',
                             fontSize: 12,
                             fontWeight: 500,
                             '&:hover .icon-link-text': {
@@ -117,7 +125,7 @@ export const AgentSidebar = memo(function AgentSidebar({
                         <Box component="span" className="icon-link-text">
                             Replace…
                         </Box>
-                    </Box>
+                    </ButtonBase>
                 </InfoRow>
             </InfoPanel>
 

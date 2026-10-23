@@ -46,8 +46,8 @@ describe('Topbar', () => {
         server.use(...topbarHandlers());
         const onShortcutsOpen = vi.fn();
         renderWithProviders(<Topbar onShortcutsOpen={onShortcutsOpen} />);
-        const pill = screen.getByText('Shortcuts');
-        fireEvent.click(pill);
+        // The visible label is the accessible name; the tooltip only describes it.
+        fireEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));
         expect(onShortcutsOpen).toHaveBeenCalled();
     });
 

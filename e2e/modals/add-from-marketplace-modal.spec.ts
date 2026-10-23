@@ -1,67 +1,36 @@
 import { test, expect } from '@playwright/test';
 import { goto } from '../helpers/nav.js';
+import { one } from '../helpers/db.js';
 
-// AddFromMarketplaceModal is the rename/retry step shown when an install
-// hits a slug clash; it is reached from the marketplace DETAIL page, not from
-// /agents. Per ADR 0007 the marketplace is its own page and the /agents
-// empty-state CTA navigates there.
-//
-// 2026-09-12 — the name regex used to include /Add agent/i, which matched the
-// unrelated "Add Agent" dialog on /agents (name · category · CLI · model ·
-// colour). That defeated the `test.skip` guard below and the specs then failed
-// looking for catalog cards inside a form. Narrowed so the guard fires.
-// We never submit (install) — Cancel or Esc only.
+// AddFromMarketplaceModal opens from "Add to my agents" on the marketplace
+// detail page, shown only for a catalog agent that is not installed. The e2e
+// seed installs only agent-solo, so AI News is a catalog-only entry.
+// We never install — Cancel or Esc only.
+
+const AGENT = 'agent-ai-news';
 
 test.describe('AddFromMarketplaceModal', () => {
-    test('Add button on /agents opens the marketplace dialog', async ({ page }) => {
-        await goto(page, '/agents');
-        await expect(page.getByRole('heading', { name: /Agents/i }).first()).toBeVisible();
-
-        // Look for an "Add" or "Add from marketplace" button (not the card-level "Add" btns)
-        const addBtn = page
-            .getByRole('button', { name: /Add from marketplace|Browse marketplace/i })
-            .first();
-        const hasAdd = await addBtn.isVisible().catch(() => false);
-        test.skip(!hasAdd, 'no Add from marketplace button on /agents — deferring');
-
-        await addBtn.click();
-        const dialog = page.getByRole('dialog');
-        await expect(dialog).toBeVisible();
+    test.beforeEach(async ({ page }) => {
+        expect(one(`SELECT count(*) FROM agents WHERE id = '${AGENT}'`)).toBe('0');
+        await goto(page, `/agents/marketplace/${AGENT}`);
+        await page.getByRole('button', { name: 'Add to my agents' }).click();
     });
 
-    test('marketplace modal shows catalog cards with Add or Installed buttons', async ({ page }) => {
-        await goto(page, '/agents');
-        await expect(page.getByRole('heading', { name: /Agents/i }).first()).toBeVisible();
-
-        const addBtn = page
-            .getByRole('button', { name: /Add from marketplace|Browse marketplace/i })
-            .first();
-        const hasAdd = await addBtn.isVisible().catch(() => false);
-        test.skip(!hasAdd, 'no Add from marketplace button — deferring');
-
-        await addBtn.click();
-        const dialog = page.getByRole('dialog');
+    test('opens with the catalog slug and closes with Cancel', async ({ page }) => {
+        const dialog = page.getByRole('dialog', { name: /to your agents$/ });
         await expect(dialog).toBeVisible();
-
-        // The marketplace inside the modal should show at least one agent card
-        const agentCard = dialog.getByText(/Solo Engineer|AI News|Market Research|Regulations/i).first();
-        await expect(agentCard).toBeVisible({ timeout: 10_000 });
+        await expect(dialog.getByText('local slug')).toBeVisible();
+        await expect(dialog.getByText(AGENT, { exact: true })).toBeVisible();
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(dialog).toBeHidden();
     });
 
-    test('Esc closes the marketplace modal', async ({ page }) => {
-        await goto(page, '/agents');
-        await expect(page.getByRole('heading', { name: /Agents/i }).first()).toBeVisible();
-
-        const addBtn = page
-            .getByRole('button', { name: /Add from marketplace|Browse marketplace/i })
-            .first();
-        const hasAdd = await addBtn.isVisible().catch(() => false);
-        test.skip(!hasAdd, 'no Add from marketplace button — deferring');
-
-        await addBtn.click();
-        const dialog = page.getByRole('dialog');
+    test('closes with Esc and installs nothing', async ({ page }) => {
+        const dialog = page.getByRole('dialog', { name: /to your agents$/ });
         await expect(dialog).toBeVisible();
         await page.keyboard.press('Escape');
-        await expect(dialog).not.toBeVisible();
+        await expect(dialog).toBeHidden();
+        await expect(page.getByRole('button', { name: 'Add to my agents' })).toBeVisible();
+        expect(one(`SELECT count(*) FROM agents WHERE id = '${AGENT}'`)).toBe('0');
     });
 });

@@ -1,48 +1,39 @@
 import { test, expect } from '@playwright/test';
 import { goto } from '../helpers/nav.js';
+import { one, sql } from '../helpers/db.js';
 
-// AcceptUpgradeModal is shown on Agent Detail when the marketplace has a newer
-// version of an installed agent. The e2e seed installs Solo Engineer at whatever
-// version the catalog holds; the catalog is seeded fresh each test run, so no
-// upgrade banner is expected. The spec uses runtime-data-guard to skip cleanly
-// when no upgrade is available (the common case in CI).
+// The upgrade banner on Agent Detail shows when the catalog version is greater
+// than agents.marketplace_pulled_version. The seed installs agent-solo at the
+// catalog version, so lower its pulled version for this file and restore it
+// afterwards (flows/marketplace-upgrade.spec.ts expects them equal).
+// We never accept or dismiss — Cancel only.
+
+let pulled = '';
 
 test.describe('AcceptUpgradeModal', () => {
-    test('upgrade banner appears when a newer catalog version exists', async ({ page }) => {
-        await goto(page, '/agents/agent-solo');
-        await expect(page.getByRole('button', { name: /Run now/i })).toBeVisible();
-
-        // Upgrade banner typically shows "Update available" or "New version" text
-        const upgradeBanner = page.getByText(/update available|new version|upgrade available/i).first();
-        const hasUpgrade = await upgradeBanner.isVisible().catch(() => false);
-        test.skip(!hasUpgrade, 'no upgrade banner — agent is up to date; deferring AcceptUpgradeModal smoke');
-
-        await expect(upgradeBanner).toBeVisible();
+    test.beforeAll(() => {
+        pulled = one(`SELECT marketplace_pulled_version FROM agents WHERE id = 'agent-solo'`);
+        expect(pulled).toMatch(/^\d+$/);
+        sql(`UPDATE agents SET marketplace_pulled_version = ${Number(pulled) - 1} WHERE id = 'agent-solo'`);
     });
 
-    test('Accept upgrade button opens the upgrade modal', async ({ page }) => {
+    test.afterAll(() => {
+        sql(`UPDATE agents SET marketplace_pulled_version = ${pulled} WHERE id = 'agent-solo'`);
+    });
+
+    test('Review upgrade opens the upgrade modal and Cancel closes it', async ({ page }) => {
         await goto(page, '/agents/agent-solo');
-        await expect(page.getByRole('button', { name: /Run now/i })).toBeVisible();
+        await expect(page.getByText('Marketplace upgrade available')).toBeVisible();
+        await expect(page.getByText(`v${Number(pulled) - 1} → v${pulled}`, { exact: false })).toBeVisible();
 
-        const upgradeBtn = page
-            .getByRole('button', { name: /Accept upgrade|Update|Review upgrade/i })
-            .first();
-        const hasUpgrade = await upgradeBtn.isVisible().catch(() => false);
-        test.skip(!hasUpgrade, 'no upgrade button — agent is up to date; deferring');
-
-        await upgradeBtn.click();
-        const dialog = page.getByRole('dialog');
+        await page.getByRole('button', { name: 'Review upgrade' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Review marketplace upgrade' });
         await expect(dialog).toBeVisible();
-        // The dialog should mention "upgrade" or "update"
-        await expect(dialog.getByText(/upgrade|update/i).first()).toBeVisible();
-        // Cancel without accepting
-        const cancelBtn = dialog.getByRole('button', { name: /Cancel|Dismiss/i });
-        const hasCancel = await cancelBtn.isVisible().catch(() => false);
-        if (hasCancel) {
-            await cancelBtn.click();
-        } else {
-            await page.keyboard.press('Escape');
-        }
-        await expect(dialog).not.toBeVisible();
+        await expect(dialog.getByRole('button', { name: 'Dismiss upgrade' })).toBeVisible();
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(dialog).toBeHidden();
+        // Cancel changes nothing: the banner is still there.
+        await expect(page.getByText('Marketplace upgrade available')).toBeVisible();
+        expect(one(`SELECT marketplace_pulled_version FROM agents WHERE id = 'agent-solo'`)).toBe(String(Number(pulled) - 1));
     });
 });

@@ -210,7 +210,7 @@ export function Topbar({ onShortcutsOpen, onMenuClick }: Props) {
             />
 
             {/* Shortcuts pill — opens Keyboard Shortcuts dialog (Cmd+K spotlight removed) */}
-            <Tooltip title="Ctrl + K" arrow>
+            <Tooltip title="Ctrl + K" arrow describeChild>
                 <Box
                     tabIndex={0}
                     role="button"
