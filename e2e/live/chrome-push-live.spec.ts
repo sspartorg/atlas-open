@@ -17,7 +17,7 @@ import { sql } from '../helpers/db.js';
 test.skip(process.env['E2E_LIVE'] !== '1', 'live spec: run with `pnpm e2e:live`');
 test.describe.configure({ timeout: 240_000 });
 
-const ORIGIN = 'http://127.0.0.1:6010';
+const ORIGIN = 'http://127.0.0.1:7010';
 
 test('real Chrome + FCM: Send test and a run park both pop up', async ({ request }) => {
     sql('DELETE FROM push_subscriptions');

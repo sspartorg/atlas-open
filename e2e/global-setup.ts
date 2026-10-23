@@ -11,35 +11,35 @@ const execFileP = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// E2E global setup. Owns the dedicated `atlas_e2e` Postgres DB +
-// spawns api on :6001 + web on :6000. Tear-down lives in
+// E2E global setup. Owns the dedicated `atlas_open_e2e` Postgres DB +
+// spawns api on :7001 + web on :7010. Tear-down lives in
 // `global-teardown.ts`; the two share state via a tiny PID file
 // (`e2e-logs/pids.json`) which records both child PIDs + the windows
 // shell flag so teardown can SIGTERM / taskkill the right tree.
 //
-// Prereq: `docker compose up -d atlas-postgres` (the same instance
+// Prereq: `docker compose up -d atlas-open-postgres` (the same instance
 // the dev stack uses — we just create another database inside it, and
-// reach it on host port 5500).
+// reach it on host port 5600).
 
-const E2E_DB = 'atlas_e2e';
-// The dev postgres container (docker compose `atlas-postgres`, host port 5500).
-const dbUrl = (dbName: string) => `postgres://atlas:atlas@localhost:5500/${dbName}`;
-const API_PORT = 6001;
+const E2E_DB = 'atlas_open_e2e';
+// The dev postgres container (docker compose `atlas-open-postgres`, host port 5600).
+const dbUrl = (dbName: string) => `postgres://atlas:atlas@localhost:5600/${dbName}`;
+const API_PORT = 7001;
 // 2026-06-23 — moved off 6000 (X11 server port) because it sits on the
 // WHATWG "bad ports" blocklist. Node's undici-backed fetch refuses it
 // (`bad port` error) and bundled Chromium blocks it as ERR_UNSAFE_PORT,
 // so both the global-setup HTTP probe AND the actual test browser
 // navigation would otherwise fail before any spec runs.
-const WEB_PORT = 6010;
+const WEB_PORT = 7010;
 const REPO_ROOT = resolve(__dirname, '..');
 // The API under test gets its own data dir and env file: Reset Workspace
 // wipes <dataDir> and the Environment tab rewrites the env
-// file, and neither may touch the developer's real ~/.config/Atlas or .env.
+// file, and neither may touch the developer's real ~/.config/AtlasOpen or .env.
 // Specs import the same paths from helpers/api.ts.
 const E2E_DATA_DIR = join(REPO_ROOT, 'e2e-logs', 'data');
 const E2E_ENV_FILE = join(REPO_ROOT, 'e2e-logs', 'e2e.env');
 // settings-notifications.spec.ts runs a fake Telegram Bot API here.
-const FAKE_TELEGRAM_PORT = 6091;
+const FAKE_TELEGRAM_PORT = 7091;
 const LOG_DIR = join(REPO_ROOT, 'e2e-logs');
 const PID_FILE = join(LOG_DIR, 'pids.json');
 // flows/push-delivery.spec.ts runs a local HTTPS push service: web-push only
@@ -55,7 +55,7 @@ export async function dropAndCreateDb(dbName = E2E_DB): Promise<void> {
     const psql = async (sql: string) => {
         await execFileP(
             'docker',
-            ['exec', 'atlas-postgres', 'psql', '-U', 'atlas', '-d', 'postgres', '-c', sql],
+            ['exec', 'atlas-open-postgres', 'psql', '-U', 'atlas', '-d', 'postgres', '-c', sql],
             { maxBuffer: 4 * 1024 * 1024 },
         );
     };
@@ -193,9 +193,9 @@ export function startApi(
                 ...(o.mcpPort ? { ATLAS_MCP_PORT: String(o.mcpPort) } : {}),
                 // 2026-06-23 — the API's MCP-token gate trusts the browser
                 // origins built from WEB_PORT (see utils/lan-origins.ts).
-                // Without this the e2e web at 127.0.0.1:6010 hits the API's
+                // Without this the e2e web at 127.0.0.1:7010 hits the API's
                 // 401 path on every write, since the trusted set defaults
-                // to the dev port (4000). The dev pnpm script sets this
+                // to the dev port (4300). The dev pnpm script sets this
                 // automatically; the e2e spawn has to be explicit.
                 WEB_PORT: String(WEB_PORT),
                 DATABASE_URL: dbUrl(o.dbName),
@@ -294,7 +294,7 @@ export default async function globalSetup(): Promise<void> {
     writeFileSync(E2E_ENV_FILE, 'ATLAS_LOG_LEVEL=error\n');
 
     // eslint-disable-next-line no-console
-    console.log('[e2e] dropping + creating atlas_e2e...');
+    console.log('[e2e] dropping + creating atlas_open_e2e...');
     await dropAndCreateDb();
     // eslint-disable-next-line no-console
     console.log('[e2e] running migrations...');

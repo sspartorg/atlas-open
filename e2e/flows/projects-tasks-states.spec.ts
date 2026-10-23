@@ -22,7 +22,7 @@ const NAME = 'Stoat States';
 const AGENT = 'agent-solo';
 let projectId = '';
 let git = { origin: '', clone: '' };
-const WORKSPACE = '/tmp/atlas-e2e';
+const WORKSPACE = '/tmp/atlas-open-e2e';
 const LOCKED = join(WORKSPACE, 'sta-locked');
 
 async function cleanup(request: APIRequestContext) {
@@ -236,7 +236,7 @@ test.describe('delete project failures', () => {
         chmodSync(LOCKED, 0o755);
 
         // A repo folder outside the workspace root survives a purge.
-        const outside = join(tmpdir(), 'atlas-e2e-fixtures', 'sta-outside');
+        const outside = join(tmpdir(), 'atlas-open-e2e-fixtures', 'sta-outside');
         mkdirSync(outside, { recursive: true });
         writeFileSync(join(outside, 'keep.txt'), 'keep');
         const p2 = await createProject(request, 'Stoat Outside', 'STO');
@@ -409,7 +409,7 @@ async function ensureMany(request: APIRequestContext): Promise<string> {
     if (existing && one(`SELECT count(*) FROM items_live WHERE project_id = '${existing}'`) === '65') return existing;
     if (existing) await deleteProject(request, existing);
     const big = await createProject(request, 'Stoat Many', 'STM');
-    insertRepo(big.id, { id: `${big.id}-r`, name: 'many', git_path: '/tmp/atlas-e2e-stoat-many' });
+    insertRepo(big.id, { id: `${big.id}-r`, name: 'many', git_path: '/tmp/atlas-open-e2e-stoat-many' });
     for (let i = 1; i <= 65; i++) await apiPost(request, '/api/tasks', { project_id: big.id, title: `Stoat many ${String(i).padStart(2, '0')}` });
     return big.id;
 }

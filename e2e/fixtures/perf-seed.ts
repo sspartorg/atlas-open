@@ -12,16 +12,16 @@ import {
 //
 // The dev DB is usually near-empty, and every endpoint answers in <20ms there,
 // so "the Tests page is slow with lots of data" cannot be seen on it. This
-// fills a DEDICATED database (never `atlas` or `atlas_e2e`) with roughly what a
+// fills a DEDICATED database (never `atlas` or `atlas_open_e2e`) with roughly what a
 // month of golden-set runs leaves behind. Deterministic: same counts, same ids,
 // every run, so a before/after comparison measures the code and not the seed.
 //
-// Usage: DATABASE_URL=postgres://atlas:atlas@localhost:5500/atlas_perf tsx e2e/fixtures/perf-seed.ts
+// Usage: DATABASE_URL=postgres://atlas:atlas@localhost:5600/atlas_open_perf tsx e2e/fixtures/perf-seed.ts
 // (after migrating that DB). `scripts/perf-stack.sh` does all of it.
 
 const url = process.env['DATABASE_URL'] ?? '';
-if (!/\/atlas_perf(\?|$)/.test(url)) {
-    throw new Error(`perf-seed only writes to a database named atlas_perf, got ${url || '(unset)'}`);
+if (!/\/atlas_open_perf(\?|$)/.test(url)) {
+    throw new Error(`perf-seed only writes to a database named atlas_open_perf, got ${url || '(unset)'}`);
 }
 
 const TASKS_PER_PROJECT = 700;
@@ -52,7 +52,7 @@ for (const entry of await marketplaceService.search()) {
         if (!(err instanceof MarketplaceSlugTakenError)) throw err;
     }
 }
-const workspace = join(tmpdir(), 'atlas-perf-workspace');
+const workspace = join(tmpdir(), 'atlas-open-perf-workspace');
 mkdirSync(workspace, { recursive: true });
 await db.updateTable('settings').set({ onboarding_complete: 1, workspace_path: workspace }).where('id', '=', 1).execute();
 

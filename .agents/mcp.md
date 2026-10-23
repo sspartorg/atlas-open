@@ -4,9 +4,9 @@ The `@atlas/mcp` package exposes the Atlas tool surface to MCP clients
 (Claude Code, Cursor, Claude Desktop). It has **two** transports:
 
 - **HTTP (recommended, single-entry config)** â€” hosted in-process by
-  `@atlas/api` on the fixed loopback port `127.0.0.1:4500`. Boot path:
+  `@atlas/api` on the fixed loopback port `127.0.0.1:4600`. Boot path:
   `packages/api/src/plugins/mcp-host.ts` â†’ `packages/mcp/src/http-handler.ts`.
-  One entry in `~/.claude.json` (`atlas` â†’ `url: http://127.0.0.1:4500/mcp`)
+  One entry in `~/.claude.json` (`atlas` â†’ `url: http://127.0.0.1:4600/mcp`)
   serves both the dev (`pnpm dev`) and prod (`pnpm prod`) local stacks â€”
   whichever is currently running owns the port.
 - **stdio (legacy / standalone)** â€” `packages/mcp/src/index.ts`. AI clients
@@ -15,8 +15,8 @@ The `@atlas/mcp` package exposes the Atlas tool surface to MCP clients
   process can't host the MCP listener.
 
 The server itself holds **no state** and touches **no database**. It is a thin
-tool layer that calls `@atlas/api` over HTTP â€” at `http://127.0.0.1:4001`
-(dev) or `http://127.0.0.1:4001` (prod), driven by whichever API process is
+tool layer that calls `@atlas/api` over HTTP â€” at `http://127.0.0.1:4301`
+(dev) or `http://127.0.0.1:4301` (prod), driven by whichever API process is
 hosting it.
 
 ---
@@ -76,20 +76,20 @@ Two transports, share the same tool registrations (`registerAllTools()`):
 
 ### HTTP (recommended)
 
-- Listener: `127.0.0.1:4500/mcp`, bound by the API process via
+- Listener: `127.0.0.1:4600/mcp`, bound by the API process via
   `startMcpHost()` (`packages/api/src/plugins/mcp-host.ts`).
 - Uses `StreamableHTTPServerTransport` from
   `@modelcontextprotocol/sdk/server/streamableHttp.js` in stateless mode
   (`sessionIdGenerator: undefined`) â€” each request is independent, no
   in-memory session table to leak across API restarts.
 - **First-boot-wins.** Whichever API instance (dev or prod) calls
-  `listen(4500)` first owns the port. The second instance catches
-  `EADDRINUSE`, logs `[mcp] port 4500 in use â€” running API-only`, and
+  `listen(4600)` first owns the port. The second instance catches
+  `EADDRINUSE`, logs `[mcp] port 4600 in use â€” running API-only`, and
   serves its own `/api/*` traffic without MCP. To hand MCP over, stop the
   owning instance and start the other.
 - Opt-out via `ATLAS_HOST_MCP=false` on a given instance â€” useful when
   running a second stack headless or in CI.
-- `ATLAS_MCP_PORT` moves the listener off 4500 for a second stack that needs its own MCP (a test stack whose agents must reach its own database). Item-attached agent runs receive the port via `--mcp-config`; runs using the Owner's `~/.claude.json` still reach 4500.
+- `ATLAS_MCP_PORT` moves the listener off 4600 for a second stack that needs its own MCP (a test stack whose agents must reach its own database). Item-attached agent runs receive the port via `--mcp-config`; runs using the Owner's `~/.claude.json` still reach 4600.
 - Loopback only. No LAN exposure regardless of `ATLAS_LAN_ACCESS`.
 - MCP â†’ API loopback HTTP still carries `X-Atlas-Token` per the existing
   `api-client.ts`; the token is the `ATLAS_MCP_TOKEN` from `.env` /
@@ -166,7 +166,7 @@ chains.
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `ATLAS_API_BASE` | `http://127.0.0.1:4001` | Base URL of the `@atlas/api` server |
+| `ATLAS_API_BASE` | `http://127.0.0.1:4301` | Base URL of the `@atlas/api` server |
 | `ATLAS_MCP_TIMEOUT_MS` | `15000` | Per-request HTTP timeout |
 | `ATLAS_MCP_TOKEN` | _(generated at API boot)_ | Sent as `X-Atlas-Token` on every non-GET request. The API's `requireMcpToken` preHandler rejects mutating calls when this header is missing on protected routes. |
 
@@ -180,14 +180,14 @@ response snippet.
 
 ### HTTP (recommended)
 
-Start the API at least once (`pnpm dev` or `pnpm prod`) so port 4500 is live.
+Start the API at least once (`pnpm dev` or `pnpm prod`) so port 4600 is live.
 Then add ONE entry to `~/.claude.json` â€” never edit it again:
 
 ```json
 {
   "mcpServers": {
     "atlas": {
-      "url": "http://127.0.0.1:4500/mcp"
+      "url": "http://127.0.0.1:4600/mcp"
     }
   }
 }
@@ -208,13 +208,13 @@ Build the package: `pnpm --filter @atlas/mcp build`. Entry point is
     "atlas": {
       "command": "node",
       "args": ["<absolute-path-to-repo>/packages/mcp/dist/index.js"],
-      "env": { "ATLAS_API_BASE": "http://127.0.0.1:4001" }
+      "env": { "ATLAS_API_BASE": "http://127.0.0.1:4301" }
     }
   }
 }
 ```
 
-Switch the env var to `http://127.0.0.1:5001` (prod) by editing this file
+Switch the env var to `http://127.0.0.1:5301` (prod) by editing this file
 and restarting the client â€” stdio doesn't auto-follow the running stack.
 
 ---

@@ -18,11 +18,11 @@ export function dataDir(): string {
             ? join(
                   process.env['APPDATA'] ??
                       join(process.env['USERPROFILE'] ?? '.', 'AppData', 'Roaming'),
-                  'Atlas'
+                  'AtlasOpen'
               )
             : // The non-win32 branch is unreachable on Windows CI where tests run.
               /* v8 ignore next */
-              join(process.env['HOME'] ?? '.', '.config', 'Atlas'))
+              join(process.env['HOME'] ?? '.', '.config', 'AtlasOpen'))
     );
 }
 

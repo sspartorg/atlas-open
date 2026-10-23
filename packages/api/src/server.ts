@@ -344,7 +344,7 @@ export async function buildApp(opts: FastifyServerOptions = {}): Promise<Fastify
             },
             servers: [
                 {
-                    url: `http://localhost:${process.env['API_PORT'] ?? process.env['PORT'] ?? 4001}`,
+                    url: `http://localhost:${process.env['API_PORT'] ?? process.env['PORT'] ?? 4301}`,
                     description:
                         process.env['ATLAS_ENV']?.toLowerCase() === 'prod'
                             ? 'Local prod'

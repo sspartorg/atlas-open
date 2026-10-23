@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-React 19 + Vite SPA on port 4000 (dev) / 5000 (prod). Owns:
+React 19 + Vite SPA on port 4300 (dev) / 5300 (prod). Owns:
 - All UI components (MUI-based)
 - 38 page routes + a catch-all (React Router v7) — `App.tsx` is the inventory, mirrored in `.agents/routes-map.md`
 - Data fetching (TanStack Query + typed fetch client)

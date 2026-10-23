@@ -4,29 +4,29 @@
 # data dir and MCP port, so the screenshots in docs/guide/images never show the
 # SIMULATED chip and never show the Owner's own projects.
 #
-#   scripts/guide-stack.sh up     # drop/create atlas_guide, migrate, seed, build, start
-#   scripts/guide-stack.sh down   # stop the servers (leaves the DB and /tmp/atlas-guide)
-#   scripts/guide-stack.sh drop   # down + DROP DATABASE atlas_guide + rm -rf /tmp/atlas-guide
+#   scripts/guide-stack.sh up     # drop/create atlas_open_guide, migrate, seed, build, start
+#   scripts/guide-stack.sh down   # stop the servers (leaves the DB and /tmp/atlas-open-guide)
+#   scripts/guide-stack.sh drop   # down + DROP DATABASE atlas_open_guide + rm -rf /tmp/atlas-open-guide
 #
 # Then: pnpm guide:populate        (real runs — spends tokens)
 #       pnpm guide:capture
 #
-# Web/API sit on 6010/6001 because that is where playwright.config.ts points,
+# Web/API sit on 7010/7001 because that is where playwright.config.ts points,
 # so the e2e suite and this stack cannot run at the same time.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DB=atlas_guide
-WEB_PORT=6010
-API_PORT=6001
-# Not 4500: a real agent's `atlas` MCP calls must reach this API, never the dev one.
-MCP_PORT=4720
-DB_URL="postgres://atlas:atlas@localhost:5500/${DB}"
+DB=atlas_open_guide
+WEB_PORT=7010
+API_PORT=7001
+# Not 4600: a real agent's `atlas` MCP calls must reach this API, never the dev one.
+MCP_PORT=4820
+DB_URL="postgres://atlas:atlas@localhost:5600/${DB}"
 # Outside the repo on purpose: Claude Code walks up from its cwd for CLAUDE.md,
 # and a worktree nested in this repo would hand every guide run Atlas's own rules.
-DATA=/tmp/atlas-guide
+DATA=/tmp/atlas-open-guide
 LOGS="$DATA/logs"
-psql() { docker exec atlas-postgres psql -U atlas -d postgres -qc "$1"; }
+psql() { docker exec atlas-open-postgres psql -U atlas -d postgres -qc "$1"; }
 
 down() {
     for port in "$WEB_PORT" "$API_PORT" "$MCP_PORT"; do

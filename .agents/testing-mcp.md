@@ -12,7 +12,7 @@ Two ways to exercise the MCP server end-to-end: a scripted JSON-RPC smoke test, 
    ```powershell
    pnpm --filter @atlas/api dev
    ```
-   Confirm it's up: `http://127.0.0.1:4001/api/health` returns `{"status":"ok",...}`.
+   Confirm it's up: `http://127.0.0.1:4301/api/health` returns `{"status":"ok",...}`.
 
 ---
 
@@ -25,7 +25,7 @@ The Inspector spawns the server, lists tools, and lets you call any tool with a 
 ```powershell
 $env:CLIENT_PORT='6280'
 $env:SERVER_PORT='6281'
-$env:ATLAS_API_BASE='http://127.0.0.1:4001'
+$env:ATLAS_API_BASE='http://127.0.0.1:4301'
 npx -y @modelcontextprotocol/inspector node --import tsx packages/mcp/src/index.ts
 ```
 
@@ -63,8 +63,8 @@ The Inspector defaults to **6274** (UI) + **6277** (proxy). If either is already
 # Tool surface only — no API needed
 node packages/mcp/scripts/smoke-test.mjs
 
-# Plus the read-only round-trip (API must be running; default base http://127.0.0.1:4001)
-LIVE_API=1 ATLAS_API_BASE=http://127.0.0.1:4001 node packages/mcp/scripts/smoke-test.mjs
+# Plus the read-only round-trip (API must be running; default base http://127.0.0.1:4301)
+LIVE_API=1 ATLAS_API_BASE=http://127.0.0.1:4301 node packages/mcp/scripts/smoke-test.mjs
 ```
 
 `SMOKE_QUERY` (default `todo`) is the `search_item` keyword; zero hits only skip the `get_item` leg, and an empty project / agent list skips its `get` leg.
@@ -84,7 +84,7 @@ Non-zero exit means the handshake, the tool surface, or a tool call failed. A to
 
 | Var | Default | Purpose |
 |---|---|---|
-| `ATLAS_API_BASE` | `http://127.0.0.1:4001` | Where the MCP tools send their HTTP calls |
+| `ATLAS_API_BASE` | `http://127.0.0.1:4301` | Where the MCP tools send their HTTP calls |
 | `ATLAS_MCP_TIMEOUT_MS` | `15000` | Per-API-request timeout in ms |
 
 ---
@@ -98,7 +98,7 @@ Sample config at `packages/mcp/examples/claude-desktop-config.json`. Replace `<a
 ## Common gotchas
 
 - **Tools list is empty / Connect fails in Inspector** → the Inspector was pointed at `dist/index.js`; it can't load `@atlas/shared`'s TypeScript. Use `node --import tsx packages/mcp/src/index.ts`.
-- **Every tool call errors with `fetch failed` or `ECONNREFUSED 127.0.0.1:4001`** → `@atlas/api` isn't running.
+- **Every tool call errors with `fetch failed` or `ECONNREFUSED 127.0.0.1:4301`** → `@atlas/api` isn't running.
 - **Port already in use** → use the `CLIENT_PORT` / `SERVER_PORT` env-var override shown above.
 - **Inspector opens, but server log says nothing on stdout** → that is correct. The server writes JSON-RPC to stdout (consumed by the transport) and all diagnostics to stderr. `console.log` would corrupt the stream.
-- **`list_projects` returns an empty array** → your local DB has no seeded projects, not an MCP error. Check the workspace data dir (`%APPDATA%/Atlas/atlas.db` on Windows, `~/.config/Atlas/atlas.db` on macOS/Linux).
+- **`list_projects` returns an empty array** → your local DB has no seeded projects, not an MCP error. Check the `atlas_open` database on `localhost:5600`.

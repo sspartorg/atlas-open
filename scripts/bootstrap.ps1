@@ -52,13 +52,13 @@ $copilotConfigPath   = Join-Path $env:USERPROFILE '.copilot\mcp-config.json'
 # HTTP form for Claude Code CLI / Copilot CLI.
 $desiredAtlasServerHttp = [ordered]@{
     type = 'http'
-    url  = 'http://127.0.0.1:4500/mcp'
+    url  = 'http://127.0.0.1:4600/mcp'
 }
 
 # stdio bridge fallback for clients that do not speak HTTP.
 $desiredAtlasServerStdio = [ordered]@{
     command = 'npx'
-    args    = @('-y', 'mcp-remote', 'http://127.0.0.1:4500/mcp')
+    args    = @('-y', 'mcp-remote', 'http://127.0.0.1:4600/mcp')
 }
 
 # -----------------------------------------------------------------------------
@@ -861,7 +861,7 @@ function Ensure-McpClientConfigs {
             Write-Mute 'atlas already registered with Claude Code CLI.'
         } else {
             Write-Warn 'Registering atlas with Claude Code CLI ...'
-            $json = '{"url":"http://127.0.0.1:4500/mcp"}'
+            $json = '{"url":"http://127.0.0.1:4600/mcp"}'
             & claude mcp add-json atlas --scope user $json 2>&1 | Out-Host
             if ($LASTEXITCODE -ne 0) {
                 Write-Warn "claude mcp add-json exited with code $LASTEXITCODE. Falling back to editing ~/.claude.json."
@@ -963,8 +963,8 @@ function Invoke-Bootstrap {
     Write-Host ''
     Write-Host '    pnpm dev' -ForegroundColor Green
     Write-Host ''
-    Write-Host '  Then open http://localhost:4000 in your browser.' -ForegroundColor Green
-    Write-Host '  API: http://localhost:4001    MCP: http://localhost:4500/mcp    Postgres: localhost:5500' -ForegroundColor DarkGray
+    Write-Host '  Then open http://localhost:4300 in your browser.' -ForegroundColor Green
+    Write-Host '  API: http://localhost:4301    MCP: http://localhost:4600/mcp    Postgres: localhost:5600' -ForegroundColor DarkGray
 
     # Auth follow-ups for tools that need interactive login flows the script
     # cannot reliably drive. We do not check claude's actual auth state (the

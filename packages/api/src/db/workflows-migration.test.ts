@@ -55,7 +55,6 @@ describe('migration 035 — workflows', () => {
             use_worktree: true,
             push_code: true,
             raises_pr: true,
-            max_loops: 3,
             graph: { nodes: [], edges: [] },
         });
     });

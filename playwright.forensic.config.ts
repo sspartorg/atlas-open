@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 // 2026-06-11 — Forensic-audit Playwright config.
 //
-// Targets the LIVE dev stack instead of the hermetic e2e stack on :6010.
+// Targets the LIVE dev stack instead of the hermetic e2e stack on :7010.
 //
 // G-018/G-017 — the port is derived from `WEB_PORT`, the same variable the
 // dev server and `utils/lan-origins.ts` read, rather than hardcoded. It was
@@ -36,9 +36,9 @@ function devWebPort(): string {
     if (fromShell) return fromShell;
     try {
         const env = readFileSync(new URL('.env', import.meta.url), 'utf8');
-        return /^WEB_PORT=(\d+)/m.exec(env)?.[1] ?? '4000';
+        return /^WEB_PORT=(\d+)/m.exec(env)?.[1] ?? '4300';
     } catch {
-        return '4000';
+        return '4300';
     }
 }
 

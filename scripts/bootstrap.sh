@@ -35,9 +35,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Test seam: the Debian/Fedora/Arch branches are chosen from os-release, and a
 # test cannot write /etc/os-release. Nothing else reads this variable.
 OS_RELEASE_FILE="${ATLAS_BOOTSTRAP_OS_RELEASE:-/etc/os-release}"
-MCP_URL='http://127.0.0.1:4500/mcp'
+MCP_URL='http://127.0.0.1:4600/mcp'
 # Byte-for-byte the JSON bootstrap.ps1 passes to `claude mcp add-json`.
-MCP_ADD_JSON='{"url":"http://127.0.0.1:4500/mcp"}'
+MCP_ADD_JSON='{"url":"http://127.0.0.1:4600/mcp"}'
 
 DRY_RUN=0
 NON_INTERACTIVE=0
@@ -172,7 +172,7 @@ manual_steps() {
 Then, from the repo root:
   cp .env.example .env && cp .env.prod.example .env.prod
   pnpm install && pnpm db:up && pnpm db:wait && pnpm db:migrate
-  claude mcp add-json atlas --scope user '{"url":"http://127.0.0.1:4500/mcp"}'
+  claude mcp add-json atlas --scope user '{"url":"http://127.0.0.1:4600/mcp"}'
   pnpm doctor
 EOF
 }
@@ -572,8 +572,8 @@ Next:
 
     pnpm dev
 
-Then open http://localhost:4000
-API: http://localhost:4001   MCP: http://localhost:4500/mcp   Postgres: localhost:5500
+Then open http://localhost:4300
+API: http://localhost:4301   MCP: http://localhost:4600/mcp   Postgres: localhost:5600
 
 For live agent runs, sign in to the CLIs that need a browser:
     claude login         # Anthropic

@@ -31,7 +31,7 @@ export async function deleteProjectsByPrefix(request: APIRequestContext, first: 
 
 /** A git clone with a local bare origin, like the seed's fixture. */
 export function gitFixture(name: string): { origin: string; clone: string } {
-    const dir = join(tmpdir(), 'atlas-e2e-fixtures', `pt-${name}`);
+    const dir = join(tmpdir(), 'atlas-open-e2e-fixtures', `pt-${name}`);
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     const origin = join(dir, 'origin.git');
@@ -60,7 +60,7 @@ export function insertRepo(projectId: string, r: { id: string; name: string; git
 
 /** Commit a new file in the bare origin, through a second clone, so the fixture clone is behind by one. */
 export function pushUpstream(origin: string, file: string): void {
-    const dir = join(tmpdir(), 'atlas-e2e-fixtures', `push-${Date.now()}`);
+    const dir = join(tmpdir(), 'atlas-open-e2e-fixtures', `push-${Date.now()}`);
     const git = (...args: string[]) => execFileSync('git', args, { stdio: 'pipe' });
     git('clone', origin, dir);
     git('-C', dir, 'config', 'user.email', 'e2e@atlas.local');

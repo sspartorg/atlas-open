@@ -5,7 +5,7 @@
 ## Purpose
 One Task run: the Task's assigned agent working it end to end in its own worktree, then Atlas committing leftovers, pushing and opening the PR. Shows the run's status, its agent step(s), the PR(s), and the code it changed — and lets the Owner **Stop** or **Resume** it.
 
-The run record is a `workflow_runs` row on the built-in `solo` workflow (migration `020_solo_runs.ts`; graph start → agent → end, `soloGraph` in `services/workflow-engine.ts`). The internal names (`workflow_runs`, `/api/workflow-runs/*`, `useWorkflowRun`, `workflow_run_updated`) are the run record's; there is no workflow builder in Atlas Open.
+The run record is a `workflow_runs` row on the built-in `solo` workflow (seeded by `001_baseline.sql`; graph start → agent → end, `soloGraph` in `services/workflow-engine.ts`). The internal names (`workflow_runs`, `/api/workflow-runs/*`, `useWorkflowRun`, `workflow_run_updated`) are the run record's; there is no workflow builder in Atlas Open.
 
 ## States
 - **Loading**: centred spinner.

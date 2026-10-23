@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 // is confirmed indirectly via a second subscribe returning 201 on
 // the same endpoint (upsert path) and unsubscribe returning 204.
 
-const API = 'http://127.0.0.1:6001';
+const API = 'http://127.0.0.1:7001';
 
 const SUB = {
     endpoint: 'https://fcm.googleapis.com/fcm/send/e2e-aaaa-bbbb-cccc-dddddddddddd',

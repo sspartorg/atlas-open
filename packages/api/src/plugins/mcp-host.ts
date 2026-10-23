@@ -1,26 +1,26 @@
-// HTTP MCP host — binds the Atlas MCP to a fixed loopback port (4500)
+// HTTP MCP host — binds the Atlas MCP to a fixed loopback port (4600)
 // so that ~/.claude.json carries ONE `atlas` entry (`url:
-// http://127.0.0.1:4500/mcp`) that always routes to whichever local
+// http://127.0.0.1:4600/mcp`) that always routes to whichever local
 // stack (dev or prod) is currently running.
 //
 // First-boot-wins: if the second stack starts while the first is still
-// up, the EADDRINUSE on port 4500 is caught and the second instance
+// up, the EADDRINUSE on port 4600 is caught and the second instance
 // runs API-only (web UI + /api/* still work; just no MCP). The user
 // stops the running stack to hand MCP over to the other.
 //
 // Opt-out: set ATLAS_HOST_MCP=false to skip binding entirely on a
 // given instance (useful when running headless or testing).
 //
-// ATLAS_MCP_PORT moves the listener off 4500 for a second stack that must
+// ATLAS_MCP_PORT moves the listener off 4600 for a second stack that must
 // own its own MCP (e.g. a test stack whose item-attached agent runs have
 // to reach its own database). Those runs get the port through
-// `--mcp-config`; runs that use the Owner's ~/.claude.json still hit 4500.
+// `--mcp-config`; runs that use the Owner's ~/.claude.json still hit 4600.
 
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import { createHttpMcpHandler, type IHttpMcpHost } from '@atlas/mcp/http-handler';
 import type { FastifyBaseLogger } from 'fastify';
 
-const MCP_HOST_PORT = Number(process.env['ATLAS_MCP_PORT']) || 4500;
+const MCP_HOST_PORT = Number(process.env['ATLAS_MCP_PORT']) || 4600;
 const MCP_HOST_BIND = '127.0.0.1';
 const MCP_HOST_PATH = '/mcp';
 

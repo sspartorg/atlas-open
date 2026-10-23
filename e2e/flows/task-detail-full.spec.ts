@@ -29,7 +29,7 @@ async function cleanup(request: APIRequestContext) {
 test.beforeAll(async ({ request }) => {
     await cleanup(request);
     projectId = (await createProject(request, NAME, 'VTD')).id;
-    insertRepo(projectId, { id: `${projectId}-r`, name: 'vole', git_path: '/tmp/atlas-e2e-vole' });
+    insertRepo(projectId, { id: `${projectId}-r`, name: 'vole', git_path: '/tmp/atlas-open-e2e-vole' });
     taskId = (await apiPost<{ id: string }>(request, '/api/tasks', { project_id: projectId, title: 'Vole task', description: 'Original description' })).id;
     subIds = [];
     for (const t of ['Vole sub one', 'Vole sub two', 'Vole sub three']) {

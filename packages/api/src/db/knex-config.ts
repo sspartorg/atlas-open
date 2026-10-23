@@ -4,6 +4,7 @@ import '../load-env.js';
 import type { Knex } from 'knex';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
 
 function databaseUrl(): string {
     const url = process.env['DATABASE_URL'];
@@ -15,7 +16,7 @@ const config: Knex.Config = {
     client: 'pg',
     connection: databaseUrl(),
     migrations: {
-        directory: path.join(__dirname, 'migrations'),
+        directory: MIGRATIONS_DIR,
         extension: 'ts',
         loadExtensions: ['.ts'],
         tableName: '_knex_migrations',

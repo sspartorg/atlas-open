@@ -235,8 +235,6 @@ export async function settingsRoutes(app: FastifyInstance) {
             await trx.deleteFrom('jira_issues').execute();
             await trx.deleteFrom('jira_attachments').execute();
             await trx.deleteFrom('jira_config').execute();
-            // Left behind, the next tick would pull the team's projects straight back in.
-            await trx.deleteFrom('team_config').execute();
             await trx.deleteFrom('items').execute();
             await trx.deleteFrom('projects').execute();
             await trx.deleteFrom('credentials').execute();

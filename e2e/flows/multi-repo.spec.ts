@@ -12,7 +12,7 @@ import { API, SEEDED_AGENT, apiGet, taskRuns } from '../helpers/api.js';
 // same docker psql the global setup uses) and removed afterwards.
 
 const PROJECT_ID = 'e2e-terminal-project';
-const FIX_DIR = join(tmpdir(), 'atlas-e2e-fixtures');
+const FIX_DIR = join(tmpdir(), 'atlas-open-e2e-fixtures');
 const WEB_BARE = join(FIX_DIR, 'web.git');
 const WEB_CLONE = join(FIX_DIR, 'web');
 const REPO_ID = 'e2e-web-repo';
@@ -20,7 +20,7 @@ const REPO_ID = 'e2e-web-repo';
 function psql(sql: string): void {
     execFileSync(
         'docker',
-        ['exec', 'atlas-postgres', 'psql', '-U', 'atlas', '-d', 'atlas_e2e', '-c', sql],
+        ['exec', 'atlas-open-postgres', 'psql', '-U', 'atlas', '-d', 'atlas_open_e2e', '-c', sql],
         { stdio: 'pipe' }
     );
 }

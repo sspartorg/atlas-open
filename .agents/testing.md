@@ -146,7 +146,7 @@ debugging a red spec:**
   running.** `global-setup.ts` spawns the API as `pnpm --filter @atlas/api dev`,
   i.e. `tsx watch`. A save restarts it mid-run, and a save that does not parse
   kills it with an uncaught `TransformError` — every spec from that point on
-  fails with proxy `502` / `ECONNREFUSED 127.0.0.1:6001` and looks like 12
+  fails with proxy `502` / `ECONNREFUSED 127.0.0.1:7001` and looks like 12
   unrelated regressions. `e2e-logs/api.log` is where the real cause is; check it
   before believing a wave of failures. Note the logs are opened with `flags:
   'w'`, so the next run overwrites them — read them before re-running.
@@ -158,9 +158,9 @@ debugging a red spec:**
   `100755` in the index as of 2026-09-12 — `git ls-files -s e2e/fixtures` if a
   terminal spec starts failing on session status.
 
-`pnpm e2e` runs the greenfield Playwright suite at the repo root. The setup owns a dedicated `atlas_e2e` Postgres DB + isolated api on :6001 + web on :6000, so it never collides with `pnpm dev` (4000/4001) or `pnpm prod` (5000/5001). Layout, spec catalogue, and the backfill list live in `docs/regression-2026-05.md`.
+`pnpm e2e` runs the greenfield Playwright suite at the repo root. The setup owns a dedicated `atlas_open_e2e` Postgres DB + isolated api on :7001 + web on :7010, so it never collides with `pnpm dev` (4300/4301) or `pnpm prod` (5300/5301). Layout, spec catalogue, and the backfill list live in `docs/regression-2026-05.md`.
 
-The forensic audits (`pnpm e2e:forensic`, `e2e:functional`, `e2e:state-transitions`, config `playwright.forensic.config.ts`) run against a **live** dev stack, not the e2e one: start `pnpm dev` first. They target `http://localhost:4000`; set `FORENSIC_BASE_URL` (e.g. `http://127.0.0.1:4300`) for a stack on other ports, and `OUT_DIR` to keep their ndjson and screenshots out of the repo.
+The forensic audits (`pnpm e2e:forensic`, `e2e:functional`, `e2e:state-transitions`, config `playwright.forensic.config.ts`) run against a **live** dev stack, not the e2e one: start `pnpm dev` first. They target `http://localhost:4300`; set `FORENSIC_BASE_URL` (e.g. `http://127.0.0.1:4300`) for a stack on other ports, and `OUT_DIR` to keep their ndjson and screenshots out of the repo.
 
 - `pnpm e2e` â€” full headless suite (~7 minutes wall-clock)
 - `pnpm e2e:headed` â€” opens a browser window per spec; slower, useful for debugging

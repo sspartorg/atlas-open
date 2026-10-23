@@ -1,11 +1,11 @@
 import { execFileSync } from 'node:child_process';
 
-// Plain SQL on the e2e DB (atlas_e2e on the dev postgres container), for
+// Plain SQL on the e2e DB (atlas_open_e2e on the dev postgres container), for
 // seeding rows no API produces on demand and for hand-computed expectations.
 
 /** Rows of a query, tab-separated columns. */
-export function sql(query: string, dbName = 'atlas_e2e'): string[][] {
-    const out = execFileSync('docker', ['exec', 'atlas-postgres', 'psql', '-U', 'atlas', '-d', dbName, '-v', 'ON_ERROR_STOP=1', '-tAF', '\t', '-c', query], {
+export function sql(query: string, dbName = 'atlas_open_e2e'): string[][] {
+    const out = execFileSync('docker', ['exec', 'atlas-open-postgres', 'psql', '-U', 'atlas', '-d', dbName, '-v', 'ON_ERROR_STOP=1', '-tAF', '\t', '-c', query], {
         encoding: 'utf8',
     });
     return out

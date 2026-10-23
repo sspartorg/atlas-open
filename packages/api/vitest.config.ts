@@ -12,7 +12,7 @@ export default defineConfig({
         env: {
             DATABASE_URL:
                 process.env['TEST_DATABASE_URL'] ??
-                'postgres://atlas:atlas@localhost:5500/atlas_test',
+                'postgres://atlas:atlas@localhost:5600/atlas_open_test',
             // Silence Fastify pino during tests.
             ATLAS_LOG_LEVEL: 'error',
             // Force the MCP-write gate into degraded/open mode so route-
@@ -27,7 +27,7 @@ export default defineConfig({
             TZ: 'UTC',
             // Every on-disk side effect (team-config clone, Jira attachment
             // copies, the encryption key) goes to a scratch dir, never the
-            // developer's ~/.config/Atlas — Reset Workspace's test deletes
+            // developer's ~/.config/AtlasOpen — Reset Workspace's test deletes
             // <dataDir>/team-config and <dataDir>/jira-attachments for real.
             ATLAS_DATA_DIR: join(tmpdir(), 'atlas-api-test-data'),
             // The Environment routes write a real env file; never the
@@ -40,7 +40,7 @@ export default defineConfig({
         pool: 'forks',
         // Vitest 4 decoupled singleFork from sequential file execution; without
         // this, test files run in parallel in one fork and trip each other's
-        // TRUNCATE/INSERT in the shared atlas_test DB.
+        // TRUNCATE/INSERT in the shared atlas_open_test DB.
         fileParallelism: false,
         forks: {
             singleFork: true,

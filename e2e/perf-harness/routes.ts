@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-// The heavy routes the perf + visual harness walks, on the `atlas_perf` seed
+// The heavy routes the perf + visual harness walks, on the `atlas_open_perf` seed
 // (`e2e/fixtures/perf-seed.ts`). Ids are the seed's fixed ids.
 
 export interface PerfRoute {

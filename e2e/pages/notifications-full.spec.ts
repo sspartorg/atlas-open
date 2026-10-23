@@ -9,7 +9,7 @@ import { insertNotifications, sql, type NotificationRow } from '../helpers/db.js
 // through a fake Telegram Bot API; filter pills and counts; Load more; Mark All
 // Read with the sidenav badge and the topbar popover; a live arrival over SSE;
 // and the needs_you rule (the row drops once its item moves on).
-// Rows are inserted straight into atlas_e2e (helpers/db.ts) except where the
+// Rows are inserted straight into atlas_open_e2e (helpers/db.ts) except where the
 // point is a real producer.
 
 let fake: Server;

@@ -280,7 +280,6 @@ export interface ProjectsTable {
     status: Str;
     guardrails_md: Str;
     // Migration 022 — preselected by /tasks/new only (never applied server-side).
-    default_workflow_id: StrN;
     // Migration 002 — the one project agent tests default to (`test-project.ts`).
     is_test_sandbox: ColumnType<boolean, boolean | undefined, boolean | undefined>;
     // Migration 009 — Jira status names per Atlas status; null = unmapped.
@@ -505,20 +504,6 @@ export interface JiraConfigTable {
     updated_at: UpdatedAt;
 }
 
-export interface TeamConfigTable {
-    id: Generated<number>;
-    role: ColumnType<'off' | 'publisher' | 'subscriber', 'off' | 'publisher' | 'subscriber' | undefined, 'off' | 'publisher' | 'subscriber'>;
-    repo_url: StrN;
-    credential_id: StrN;
-    branch: Str;
-    interval_minutes: Int;
-    last_sync_at: TSD;
-    last_sync_ok: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
-    last_sync_message: StrN;
-    last_commit: StrN;
-    updated_at: UpdatedAt;
-}
-
 export interface JiraIssuesTable {
     jira_key: string;
     item_id: StrN;
@@ -577,7 +562,6 @@ export interface ItemExternalLinksTable {
     ci_summary: ColumnType<IExternalCiCheck[] | null, string | null | undefined, string | null | undefined>;
     ci_checked_at: TSn;
     ci_handled_sha: StrN;
-    ci_fix_attempts: ColumnType<number, number | undefined, number>;
 }
 
 /** Shape written by `services/run-trace-parser.ts`. Declared here so the column is typed, not `unknown`. */
@@ -796,18 +780,13 @@ export interface WorkflowsTable {
     push_code: ColumnType<boolean, boolean | undefined, boolean>;
     raises_pr: ColumnType<boolean, boolean | undefined, boolean>;
     // ADR 0015 — migration 038_workflow_subtasks.ts.
-    push_to_default: ColumnType<boolean, boolean | undefined, boolean>;
-    max_loops: Int;
-    max_parallel_runs: Int;
     schedule_preset: ColumnType<SchedulePreset | null, SchedulePreset | null | undefined, SchedulePreset | null | undefined>;
     schedule_time_of_day: StrN;
-    schedule_weekday: IntN;
     cron_expr: StrN;
     next_run_at: TSn;
     last_run_at: TSn;
     marketplace_source_id: StrN;
     marketplace_pulled_version: IntN;
-    marketplace_pulled_at: TSn;
     created_at: CreatedAt;
     updated_at: UpdatedAt;
 }
@@ -855,19 +834,6 @@ export interface WorkflowRunEventsTable {
     created_at: CreatedAt;
 }
 
-// Migration 041 — workflows published to the Marketplace. `bundle` is the
-// export zip (bytea selects as a Buffer).
-export interface PublishedWorkflowsTable {
-    id: string;
-    name: string;
-    description: StrN;
-    source_workflow_id: StrN;
-    bundle: Buffer;
-    version: Int;
-    published_at: CreatedAt;
-    updated_at: UpdatedAt;
-}
-
 // Migration 011 — one row per deterministic gate execution. ADR 0020 made
 // Atlas run the gate itself; this is where the verdict lands so it can be
 // queried instead of read out of `workflow_runs.park_reason` prose.
@@ -891,7 +857,6 @@ export interface RunGateResultsTable {
      */
     command: StrN;
     /** ADR 0028 — where the step's full output was written, under `.atlas/checks/`. */
-    log_path: StrN;
     created_at: CreatedAt;
 }
 
@@ -966,7 +931,6 @@ export interface DB {
     workflows: WorkflowsTable;
     workflow_runs: WorkflowRunsTable;
     workflow_run_events: WorkflowRunEventsTable;
-    published_workflows: PublishedWorkflowsTable;
     run_gate_results: RunGateResultsTable;
     agent_tests: AgentTestsTable;
     agent_test_runs: AgentTestRunsTable;
@@ -996,7 +960,6 @@ export interface DB {
     item_links: ItemLinksTable;
     item_external_links: ItemExternalLinksTable;
     jira_config: JiraConfigTable;
-    team_config: TeamConfigTable;
     jira_sources: JiraSourcesTable;
     jira_issues: JiraIssuesTable;
     jira_attachments: JiraAttachmentsTable;

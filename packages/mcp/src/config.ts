@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE = 'http://127.0.0.1:4001';
+const DEFAULT_API_BASE = 'http://127.0.0.1:4301';
 
 export interface IMcpConfig {
     apiBase: string;

@@ -14,7 +14,7 @@ import { one, sql } from '../helpers/db.js';
 // the small base seed. The browser and the SQL both use UTC.
 
 const ROOT = new URL('../..', import.meta.url).pathname;
-const E2E_DB_URL = 'postgres://atlas:atlas@localhost:5500/atlas_e2e';
+const E2E_DB_URL = 'postgres://atlas:atlas@localhost:5600/atlas_open_e2e';
 const WINDOWS = ['7d', '30d', '90d', 'month'] as const;
 type Win = (typeof WINDOWS)[number];
 

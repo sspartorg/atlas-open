@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Seed visual baselines against the running dev stack (web :4000).
+// Seed visual baselines against the running dev stack (web :4300).
 // Uses the desktop / mobile / ipad viewports declared in playwright.config.ts
 // and writes PNGs matching the naming convention expected by
 // e2e/visual/snapshots.spec.ts.
@@ -56,7 +56,7 @@ function safeName(route) {
 async function seedOne(page, route, theme, viewport) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.addInitScript((t) => localStorage.setItem('atlas.theme', t), theme);
-    await page.goto('http://localhost:4000' + route, { waitUntil: 'domcontentloaded' });
+    await page.goto('http://localhost:4300' + route, { waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
     await page.waitForTimeout(1000);
     const filename = `${theme}--${safeName(route)}${viewport.suffix}.png`;

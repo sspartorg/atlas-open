@@ -3,9 +3,9 @@ import { defineConfig, devices } from '@playwright/test';
 // Playwright E2E config.
 //
 // Stack-up is owned by `e2e/global-setup.ts`: it drops + creates
-// `atlas_e2e` (on the dev postgres container, host port 5500),
-// runs Knex migrations, seeds, then spawns the API on :6001 + the
-// Web dev server on :6000 with `VITE_API_BASE_URL` pointing at the
+// `atlas_open_e2e` (on the dev postgres container, host port 5600),
+// runs Knex migrations, seeds, then spawns the API on :7001 + the
+// Web dev server on :7010 with `VITE_API_BASE_URL` pointing at the
 // test API. `global-teardown.ts` kills both processes and the e2e
 // DB (state lives on disk between runs only when the snapshot
 // battery is rebuilt).
@@ -44,10 +44,10 @@ export default defineConfig({
     ],
 
     use: {
-        // 2026-06-23 — 6010, not 6000. 6000 is X11 on the WHATWG bad-ports
+        // 2026-06-23 — 7010, not 6000. 6000 is X11 on the WHATWG bad-ports
         // blocklist (Chromium blocks ERR_UNSAFE_PORT, Node fetch refuses
         // it). Kept in sync with WEB_PORT in `e2e/global-setup.ts`.
-        baseURL: 'http://127.0.0.1:6010',
+        baseURL: 'http://127.0.0.1:7010',
         trace: 'on-first-retry',
         screenshot: 'only-on-failure',
         video: 'off',

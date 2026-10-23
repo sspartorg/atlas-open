@@ -23,7 +23,7 @@ let projectId = '';
 let taskId = '';
 let subId = '';
 let git = { origin: '', clone: '' };
-const OUT = join(tmpdir(), 'atlas-e2e-fixtures', 'mor-setup-out.txt');
+const OUT = join(tmpdir(), 'atlas-open-e2e-fixtures', 'mor-setup-out.txt');
 
 async function cleanup(request: APIRequestContext) {
     for (const [id] of sql(`SELECT id FROM projects WHERE issue_key_prefix = 'MOR'`)) {

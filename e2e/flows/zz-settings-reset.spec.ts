@@ -11,7 +11,7 @@ import { API, apiGet } from '../helpers/api.js';
 test.afterAll(() => {
     execFileSync('pnpm', ['exec', 'tsx', 'e2e/fixtures/run-seed.ts'], {
         cwd: resolve(new URL('.', import.meta.url).pathname, '../..'),
-        env: { ...process.env, DATABASE_URL: 'postgres://atlas:atlas@localhost:5500/atlas_e2e' },
+        env: { ...process.env, DATABASE_URL: 'postgres://atlas:atlas@localhost:5600/atlas_open_e2e' },
         stdio: 'ignore',
     });
 });

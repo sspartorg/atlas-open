@@ -7,7 +7,7 @@ import { setThemeMode, type ThemeMode } from '../helpers/theme.js';
 // 2026-06-11 — Forensic walker (Plan 1 of /goal audit).
 //
 // Visits every top-level route + every tab on the 4 tabbed pages, in
-// both light and dark themes, against the LIVE dev stack (port 4000
+// both light and dark themes, against the LIVE dev stack (port 4300
 // per `playwright.forensic.config.ts`). For each visit captures:
 //
 //   - nav timing + per-request network records (via gotoWithPerf)

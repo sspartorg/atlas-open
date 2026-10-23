@@ -28,8 +28,8 @@ import {
 
 const NAME = 'Robin Repos';
 const CRED = 'e2e-fake-github';
-const WORKSPACE = '/tmp/atlas-e2e';
-const CONNECT_DIR = join(tmpdir(), 'atlas-e2e-fixtures', 'rgh-connect');
+const WORKSPACE = '/tmp/atlas-open-e2e';
+const CONNECT_DIR = join(tmpdir(), 'atlas-open-e2e-fixtures', 'rgh-connect');
 const FAKE = ['rgh-base', 'rgh-alpha', 'rgh-beta', 'rgh-other', 'rgh-fetch', 'rgh-gone'];
 let projectId = '';
 let credId = '';
@@ -279,7 +279,7 @@ test.describe('Add repo, connect an existing folder', () => {
     });
 
     test('a folder another project already registered is refused, naming it', async ({ page }) => {
-        const dialog = await connect(page, join(tmpdir(), 'atlas-e2e-fixtures', 'project'), 'https://github.com/atlas-e2e/rgh-beta.git');
+        const dialog = await connect(page, join(tmpdir(), 'atlas-open-e2e-fixtures', 'project'), 'https://github.com/atlas-e2e/rgh-beta.git');
         await expect(dialog.getByText('Folder already registered')).toBeVisible();
         await expect(dialog).toContainText(/This folder is already registered as "[^"]+"\./);
         await expect(dialog).toContainText('Open the existing project from the list');
@@ -390,7 +390,7 @@ test.describe('auto-fetch, run now', () => {
     const notes = (repo: string) => sql(`SELECT event_type, message FROM notifications WHERE project_id = '${projectId}' AND message LIKE '%${NAME}/${repo}%' ORDER BY id`);
 
     test('a fetch after a push to GitHub fast-forwards the folder and leaves an autofetch_success note', async ({ request }) => {
-        const dest = join(tmpdir(), 'atlas-e2e-fixtures', 'rgh-fetch');
+        const dest = join(tmpdir(), 'atlas-open-e2e-fixtures', 'rgh-fetch');
         const url = fakeGithubClone('rgh-fetch', dest);
         insertRepo(projectId, { id: `${projectId}-fetch`, name: 'fetch', git_path: dest, git_url: url, credential_id: credId, position: 2 });
         await enable(request, `${projectId}-fetch`);
@@ -403,7 +403,7 @@ test.describe('auto-fetch, run now', () => {
     });
 
     test('a fetch that fails leaves an autofetch_failed notification the Owner sees', async ({ page, request }) => {
-        const dest = join(tmpdir(), 'atlas-e2e-fixtures', 'rgh-gone');
+        const dest = join(tmpdir(), 'atlas-open-e2e-fixtures', 'rgh-gone');
         const url = fakeGithubClone('rgh-gone', dest);
         insertRepo(projectId, { id: `${projectId}-gone`, name: 'gone', git_path: dest, git_url: url, credential_id: credId, position: 3 });
         await enable(request, `${projectId}-gone`);
@@ -423,7 +423,7 @@ test.describe('auto-fetch, run now', () => {
     });
 
     test('a repo with no credential is skipped with a note saying so; a disabled schedule does nothing', async ({ request }) => {
-        insertRepo(projectId, { id: `${projectId}-nocred`, name: 'nocred', git_path: '/tmp/atlas-e2e-rgh-nocred', position: 4 });
+        insertRepo(projectId, { id: `${projectId}-nocred`, name: 'nocred', git_path: '/tmp/atlas-open-e2e-rgh-nocred', position: 4 });
         expect((await fire(request, `${projectId}-nocred`)).status()).toBe(202);
         // Off by default: firing an off schedule is a no-op.
         await expect.poll(() => notes('nocred').length, { timeout: 3_000 }).toBe(0);
@@ -486,7 +486,7 @@ test.describe('Generate AI scaffold', () => {
     });
 
     test('a repo without a credential or not cloned is refused with the reason', async ({ request }) => {
-        insertRepo(projectId, { id: `${projectId}-bare`, name: 'nocredential', git_path: '/tmp/atlas-e2e-rgh-nocred2', position: 5 });
+        insertRepo(projectId, { id: `${projectId}-bare`, name: 'nocredential', git_path: '/tmp/atlas-open-e2e-rgh-nocred2', position: 5 });
         const res = await request.post(`${API}/api/projects/${projectId}/generate-ai-scaffold`, { data: { repo_id: `${projectId}-bare` } });
         expect(res.status()).toBe(409);
         expect(await res.json()).toMatchObject({ error: 'Repo has no credential attached' });
