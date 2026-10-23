@@ -18,24 +18,13 @@ A short version of these rules lives in the root [`AGENTS.md`](../AGENTS.md), wh
 - Architecture decisions — those live in `docs/adr/`, which is authoritative and immutable. `.agents/` is a derived cache; when the two disagree, the ADR wins and this folder is wrong.
 - Implementation plans — those live in `docs/superpowers/plans/` (kept) or a local plan file (transient).
 
-## Commit discipline (Theme 11)
+## Commit discipline (Theme 11, ADR 0015)
 
-Every chore an agent performs gets one commit. Format:
+Agents never run `git commit`, `git push`, `gh`, `git worktree` or `git checkout <branch>`. They edit files and leave them uncommitted. When the run ends `workflow-engine.ts` `commitPending` stages everything (minus `.atlas/` scratch paths) and commits it as `<task key>: <task title>` (e.g. `ATL-12: Fix login`) under the credential's bot identity, with the human `Co-Authored-By` trailer when the credential carries one; then it pushes and opens the PR.
 
-```
-<type>(<scope>): <summary>
+Enforcement: the constitution's "Repository operations" section (`prompt-builder.ts`), Claude `--disallowedTools` (`CLAUDE_DISALLOWED_TOOLS`: `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh:*)`, also for ollama), Copilot `--deny-tool shell(git commit) / shell(git push) / shell(gh)`, and no credential in the agent's env (`agentRunEnv`).
 
-Refs: <atlas-item-id>
-<optional body — WHY, not WHAT>
-```
-
-- `<type>` ∈ `feat | fix | refactor | test | docs | chore | perf | style | build | ci`
-- `<scope>` ∈ `api | web | shared | mcp | infra | docs` (or your role slug for cross-cutting work)
-- `<summary>` ≤ 60 chars, imperative ("add", not "added")
-- `Refs:` line is mandatory for issue-attached runs (UUID or short-id like `ATL-7`)
-- Never `--no-verify`. Never `--amend`.
-
-The verifier in `services/commit-verifier.ts` audits this rule per run; the Agent Detail Overview tab shows the last 10 audits as colored dots (green/amber/red/grey). Owners see at a glance whether an agent is following discipline. Verbatim rule lives in `services/commit-discipline.ts` `COMMIT_DISCIPLINE_PROMPT_SECTION` and is injected into every issue-attached run's prompt.
+The verifier in `services/commit-verifier.ts` audits each item run before Atlas commits: `compliant` = files changed and left uncommitted, `partial` = the agent committed (`agent-committed` per commit), `clean` = nothing changed. The Agent Detail Overview tab shows the last 10 audits as coloured dots.
 
 ---
 

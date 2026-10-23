@@ -327,8 +327,8 @@ function CommitDisciplineTile({ agentId }: { agentId: string }) {
         return (
             <FormSection label="Commit discipline">
                 <Typography sx={{ fontSize: 12.5, color: ATLAS_PALETTE.slate60 }}>
-                    No agent runs have been verified yet. The verifier audits commits every
-                    issue-attached run completes.
+                    No agent runs have been verified yet. The verifier checks every issue-attached
+                    run left its changes for Atlas to commit.
                 </Typography>
             </FormSection>
         );
@@ -380,8 +380,8 @@ function CommitDisciplineTile({ agentId }: { agentId: string }) {
                 })}
             </Box>
             <Typography sx={{ fontSize: 11, color: ATLAS_PALETTE.slate60 }}>
-                Newest first. Green = compliant, amber = partial (missing Refs or unconventional
-                subject), red = silent (files changed, no commit), grey = clean (no work to verify).
+                Newest first. Green = compliant (files changed, left for Atlas to commit), amber =
+                partial (the agent committed itself), grey = clean (no work to verify).
             </Typography>
         </FormSection>
     );

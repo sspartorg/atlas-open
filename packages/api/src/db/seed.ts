@@ -749,53 +749,6 @@ foreach ($g in $gaps) { $i++; Write-Output ("{0}. {1}" -f $i, $g) }
 exit 1
 `,
     },
-    {
-        id: 'commit-discipline',
-        name: 'Commit discipline (Co-Authored-By trailer)',
-        description:
-            'Every commit between git merge-base HEAD origin/main and HEAD must carry the Co-Authored-By trailer in its body. Catches commits made without the standard human+AI signature.',
-        sort_order: 106,
-        body_sh: `#!/usr/bin/env bash
-# Commit discipline gate. $1 is the item id (unused).
-set -u
-base="$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD~10)"
-shas="$(git log --format=%H "$base"..HEAD 2>/dev/null || true)"
-if [ -z "$shas" ]; then exit 0; fi
-gaps=""
-n=0
-for sha in $shas; do
-    body="$(git log -1 --format=%B "$sha" 2>/dev/null || true)"
-    if ! printf "%s" "$body" | grep -q "Co-Authored-By:"; then
-        n=$((n+1))
-        gaps="$gaps$n. commit $sha missing Co-Authored-By trailer
-"
-    fi
-done
-if [ -z "$gaps" ]; then exit 0; fi
-printf "commit-discipline:\\n%s" "$gaps"
-exit 1
-`,
-        body_ps1: `# Commit discipline gate. $args[0] is the item id (unused).
-$ErrorActionPreference = 'Continue'
-$base = git merge-base HEAD origin/main 2>$null
-if ([string]::IsNullOrWhiteSpace($base)) { $base = 'HEAD~10' }
-$shas = git log --format=%H "$base..HEAD" 2>$null
-if ([string]::IsNullOrWhiteSpace($shas)) { exit 0 }
-$gaps = New-Object System.Collections.ArrayList
-foreach ($sha in ($shas -split "\`r?\`n")) {
-    if ([string]::IsNullOrWhiteSpace($sha)) { continue }
-    $body = git log -1 --format=%B $sha 2>$null
-    if (-not ($body -match 'Co-Authored-By:')) {
-        [void]$gaps.Add("commit $sha missing Co-Authored-By trailer")
-    }
-}
-if ($gaps.Count -eq 0) { exit 0 }
-Write-Output 'commit-discipline:'
-$i = 0
-foreach ($g in $gaps) { $i++; Write-Output ("{0}. {1}" -f $i, $g) }
-exit 1
-`,
-    },
 ];
 
 async function seedGuardrailScripts(): Promise<void> {

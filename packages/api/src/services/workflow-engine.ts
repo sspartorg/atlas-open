@@ -252,7 +252,7 @@ export async function startTaskRun(itemId: string): Promise<string> {
  * Provisions the run's worktree, or — when it already exists — brings the
  * branch onto the latest default branch (ensureWorktree pulls ff-only and
  * rebases its commits onto fresh origin/<default>). Returns why it failed, or
- * null. ensureWorktree discards uncommitted files, so leftovers are committed
+ * null. ensureWorktree discards uncommitted files, so the agent's edits are committed
  * first.
  */
 async function prepareWorktree(run: RunRow): Promise<string | null> {
@@ -266,7 +266,7 @@ async function prepareWorktree(run: RunRow): Promise<string | null> {
             if (!repo.git_path) {
                 throw new Error(workspace ? `Repo ${repo.name} has no cloned repository on disk` : 'Project has no cloned repository on disk');
             }
-            if (run.worktree_path) await commitPending(path, repo.credential_id, run.id);
+            if (run.worktree_path) await commitPending(path, repo.credential_id, await commitMessage(run));
             // item: null — the path lives on workflow_runs only. Writing it to
             // items.worktree_path would let the boot orphan reaper push and
             // delete the worktree mid-run.
@@ -572,19 +572,29 @@ export async function continueResumedRun(runId: string): Promise<void> {
 
 // ─── Delivery / cancel ──────────────────────────────────────────────────────
 
-async function commitPending(worktreePath: string, credentialId: string | null, runId: string): Promise<string | null> {
+/** `<task key>: <task title>`, e.g. `ATL-12: Fix login`. */
+async function commitMessage(run: Pick<RunRow, 'id' | 'item_id'>): Promise<string> {
+    const item = run.item_id ? await loadItem(run.item_id) : undefined;
+    return item ? `${item.id}: ${item.title}` : `Atlas run ${run.id.slice(0, 8)}`;
+}
+
+/**
+ * The only commit path for a run's work (ADR 0015): agents edit, Atlas commits
+ * whatever the worktree holds. A no-op when nothing changed.
+ */
+async function commitPending(worktreePath: string, credentialId: string | null, message: string): Promise<string | null> {
     const auth = credentialId ? await buildGitAuth(credentialId).catch(() => null) : null;
     const env = gitInvokeEnv(auth?.configPath ?? null);
     try {
         const status = await exec('git', ['-C', worktreePath, 'status', '--porcelain'], { env, timeout: 60_000 });
         if (!status.stdout.trim()) return null;
         await exec('git', ['-C', worktreePath, ...stageArgs()], { env, timeout: 60_000 });
-        const args = ['-c', 'core.hooksPath=.husky/_', '-C', worktreePath, 'commit', '-m', `chore(atlas): uncommitted changes from run ${runId.slice(0, 8)}`];
+        const args = ['-c', 'core.hooksPath=.husky/_', '-C', worktreePath, 'commit', '-m', message];
         if (auth?.humanName && auth.humanEmail) args.push('--trailer', `Co-Authored-By: ${auth.humanName} <${auth.humanEmail}>`);
         await exec('git', args, { env, timeout: 60_000 });
-        return 'committed leftover changes';
+        return `committed ${message}`;
     } catch (err) {
-        return `could not commit leftover changes: ${(err as Error).message}`;
+        return `could not commit: ${(err as Error).message}`;
     } finally {
         if (auth?.configPath) cleanupGitConfig(auth.configPath);
     }
@@ -623,7 +633,17 @@ async function deliver(run: RunRow, opts: { openPr: boolean }): Promise<Delivery
     const { repos, workspace } = await runRepos(run);
     const item = run.item_id ? await loadItem(run.item_id) : undefined;
     const title = item ? `[${item.id}] ${String(item.title).slice(0, 80)}` : project.name;
-    const body = [`Opened by Atlas.`, '', ...(item ? [`- Task: ${item.id}`] : []), `- Run: \`${run.id}\``].join('\n');
+    const agent = item?.assignee_agent_id
+        ? await db.selectFrom('agents').select('name').where('id', '=', item.assignee_agent_id).executeTakeFirst()
+        : undefined;
+    const body = [
+        `Opened by Atlas.`,
+        '',
+        ...(item ? [`- Task: ${item.id}`] : []),
+        ...(agent ? [`- Agent: ${agent.name}`] : []),
+        `- Run: \`${run.id}\``,
+    ].join('\n');
+    const message = await commitMessage(run);
     const opened: { repo: (typeof repos)[number]['repo']; path: string; base: string; url: string }[] = [];
 
     // ADR 0017 — each repo of the Task delivers on its own; a multi-repo Task
@@ -631,7 +651,7 @@ async function deliver(run: RunRow, opts: { openPr: boolean }): Promise<Delivery
     for (const { repo, path } of repos) {
         const tag = workspace ? `${repo.name}: ` : '';
         const base = repo.default_branch?.trim() ? repo.default_branch : 'main';
-        const committed = await commitPending(path, repo.credential_id, run.id);
+        const committed = await commitPending(path, repo.credential_id, message);
         if (committed) log.push(tag + committed);
         if (workspace && !(await hasChanges(path, base))) {
             log.push(`${tag}no changes`);

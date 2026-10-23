@@ -40,7 +40,7 @@ Same profile, cold load (total download / network idle):
 | `/projects` | 1,418 KB / 8.3 s | 425 KB / 3.6 s |
 | `/agents/agent-ai-news/runs/:id` (big log) | 1,259 KB / 7.8 s | 410 KB / 3.6 s |
 | `/agents` | 1,014 KB / 6.5 s | 485 KB / 4.3 s |
-| `/queue` | 875 KB / 5.6 s | 405 KB / 3.5 s |
+| `/queue` (page since removed) | 875 KB / 5.6 s | 405 KB / 3.5 s |
 | `/agents/:id` | 627 KB / 4.8 s (LCP 3.9 s) | 418 KB / 4.0 s (LCP 2.6 s) |
 | `/` | 402 KB / 3.5 s | 400 KB / 3.4 s (LCP 2.2 s) |
 

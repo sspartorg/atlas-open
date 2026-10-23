@@ -3,7 +3,6 @@ import { promisify } from 'util';
 import { db } from '../db/kysely-client.js';
 import { broadcastSSE } from '../routes/events.js';
 import { commentsService } from './comments.js';
-import { parseCommitMessage } from './commit-discipline.js';
 import { gitInvokeEnv } from './git-env.js';
 import type {
     CommitVerificationResult,
@@ -16,7 +15,9 @@ const execFileP = promisify(execFile);
 // Theme 11 — commit verifier.
 //
 // Called by `agent-runner` after every issue-attached run (success or
-// error). Wrapped in try/catch at the call site so a verifier failure
+// error), before Atlas commits the run's work. ADR 0015: agents only edit
+// files, so a dirty tree with no commits is the compliant handoff and any
+// commit in the run window is the agent breaking that rule. Wrapped in try/catch at the call site so a verifier failure
 // must NOT compound a run failure — verification is best-effort
 // observability, not load-bearing logic.
 
@@ -135,23 +136,11 @@ export async function verifyRunCommits(args: VerifyArgs): Promise<VerifyOutput> 
         gitHasModifications(args.cwd),
     ]);
 
-    const problems: ICommitProblem[] = [];
-    for (const c of commits) {
-        const raw = `${c.subject}\n\n${c.body}`.trim();
-        const parsed = parseCommitMessage(raw);
-        for (const p of parsed.problems) {
-            problems.push({ commit_sha: c.sha.slice(0, 12), reason: p.reason });
-        }
-        if (args.itemId !== null && parsed.refs.length === 0) {
-            problems.push({ commit_sha: c.sha.slice(0, 12), reason: 'refs-missing' });
-        }
-    }
-
-    let result: CommitVerificationResult;
-    if (commits.length === 0 && !dirty) result = 'clean';
-    else if (commits.length === 0 && dirty) result = 'silent';
-    else if (problems.length > 0) result = 'partial';
-    else result = 'compliant';
+    const problems: ICommitProblem[] = commits.map((c) => ({
+        commit_sha: c.sha.slice(0, 12),
+        reason: 'agent-committed',
+    }));
+    const result: CommitVerificationResult = commits.length > 0 ? 'partial' : dirty ? 'compliant' : 'clean';
 
     return await persistAndEmit(args, {
         result,

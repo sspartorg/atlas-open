@@ -879,21 +879,15 @@ interface SpawnCliOptions {
     prompt: string;
     cwd: string;
     /** Theme 09b — per-run temporary git config path. When set, the
-     *  spawn inherits `GIT_CONFIG_GLOBAL=<path>` so the agent's git
-     *  shell-out picks up `http.extraheader` auth for `git push` PLUS
-     *  the `[user]` block that attributes `git commit` to the App's
-     *  bot identity (built via `buildGitAuth`). */
+     *  spawn inherits `GIT_CONFIG_GLOBAL=<path>`: the `[user]` bot identity
+     *  only, no `http.extraheader` (`buildGitAuth(…, { identityOnly })`).
+     *  ADR 0015 — Atlas, not the agent, commits and pushes. */
     gitConfigPath?: string | null;
     /** Every temp git-config dir this run created. A multi-repo run builds one
      *  per repo plus the composed one (`buildMultiRepoGitAuth`), so cleaning
      *  only `gitConfigPath`'s dir would leak the rest in tmpdir. Empty for a
      *  single-repo run, where `gitConfigPath` is the only dir. */
     gitConfigDirs?: string[];
-    /** Same-run plaintext token, exposed to the child as `GH_TOKEN` /
-     *  `GITHUB_TOKEN` so `gh pr create` inside the CLI authenticates
-     *  as the App instead of falling back to the developer's local
-     *  `gh auth login` in `~/.config/gh/hosts.yml`. */
-    ghToken?: string | null;
     /** Plan #7 — when the run has no worktree, the artefact files
      *  (MANDATE_CONSTITUTION.md + WORK.md) live in this throwaway
      *  os.tmpdir() subdirectory. Recursively removed by the exit /
@@ -1006,23 +1000,187 @@ export function copilotDenyToolArgs(itemAttached: boolean): string[] {
 }
 
 /**
+ * Shell commands no agent may run (ADR 0015): Atlas commits, pushes and opens
+ * the PR when the run ends. The prompt says so; these flags enforce it.
+ * Claude matches `Bash(<prefix>:*)`; Copilot matches `shell(<command>)`.
+ */
+export const CLAUDE_DISALLOWED_TOOLS = [
+    'Task',
+    'WebFetch',
+    'WebSearch',
+    'Bash(git commit:*)',
+    'Bash(git push:*)',
+    'Bash(gh:*)',
+];
+export const COPILOT_DENIED_SHELL = ['shell(git commit)', 'shell(git push)', 'shell(gh)'];
+
+/**
+ * Git config the agent's shell gets on top of whatever config files it reads.
+ * `GIT_CONFIG_COUNT` entries apply last, and an empty value resets a
+ * multi-valued key — so no credential helper and no `http.extraheader` from
+ * the Owner's ~/.gitconfig (or anywhere else) reaches the agent.
+ */
+const AGENT_GIT_NO_AUTH: NodeJS.ProcessEnv = {
+    GIT_CONFIG_COUNT: '2',
+    GIT_CONFIG_KEY_0: 'credential.helper',
+    GIT_CONFIG_VALUE_0: '',
+    GIT_CONFIG_KEY_1: 'http.extraheader',
+    GIT_CONFIG_VALUE_1: '',
+};
+
+/**
  * Child env for every agent run. `ATLAS_API_URL` lets `.atlas/scripts`
  * validators query the API directly. The ollama overlay MUST come after the
  * `gitInvokeEnv` spread (which spreads process.env), or an
  * ANTHROPIC_API_KEY in the Owner's shell wins and this nominally-free local
- * run bills Anthropic instead.
+ * run bills Anthropic instead. No GitHub token reaches the agent, not even
+ * one from the Owner's shell: Atlas pushes and opens the PR (ADR 0015).
  */
-export function agentRunEnv(
-    cli: AgentCli,
-    model: string,
-    gitConfigPath: string | null,
-    ghToken: string | null,
-): NodeJS.ProcessEnv {
-    return {
-        ...gitInvokeEnv(gitConfigPath, ghToken),
+export function agentRunEnv(cli: AgentCli, model: string, gitConfigPath: string | null): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = {
+        ...gitInvokeEnv(gitConfigPath),
+        ...AGENT_GIT_NO_AUTH,
         ATLAS_API_URL: `http://127.0.0.1:${apiPort()}`,
         ...ollamaEnv(cli, model),
     };
+    delete env['GH_TOKEN'];
+    delete env['GITHUB_TOKEN'];
+    return env;
+}
+
+/**
+ * The CLI argv for one agent run. Ollama runs the Claude binary, so it gets the
+ * Claude argv (minus `--effort`), including the same disallowed tools.
+ */
+export function cliArgs(opts: {
+    cli: AgentCli;
+    model: string;
+    effort: string;
+    itemAttached: boolean;
+    runId: string;
+    slug: string;
+    cwd: string;
+}): string[] {
+    const { cli, model, effort, itemAttached, runId, slug, cwd } = opts;
+    const dialect = CLI_DIALECT[cli];
+    const copilotTrigger = `Execute the atlas-${slug} agent — read .atlas/constitution.md, .atlas/current-task.md, .atlas/outcome.md, and the relevant template, then complete the work.`;
+
+    // `--effort` is omitted on the Ollama dialect. Ollama's docs scope thinking
+    // controls to "compatible models" only, and most local models have no
+    // thinking mode at all — a rejected flag fails the whole run, which is a
+    // far worse trade than losing the knob. Claude proper keeps it.
+    const effortArgs = cli === 'ollama' ? [] : ['--effort', effort];
+
+    const args = dialect === 'claude'
+        ? [
+              // Claude Code CLI — non-interactive single-shot. The slash
+              // command sits at the end as the positional `[prompt]`
+              // argv slot; Claude's resolver expands it against
+              // `.claude/commands/atlas-<slug>.md` (written per run by
+              // `assembleCommands`).
+              //
+              // --verbose --output-format stream-json: prints one NDJSON
+              // event per turn (system/init, assistant text+tool_use,
+              // tool_result, final result with cost+duration) instead of
+              // just the final assistant text. Required pair —
+              // `--print --output-format stream-json` without `--verbose`
+              // errors out.
+              //
+              // P1 — extend the allowlist with Claude's built-in file +
+              // shell tools so SDLC agents downstream of PO Writer
+              // (Architect, Coder, Automation) can drive git worktrees,
+              // run `specify`, and edit spec/test files directly
+              // instead of going through MCP. PO Writer and QA Writer
+              // don't strictly need Bash/file tools but inheriting them
+              // is harmless — the prompt-level guardrails still scope
+              // what each agent actually does.
+              //
+              // Hard-block sub-agent dispatch + off-charter network tools.
+              // `Task` is Claude Code's sub-agent tool; its runs would not
+              // be itemized in the Atlas run row, so cost and logs would
+              // vanish into this run's summary. `WebFetch`/`WebSearch` are
+              // off-charter for SDLC agents and add silent token cost. The
+              // constitution's "One run = one model session" clause is the
+              // soft block; this flag is the hard block. Same for `git
+              // commit` / `git push` / `gh` (ADR 0015, CLAUDE_DISALLOWED_TOOLS);
+              // ollama runs this same binary and argv.
+              // NB: do NOT append `slashCommand` as a positional argv
+              // here. `--allowedTools` and `--disallowedTools` are
+              // declared `<tools...>` (variadic) in `claude --help`, so
+              // Commander.js would greedily absorb anything after them
+              // as additional tool names — the positional `[prompt]`
+              // slot ends up empty and Claude errors with "Input must
+              // be provided either through stdin or as a prompt
+              // argument". Phase 4b regression observed on PO Writer
+              // run 5beea850-..., 2026-06-09. The slash command is now
+              // written to stdin below (unambiguous — no flag can
+              // consume stdin).
+              '--print',
+              '--verbose',
+              ...claudeIsolationArgs(itemAttached),
+              '--model', model,
+              ...effortArgs,
+              '--output-format', 'stream-json',
+              '--allowedTools', allowedToolsFor(itemAttached),
+              '--disallowedTools', ...CLAUDE_DISALLOWED_TOOLS,
+          ]
+        : [
+              // GitHub Copilot CLI — non-interactive single-shot. Phase
+              // 0 spike (2026-06-09) confirmed:
+              //   - `copilot -p "/X"` does NOT resolve a slash command;
+              //     `/X` is interpreted as an absolute filesystem path.
+              //   - `copilot -p "<text>" --agent X` DOES resolve the
+              //     agent X from `~/.copilot/agents/X.md` (user-level
+              //     ONLY — no worktree-local lookup).
+              // So Copilot's invocation is: `-p "<trigger>"` carrying a
+              // short imperative (the model sees it as the user
+              // message), plus `--agent atlas-<runId>` selecting the
+              // active agent body. `assembleCommands` has already
+              // written `~/.copilot/agents/atlas-<runId>.md` per run
+              // (UUID-unique to prevent collision across worktrees).
+              // The body itself references `.atlas/{constitution,
+              // handoff, current-task,...}` for the actual workflow.
+              //
+              // Text output, NOT `--output-format json`. JSON mode
+              // (probed 2026-06-01) under-reports premium-request usage,
+              // which broke credit accounting in the runs UI. The default
+              // text mode emits a human-readable trailer to stderr —
+              // `Changes +X -Y` / `AI Credits N (Ns)` /
+              // `Tokens ↑ X (Y cached) • ↓ Z (W reasoning)` — and
+              // `parseCopilotCostFromOutput` already extracts credits +
+              // token counts from those lines via regex (see lines
+              // 166–296 in this file). Switching back to JSON mode means
+              // re-introducing the credit-accounting bug.
+              //
+              // `--autopilot` (2026-06-01, per
+              // docs.github.com/en/copilot/concepts/agents/copilot-cli/autopilot)
+              // is required for the CLI to continue across multiple model
+              // turns autonomously. Without it the CLI does ONE turn and
+              // exits — even a research task that needs to "browse a docs
+              // page via Playwright MCP then summarise" can't complete in
+              // one turn, which is why the observed run had
+              // `premiumRequests: 1` and zero code changes. The
+              // `--max-autopilot-continues` cap prevents runaway loops in
+              // the (rare) case where the agent can't decide it's done.
+              // 30 is roughly the headroom a real multi-file Coder task
+              // needs (each turn ≈ 1 LLM call ≈ 1 premium request);
+              // adjust if Owner reports tasks hitting the cap.
+              '-p', copilotTrigger,
+              '--agent', `atlas-${runId}`,
+              '--model', model,
+              ...effortArgs,
+              '--allow-all-tools',
+              // Deny beats --allow-all-tools, so this is the isolation an
+              // item-attached Copilot run gets in place of Claude's strict
+              // MCP config. See `copilotDenyToolArgs`.
+              ...copilotDenyToolArgs(itemAttached),
+              ...COPILOT_DENIED_SHELL.flatMap((rule) => ['--deny-tool', rule]),
+              '--autopilot',
+              '--max-autopilot-continues', '30',
+              '--add-dir', cwd,
+              '--no-color',
+          ];
+    return args;
 }
 
 function spawnCli(opts: SpawnCliOptions): void {
@@ -1035,7 +1193,6 @@ function spawnCli(opts: SpawnCliOptions): void {
         cwd,
         gitConfigPath,
         gitConfigDirs,
-        ghToken,
         artefactTmpRoot,
         copilotUserAgentPath,
     } = opts;
@@ -1135,135 +1292,19 @@ function spawnCli(opts: SpawnCliOptions): void {
     void prompt;
     const slug = agentIdToSlug(agent.id);
     const slashCommand = `/atlas-${slug}`;
-    const copilotTrigger = `Execute the atlas-${slug} agent — read .atlas/constitution.md, .atlas/current-task.md, .atlas/outcome.md, and the relevant template, then complete the work.`;
+    const args = cliArgs({ cli: agent.cli, model, effort, itemAttached: issueId !== null, runId, slug, cwd });
 
-    // `--effort` is omitted on the Ollama dialect. Ollama's docs scope thinking
-    // controls to "compatible models" only, and most local models have no
-    // thinking mode at all — a rejected flag fails the whole run, which is a
-    // far worse trade than losing the knob. Claude proper keeps it.
-    const effortArgs = agent.cli === 'ollama' ? [] : ['--effort', effort];
-
-    const args = dialect === 'claude'
-        ? [
-              // Claude Code CLI — non-interactive single-shot. The slash
-              // command sits at the end as the positional `[prompt]`
-              // argv slot; Claude's resolver expands it against
-              // `.claude/commands/atlas-<slug>.md` (written per run by
-              // `assembleCommands`).
-              //
-              // --verbose --output-format stream-json: prints one NDJSON
-              // event per turn (system/init, assistant text+tool_use,
-              // tool_result, final result with cost+duration) instead of
-              // just the final assistant text. Required pair —
-              // `--print --output-format stream-json` without `--verbose`
-              // errors out.
-              //
-              // P1 — extend the allowlist with Claude's built-in file +
-              // shell tools so SDLC agents downstream of PO Writer
-              // (Architect, Coder, Automation) can drive git worktrees,
-              // run `specify`/`gh`, and edit spec/test files directly
-              // instead of going through MCP. PO Writer and QA Writer
-              // don't strictly need Bash/file tools but inheriting them
-              // is harmless — the prompt-level guardrails still scope
-              // what each agent actually does.
-              //
-              // Hard-block sub-agent dispatch + off-charter network tools.
-              // `Task` is Claude Code's sub-agent tool; its runs would not
-              // be itemized in the Atlas run row, so cost and logs would
-              // vanish into this run's summary. `WebFetch`/`WebSearch` are
-              // off-charter for SDLC agents and add silent token cost. The
-              // constitution's "One run = one model session" clause is the
-              // soft block; this flag is the hard block.
-              // NB: do NOT append `slashCommand` as a positional argv
-              // here. `--allowedTools` and `--disallowedTools` are
-              // declared `<tools...>` (variadic) in `claude --help`, so
-              // Commander.js would greedily absorb anything after them
-              // as additional tool names — the positional `[prompt]`
-              // slot ends up empty and Claude errors with "Input must
-              // be provided either through stdin or as a prompt
-              // argument". Phase 4b regression observed on PO Writer
-              // run 5beea850-..., 2026-06-09. The slash command is now
-              // written to stdin below (unambiguous — no flag can
-              // consume stdin).
-              '--print',
-              '--verbose',
-              ...claudeIsolationArgs(issueId !== null),
-              '--model', model,
-              ...effortArgs,
-              '--output-format', 'stream-json',
-              '--allowedTools', allowedToolsFor(issueId !== null),
-              '--disallowedTools', 'Task,WebFetch,WebSearch',
-          ]
-        : [
-              // GitHub Copilot CLI — non-interactive single-shot. Phase
-              // 0 spike (2026-06-09) confirmed:
-              //   - `copilot -p "/X"` does NOT resolve a slash command;
-              //     `/X` is interpreted as an absolute filesystem path.
-              //   - `copilot -p "<text>" --agent X` DOES resolve the
-              //     agent X from `~/.copilot/agents/X.md` (user-level
-              //     ONLY — no worktree-local lookup).
-              // So Copilot's invocation is: `-p "<trigger>"` carrying a
-              // short imperative (the model sees it as the user
-              // message), plus `--agent atlas-<runId>` selecting the
-              // active agent body. `assembleCommands` has already
-              // written `~/.copilot/agents/atlas-<runId>.md` per run
-              // (UUID-unique to prevent collision across worktrees).
-              // The body itself references `.atlas/{constitution,
-              // handoff, current-task,...}` for the actual workflow.
-              //
-              // Text output, NOT `--output-format json`. JSON mode
-              // (probed 2026-06-01) under-reports premium-request usage,
-              // which broke credit accounting in the runs UI. The default
-              // text mode emits a human-readable trailer to stderr —
-              // `Changes +X -Y` / `AI Credits N (Ns)` /
-              // `Tokens ↑ X (Y cached) • ↓ Z (W reasoning)` — and
-              // `parseCopilotCostFromOutput` already extracts credits +
-              // token counts from those lines via regex (see lines
-              // 166–296 in this file). Switching back to JSON mode means
-              // re-introducing the credit-accounting bug.
-              //
-              // `--autopilot` (2026-06-01, per
-              // docs.github.com/en/copilot/concepts/agents/copilot-cli/autopilot)
-              // is required for the CLI to continue across multiple model
-              // turns autonomously. Without it the CLI does ONE turn and
-              // exits — even a research task that needs to "browse a docs
-              // page via Playwright MCP then summarise" can't complete in
-              // one turn, which is why the observed run had
-              // `premiumRequests: 1` and zero code changes. The
-              // `--max-autopilot-continues` cap prevents runaway loops in
-              // the (rare) case where the agent can't decide it's done.
-              // 30 is roughly the headroom a real multi-file Coder task
-              // needs (each turn ≈ 1 LLM call ≈ 1 premium request);
-              // adjust if Owner reports tasks hitting the cap.
-              '-p', copilotTrigger,
-              '--agent', `atlas-${runId}`,
-              '--model', model,
-              ...effortArgs,
-              '--allow-all-tools',
-              // Deny beats --allow-all-tools, so this is the isolation an
-              // item-attached Copilot run gets in place of Claude's strict
-              // MCP config. See `copilotDenyToolArgs`.
-              ...copilotDenyToolArgs(issueId !== null),
-              '--autopilot',
-              '--max-autopilot-continues', '30',
-              '--add-dir', cwd,
-              '--no-color',
-          ];
-
-    // Theme 09b — inject GIT_CONFIG_GLOBAL when the run is project-
-    // scope and the project has a credential. The agent's git
-    // shell-out then transparently authenticates against the remote
-    // without us having to inject `-c http.extraheader=...` per
-    // invocation (which we can't — the agent runs git via Bash, we
-    // don't control its arg list).
+    // Theme 09b — inject GIT_CONFIG_GLOBAL (bot identity only) when the
+    // project has a credential. ADR 0015: the agent holds no push
+    // credential; `deliver()` builds its own auth to commit and push.
     //
     // `gitInvokeEnv` is the same helper every orchestrator git/gh
     // shell-out uses — sharing it here means the spawned agent's own
-    // git shell-outs (status/diff/commit, ideally never push/fetch)
+    // git shell-outs (status/diff/log, never commit/push/fetch)
     // inherit the exact same GCM-silencing env shape. Drift between
     // the spawn env and the orchestrator's would re-open the same
     // class of leak we just closed.
-    const childEnv = agentRunEnv(agent.cli, model, gitConfigPath ?? null, ghToken ?? null);
+    const childEnv = agentRunEnv(agent.cli, model, gitConfigPath ?? null);
 
     let child: ReturnType<typeof nodeSpawn>;
     try {
@@ -1701,14 +1742,12 @@ export async function spawnAgentRun(
         appendFileSync(join(cwd, '.atlas', 'current-task.md'), repositoriesMarkdown(multiRepo, worktreeBranch));
     }
 
-    // Per-run git auth (http.extraheader + bot identity) so `git commit`
-    // inside the CLI is attributed to the App, not the developer's
+    // Per-run git identity (bot `[user]` only, no token) so anything git
+    // records inside the CLI is attributed to the App, not the developer's
     // ~/.gitconfig. buildGitAuth is the ONLY correct way to build this file.
+    // ADR 0015 — the agent gets no push credential; deliver() builds its own.
     let gitConfigPath: string | null = null;
     let gitConfigDirs: string[] = [];
-    let ghToken: string | null = null;
-    let humanName: string | null = null;
-    let humanEmail: string | null = null;
     // A multi-repo Task gets ONE identity per repo, not one for the whole run.
     // Previously every checkout inherited the FIRST repo's credential, so a
     // commit in repo #2 was authored by repo #1's bot and carried repo #1's
@@ -1719,13 +1758,11 @@ export async function spawnAgentRun(
         try {
             const auth = await buildMultiRepoGitAuth(
                 multiRepo.map(({ repo }) => ({ gitPath: repo.git_path, credentialId: repo.credential_id })),
+                { identityOnly: true },
             );
             if (auth) {
                 gitConfigPath = auth.configPath;
                 gitConfigDirs = auth.configDirs;
-                ghToken = auth.token;
-                humanName = auth.humanName;
-                humanEmail = auth.humanEmail;
             }
         } catch (err) {
             broadcastSSE({
@@ -1735,13 +1772,10 @@ export async function spawnAgentRun(
         }
     } else if (effectiveProjectId && projectCredentialId) {
         try {
-            const auth = await buildGitAuth(projectCredentialId);
+            const auth = await buildGitAuth(projectCredentialId, { identityOnly: true });
             if (auth) {
                 gitConfigPath = auth.configPath;
                 gitConfigDirs = [auth.configDir];
-                ghToken = auth.token;
-                humanName = auth.humanName;
-                humanEmail = auth.humanEmail;
             }
         } catch (err) {
             // Best-effort — without auth the agent's commits fall back to
@@ -1760,8 +1794,6 @@ export async function spawnAgentRun(
         projectId,
         constitutionMd,
         omitConstitution: true,
-        humanName,
-        humanEmail,
     });
     // Mirrors the slash-command body (commands-assembler prepends the same
     // preamble) so `prompt_snapshot` reflects what the agent was told.
@@ -1928,7 +1960,6 @@ export async function spawnAgentRun(
                     cwd,
                     gitConfigPath,
                     gitConfigDirs,
-                    ghToken,
                     artefactTmpRoot,
                     copilotUserAgentPath,
                 });

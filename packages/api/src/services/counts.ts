@@ -179,13 +179,12 @@ export const countsService = {
                     .executeTakeFirst(),
             ]).then(([queued, running]) => ({ n: Number(queued?.n ?? 0) + Number(running?.n ?? 0) })),
             // 2026-09-12 — counts ALL agents, not just `status='active'`.
-            // The sidenav label is bare "Agents", the badge links to /agents
-            // which lists every agent, and /queue's header counts every agent
-            // too — so an active-only badge read as "6 agents are missing".
-            // Its five siblings (projects, tasks, sub_tasks, queue,
-            // notifications) all count every row; this is the odd one out.
-            // The active/paused split is still visible per-card and on the
-            // Queue page, where it has a label to explain it.
+            // The sidenav label is bare "Agents" and the badge links to
+            // /agents, which lists every agent — so an active-only badge read
+            // as "6 agents are missing". Its five siblings (projects, tasks,
+            // sub_tasks, queue, notifications) all count every row too. The
+            // active/paused split is visible per agent card, where it has a
+            // label to explain it.
             db
                 .selectFrom('agents')
                 .select(({ fn }) => fn.countAll<string>().as('n'))

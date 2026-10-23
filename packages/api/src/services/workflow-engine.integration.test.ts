@@ -470,6 +470,25 @@ describe('task run — multi-repo Tasks (ADR 0017/0018)', () => {
         expect(await itemOf('ATL-2')).toMatchObject({ status: 'in_review' });
     });
 
+    // ADR 0015 — the agent only edits; Atlas's commit is the only one.
+    it('commits the uncommitted edits as `<task key>: <task title>` before pushing', async () => {
+        const atPush: string[] = [];
+        git.pushWorktree.mockImplementationOnce((async (path: string) => {
+            atPush.push(execFileSync('git', ['-C', path, 'log', '-1', '--format=%s|%b'], { encoding: 'utf8' }).trim());
+            atPush.push(execFileSync('git', ['-C', path, 'status', '--porcelain'], { encoding: 'utf8' }).trim());
+            atPush.push(execFileSync('git', ['-C', path, 'show', '--name-only', '--format=', 'HEAD'], { encoding: 'utf8' }).trim());
+            return { pushed: true, alreadyUpToDate: false };
+        }) as never);
+        await startTaskRun('ATL-2');
+        writeFileSync(join(ws, 'core', 'api.txt'), 'endpoint\n');
+        await finishStep('completed', 'done');
+
+        expect(atPush).toEqual(['ATL-2: Task|', '', 'api.txt']);
+        expect(git.openPullRequest).toHaveBeenCalledWith(
+            expect.objectContaining({ body: expect.stringMatching(/- Task: ATL-2\n- Agent: .+\n- Run: /) }),
+        );
+    });
+
     it('skips a repo the Task did not change', async () => {
         await startTaskRun('ATL-2');
         writeFileSync(join(ws, 'core', 'api.txt'), 'endpoint\n');

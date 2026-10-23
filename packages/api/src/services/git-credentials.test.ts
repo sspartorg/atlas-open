@@ -109,6 +109,31 @@ describe('buildGitAuth', () => {
         expect(existsSync(join(auth!.configDir, 'prepare-commit-msg'))).toBe(false);
     });
 
+    // ADR 0015 — the agent's config: bot identity, no token on disk.
+    it('identityOnly writes the [user] bot identity and no http.extraheader', async () => {
+        svc.get.mockResolvedValueOnce({
+            id: 'a1',
+            kind: 'github_app',
+            username: 'x-access-token',
+            app_id: 42,
+            app_slug: 'atlas-bot',
+            human_name: null,
+            human_email: null,
+            human_gh_login: null,
+        });
+        svc.getToken.mockResolvedValueOnce('ghs_fake_token_1234');
+        const auth = await buildGitAuth('a1', { identityOnly: true });
+        cleanupDirs.push(auth!.configDir);
+        const content = readFile(auth!.configPath);
+        expect(content).toContain('[user]');
+        expect(content).toContain('name = atlas-bot[bot]');
+        expect(content).toContain('helper =');
+        expect(content).not.toContain('[http]');
+        expect(content).not.toContain('extraheader');
+        expect(content).not.toContain('ghs_fake_token_1234');
+        expect(content).not.toContain(Buffer.from('x-access-token:ghs_fake_token_1234', 'utf8').toString('base64'));
+    });
+
     it('adds [user] name / email for a PAT credential carrying both human fields', async () => {
         // On a PAT the human IS the author (no bot identity exists), so this
         // is a `[user]` block — not the Co-Authored-By hook the github_app

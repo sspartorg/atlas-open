@@ -208,7 +208,7 @@ spawnNode → spawnAgentRun({workflowRun})
    │        parent_run_id = crashed step; its error parks "…errored again after an automatic retry")
    │     setup_failed → park · cancelled → cancel run
    ▼
-finishRun → deliver: commit leftovers · push the branch per changed repo · one PR per repo
+finishRun → deliver: commit the agent's edits (`<key>: <title>`) · push the branch per changed repo · one PR per repo
             (items.pr_url = first, sibling links in every body) · cleanup worktrees
             Task → in_review (PR opened) | done · one notification · kick dispatch
             push / PR failure → park at End (worktree kept; resume retries delivery)
@@ -290,7 +290,7 @@ Scouts (`kind_slug` ∈ `ai-news | market-research | regulations | jira-to-epic`
 
 - **Run now** — `POST /api/run { agent_id, project_id? }`: an ad-hoc run in a temp dir, no item.
 - **As a Task** — assign the agent to a Task like any other; its run gets a worktree, pushes and opens a PR.
-- **Prompt** — `prompt-builder` renders the constitution, the role with `{{ key }}` substitution against `settings_json` and the outcome contract, then either the item context, `# Project Context` (name, description, guardrails, every Task + spec, commit discipline) when the run has a project, or a `# Project-level Run` paragraph when it doesn't, then output instructions and self-memory. Agents read `.atlas/outcome.md`, `.atlas/self-memory.md` and `.atlas/changed-files.md` from the working directory — the last is the branch diff against the merge-base, staged so an agent does not rediscover it by crawling the repo.
+- **Prompt** — `prompt-builder` renders the constitution, the role with `{{ key }}` substitution against `settings_json` and the outcome contract, then either the item context, `# Project Context` (name, description, guardrails, every Task + spec) when the run has a project, or a `# Project-level Run` paragraph when it doesn't, then output instructions and self-memory. Agents read `.atlas/outcome.md`, `.atlas/self-memory.md` and `.atlas/changed-files.md` from the working directory — the last is the branch diff against the merge-base, staged so an agent does not rediscover it by crawling the repo.
 - **Created items** — Tasks a scout creates (Jira import, market research) land as `draft` and stay put; nothing routes them. The Owner assigns an agent to queue them.
 
 ### "Generate AI scaffold"
