@@ -113,13 +113,13 @@ test('a rule is added with its category and severity, edited, survives a reload,
 test('Save Guard-rails stamps the set and resets the counter; Discard only clears the counter', async ({ page, request }) => {
     await goto(page, '/guardrails');
     await expect(page.getByText('No unsaved changes')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Discard' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Discard', exact: true })).toBeDisabled();
     await page.getByRole('button', { name: 'Add rule to Escalation & Scope' }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByRole('textbox', { name: 'Rule' }).fill('E2E-GG ask before scope creep');
     await dialog.getByRole('button', { name: 'Add rule' }).click();
     await expect(page.getByText('1 rule changed this session')).toBeVisible();
-    await page.getByRole('button', { name: 'Discard' }).click();
+    await page.getByRole('button', { name: 'Discard', exact: true }).click();
     await expect(page.getByText('No unsaved changes')).toBeVisible();
     // Discard never removes a saved rule.
     expect(await rules(request)).toHaveLength(1);

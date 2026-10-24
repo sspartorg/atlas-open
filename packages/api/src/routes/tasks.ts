@@ -18,12 +18,8 @@ import { headerAgentId } from '../services/request-actor.js';
 
 export async function tasksRoutes(app: FastifyInstance) {
     app.get('/api/tasks', async (req, reply) => {
-        const { project_id, include_archived } = req.query as {
-            project_id?: string;
-            include_archived?: string;
-        };
-        const includeArchived = include_archived === 'true' || include_archived === '1';
-        return reply.send(await tasksService.list(project_id, includeArchived));
+        const { project_id } = req.query as { project_id?: string };
+        return reply.send(await tasksService.list(project_id));
     });
 
     app.get('/api/tasks/stats', async (_req, reply) => {

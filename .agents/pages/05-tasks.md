@@ -15,8 +15,8 @@ List every Task across all projects (ADR 0015: a Task is the top-level item; its
 - **Test tag** — a row made by an agent test run (`is_test`) shows a small `TEST` pill (science icon, tooltip "Created by an agent test run") after the title, in the table and the mobile list. Test items are listed, not hidden (migration 002).
 
 **Header**
-- "Tasks" title + subtitle: `N tasks` · project name (when `?project=`) · `M ready` — both counts are of the rows listed, so they follow every filter, search and **Show archived** (no longer `GET /api/tasks/stats`, which counted archived Tasks and ignored filters)
-- **Show archived** switch → `?include_archived=true` (done Tasks older than 7 days are hidden by default)
+- "Tasks" title + subtitle: `N tasks` · project name (when `?project=`) · `M ready` — both counts are of the rows listed, so they follow every filter and search (no longer `GET /api/tasks/stats`, which counted archived Tasks and ignored filters)
+- Only open Tasks and those done in the last 7 days load here. Older done Tasks are found on the Search page (`/search`), never on this page
 - `ViewModeToggle` (Table | Kanban) — persisted in `localStorage` under `atlas.viewMode.tasks` (read/write guarded: blocked storage falls back to Table)
 - **New task** button → `/tasks/new`; disabled when no projects exist
 
@@ -35,7 +35,7 @@ List every Task across all projects (ADR 0015: a Task is the top-level item; its
 - Card click (or Enter / Space on the focused card) → `/tasks/:id`. A refused move shows **one** toast from `useTransitionTask` (the closure-rule toast, the "Close them too" offer, or "Couldn't move <id>" with the API's reason).
 - A column draws its first 50 cards; **Show N more · M hidden** adds 100 at a time (the header count is the full total). A 2,000-Task kanban used to draw every card — 24k DOM nodes.
 
-**Mobile** — `PageFab` "New task" replaces the header button and the Kanban toggle is dropped; **Show archived** stays in the header. The table renders as `MobileTaskList`, in the table's sort order.
+**Mobile** — `PageFab` "New task" replaces the header button and the Kanban toggle is dropped. The table renders as `MobileTaskList`, in the table's sort order.
 
 ## Why these affordances exist
 - **Global New Task** — the project is picked inside the form, so the Owner doesn't have to open a project first.
@@ -46,11 +46,11 @@ List every Task across all projects (ADR 0015: a Task is the top-level item; its
 None.
 
 ## Hooks used
-- `useTasks(projectId?, includeArchived)` — `['tasks', {…}]` → `GET /api/tasks`
+- `useTasks(projectId?)` — `['tasks', { projectId }]` → `GET /api/tasks`
 - `useTransitionTask` (toasts every refusal itself), `useProjects`, `useAgents`, `useSettings`
 
 ## API endpoints touched
-- `GET /api/tasks?project_id=…&include_archived=…`
+- `GET /api/tasks?project_id=…`
 - `PATCH /api/tasks/:id/status` (Kanban; always `override=false` — the override path is the status picker, not the board)
 - `GET /api/projects`, `GET /api/agents`, `GET /api/settings`
 

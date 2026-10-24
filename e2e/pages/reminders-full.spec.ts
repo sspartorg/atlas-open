@@ -323,7 +323,7 @@ test.describe('/reminders — history, fire log, refresh', () => {
         await goto(page, '/reminders');
         await expect(page.getByText('No active reminders')).toBeVisible();
         const crud = REMINDER_TOOLS.find((t) => t.name === 'crud_reminder');
-        const client = createApiClient({ apiBase: API, requestTimeoutMs: 10_000, mcpToken: '', boundAgentId: '' });
+        const client = createApiClient({ apiBase: API, requestTimeoutMs: 10_000, mcpToken: '' });
         const res = await crud!.handler(
             { op: 'create', label: 'Set by Claude', body: 'from crud_reminder', schedule: { kind: 'cron', expr: '0 8 * * 1' }, channel: 'external' },
             { client },

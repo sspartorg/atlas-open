@@ -29,21 +29,6 @@ describe('useIssues', () => {
         });
         await waitFor(() => expect(result.current.isSuccess).toBe(true));
     });
-
-    it('passes includeArchived=true as a query param', async () => {
-        let captured = '';
-        server.use(
-            http.get('http://localhost:3000/api/issues/tree', ({ request }) => {
-                captured = new URL(request.url).search;
-                return HttpResponse.json({ tree: [], projects: [], tasks: [] });
-            }),
-        );
-        const { result } = renderHook(() => useIssues({ includeArchived: true }), {
-            wrapper: makeWrapper(),
-        });
-        await waitFor(() => expect(result.current.isSuccess).toBe(true));
-        expect(captured).toContain('include_archived=true');
-    });
 });
 
 describe('flattenIssueTree', () => {

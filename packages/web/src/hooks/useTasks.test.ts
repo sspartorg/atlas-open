@@ -32,11 +32,6 @@ describe('useTasks', () => {
         await waitFor(() => expect(result.current.isSuccess).toBe(true));
     });
 
-    it('accepts includeArchived=true', async () => {
-        server.use(handlers.listTasks([makeTaskListItem({ id: 'E2' })]));
-        const { result } = renderHook(() => useTasks('p1', true), { wrapper: makeWrapper() });
-        await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    });
 });
 
 describe('useTaskFull', () => {

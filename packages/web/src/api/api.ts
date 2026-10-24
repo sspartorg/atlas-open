@@ -711,13 +711,10 @@ export const api = {
     },
 
     tasks: {
-        list: (projectId?: string, includeArchived = false) => {
-            const params = new URLSearchParams();
-            if (projectId) params.set('project_id', projectId);
-            if (includeArchived) params.set('include_archived', 'true');
-            const qs = params.toString();
-            return get<ITaskListItem[]>(`/tasks${qs ? `?${qs}` : ''}`);
-        },
+        list: (projectId?: string) =>
+            get<ITaskListItem[]>(
+                `/tasks${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`
+            ),
         stats: () => get<{ total: number; awaiting_pickup: number }>('/tasks/stats'),
         get: (id: string) => get<ITask>(`/tasks/${id}`),
         // Composite — task + project + sub_tasks + related_links + activity +
@@ -756,15 +753,10 @@ export const api = {
     issues: {
         // One round-trip view of Tasks + their Sub-tasks, with project +
         // agent dictionaries inlined. Backs Project Detail.
-        tree: (
-            opts: { projectId?: string | undefined; includeArchived?: boolean | undefined } = {}
-        ) => {
-            const params = new URLSearchParams();
-            if (opts.projectId) params.set('project_id', opts.projectId);
-            if (opts.includeArchived) params.set('include_archived', 'true');
-            const qs = params.toString();
-            return get<IIssueTreeResponse>(`/issues/tree${qs ? `?${qs}` : ''}`);
-        },
+        tree: (opts: { projectId?: string | undefined } = {}) =>
+            get<IIssueTreeResponse>(
+                `/issues/tree${opts.projectId ? `?project_id=${encodeURIComponent(opts.projectId)}` : ''}`
+            ),
     },
 
     comments: {

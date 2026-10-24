@@ -144,19 +144,6 @@ describe('Tasks page', () => {
         expect(input.value).toBe('refunds');
     });
 
-    it('toggles the "Show archived" switch', async () => {
-        server.use(...baseHandlers());
-        const { container } = renderWithProviders(<Tasks />, {
-            initialEntries: ['/tasks?include_archived=true'],
-        });
-        await screen.findByText('All');
-        // The desktop-only Switch is hidden in the xs viewport jsdom uses;
-        // we still hit its hidden checkbox input via direct query so the
-        // onChange callback gets exercised either way.
-        const toggle = container.querySelector('input[type="checkbox"]');
-        if (toggle) fireEvent.click(toggle);
-    });
-
     it('navigates to /tasks/new when the FAB / New Task button is clicked', async () => {
         server.use(...baseHandlers());
         renderWithProviders(<Tasks />, { initialEntries: ['/tasks'] });
@@ -336,14 +323,6 @@ describe('Tasks page', () => {
         expect(screen.getByText('Auth hardening')).toBeInTheDocument();
     });
 
-    it('exercises showArchived=true path — include_archived param triggers useTasks(projectId, true)', async () => {
-        server.use(...baseHandlers());
-        // Start with include_archived=true in the URL to exercise line 47 showArchived=true
-        renderWithProviders(<Tasks />, { initialEntries: ['/tasks?include_archived=true'] });
-        await screen.findByText('Refunds automation');
-        expect(document.body).toBeTruthy();
-    });
-
     it('exercises project filter — projectSlug resolves to projectId, shows project context in header', async () => {
         server.use(...baseHandlers());
         // Use the project name from makeProject() factory (name: 'Atlas')
@@ -519,7 +498,7 @@ describe('Tasks page', () => {
         ]);
     });
 
-    it('a phone still reaches Show archived (the FAB creates, no Kanban toggle)', async () => {
+    it('a phone gets the FAB and no Kanban toggle', async () => {
         const origMatchMedia = window.matchMedia;
         window.matchMedia = vi.fn().mockImplementation((query: string) => ({
             matches: query.includes('(max-width'),
@@ -535,7 +514,7 @@ describe('Tasks page', () => {
             server.use(...baseHandlers());
             renderWithProviders(<Tasks />, { initialEntries: ['/tasks'] });
             await screen.findByText('Refunds automation');
-            expect(screen.getByText('Show archived')).toBeVisible();
+            expect(screen.queryByText('Show archived')).not.toBeInTheDocument();
             expect(screen.queryByRole('button', { name: /Kanban/ })).not.toBeInTheDocument();
         } finally {
             window.matchMedia = origMatchMedia;

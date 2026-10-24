@@ -169,7 +169,7 @@ export function Reminders() {
                 subtitle={
                     <>
                         Reminders fire as in-app notifications and (optionally) external
-                        notifications, on the same per-minute scheduler as agents. Schedules
+                        notifications, on a per-minute scheduler. Schedules
                         and times are in{' '}
                         <Box component="span" sx={{ fontFamily: MONO }}>
                             {timeZone ?? 'server time'}

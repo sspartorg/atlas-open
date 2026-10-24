@@ -183,7 +183,7 @@ const DEFAULT_PORCELAIN = ' M src/a.ts\0?? src/b.ts\0';
 // Reset to DEFAULT_PORCELAIN in the shared beforeEach.
 const { porcelainFixture, beyondBaseFixture } = vi.hoisted(() => ({
     porcelainFixture: { value: ' M src/a.ts\0?? src/b.ts\0' },
-    // Commits on HEAD that the repo's base branch lacks (stop's push gate).
+    // Does HEAD change anything the base branch lacks? '0\n' = no, else yes ('ERR' = git failed).
     beyondBaseFixture: { value: '1\n' },
 }));
 
@@ -217,14 +217,14 @@ vi.mock('node:child_process', async () => {
                         return {} as unknown as ReturnType<typeof real.execFile>;
                     }
                     if (cmd === 'git' && args[2] === 'rev-list') {
-                        // origin/<session branch> is preflight's question; any
-                        // other ref is stop's "beyond the base branch" check.
-                        const againstBase = !String(args[4]).startsWith('origin/atlas/');
-                        if (againstBase && beyondBaseFixture.value === 'ERR') {
-                            cb(new Error('rev-list failed'), { stdout: '', stderr: '' });
-                        } else {
-                            cb(null, { stdout: againstBase ? beyondBaseFixture.value : '0\n', stderr: '' });
-                        }
+                        // preflight's commits-ahead-of-origin/<session branch>.
+                        cb(null, { stdout: '0\n', stderr: '' });
+                        return {} as unknown as ReturnType<typeof real.execFile>;
+                    }
+                    if (cmd === 'git' && args[2] === 'diff' && args[3] === '--quiet') {
+                        // "changes beyond the base branch": exit 0 = none.
+                        if (beyondBaseFixture.value === '0\n') cb(null, { stdout: '', stderr: '' });
+                        else cb(new Error(beyondBaseFixture.value === 'ERR' ? 'diff failed' : 'exit 1'), { stdout: '', stderr: '' });
                         return {} as unknown as ReturnType<typeof real.execFile>;
                     }
                     // `git add` / `git commit` / any other git invocation -> happy.
@@ -536,6 +536,19 @@ describe('lifecycle: pause / resume / preflight-stop / stop', () => {
             { code: ' M', path: 'src/a.ts' },
             { code: '??', path: 'src/b.ts' },
         ]);
+    });
+
+    // The dialog's "something to push" follows Stop's own push gate: a branch
+    // not on origin yet still counts its changes, and Atlas's .gitignore-only
+    // commit counts as nothing.
+    it('preflight-stop agrees with the push gate on a branch not yet on origin', async () => {
+        const session = await createSession();
+        const preflight = () =>
+            app.inject({ method: 'POST', url: `/api/cli/sessions/${session.id}/preflight-stop` });
+        beyondBaseFixture.value = '1\n';
+        expect((await preflight()).json().ahead_of_remote).toBe(1);
+        beyondBaseFixture.value = '0\n';
+        expect((await preflight()).json().ahead_of_remote).toBe(0);
     });
 
     // Regression: `git status --porcelain -z` spends a SECOND NUL field on the
@@ -1981,6 +1994,7 @@ describe('CS4 — PREFLIGHT-STOP error paths', () => {
     });
 
     it('CS4-5 returns ahead_of_remote=0 when rev-list throws (commitsAhead catch)', async () => {
+        beyondBaseFixture.value = '0\n'; // nothing beyond the base branch either
         const { execFile } = await import('node:child_process');
         const execFileMock = execFile as ReturnType<typeof vi.fn>;
         // First call (git status) succeeds.
@@ -2035,6 +2049,7 @@ describe('CS4 — PREFLIGHT-STOP error paths', () => {
     });
 
     it('CS4-6 returns ahead_of_remote=0 when rev-parse returns empty string for branch name', async () => {
+        beyondBaseFixture.value = '0\n'; // nothing beyond the base branch either
         // Override execFile: first call returns git status, second call (rev-parse) returns empty
         const { execFile } = await import('node:child_process');
         const execFileMock = execFile as ReturnType<typeof vi.fn>;

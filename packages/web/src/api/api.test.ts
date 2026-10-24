@@ -820,22 +820,6 @@ describe('api.comments.update', () => {
     });
 });
 
-describe('api.tasks.list (includeArchived)', () => {
-    it('appends include_archived when true', async () => {
-        const cap = captureGet('/tasks', []);
-        await api.tasks.list(undefined, true);
-        expect(cap.url).toContain('include_archived=true');
-    });
-});
-
-describe('api.issues.tree (includeArchived)', () => {
-    it('appends include_archived when true', async () => {
-        const cap = captureGet('/issues/tree', { tree: [], projects: [], tasks: [] });
-        await api.issues.tree({ includeArchived: true });
-        expect(cap.url).toContain('include_archived=true');
-    });
-});
-
 describe('api.issueLinks.create with relationType', () => {
     it('forwards relation_type to server', async () => {
         const cap = captureMethod('post', '/issues/sub_task/S1/links', {});

@@ -100,7 +100,7 @@ export interface AgentTestExpectations {
 }
 
 /** What a finished workflow run produced, for the expectations above. */
-export interface WorkflowRunObservation {
+interface WorkflowRunObservation {
     status: string;
     sub_task_count: number;
     pr_count: number;

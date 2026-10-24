@@ -11,10 +11,6 @@ import type {
 
 interface BuildOpts {
     projectId?: string | undefined;
-    // When false (default), items in `done` status whose `updated_at` is older
-    // than 7 days are filtered out — keeps the Issues page focused on active
-    // work. Set true to bypass the filter (e.g. archived view, search).
-    includeArchived?: boolean | undefined;
 }
 
 function projectFromRow(r: Record<string, unknown>): IProject {
@@ -34,18 +30,16 @@ function projectFromRow(r: Record<string, unknown>): IProject {
 }
 
 export async function buildIssueTree(opts: BuildOpts = {}): Promise<IIssueTreeResponse> {
-    const { projectId, includeArchived = false } = opts;
+    const { projectId } = opts;
 
     // 1. Pull every item for the scope in one query.
-    let itemsQ = db.selectFrom('items_live').selectAll();
-    if (projectId) itemsQ = itemsQ.where('project_id', '=', projectId);
     // Archive filter: hide items closed (status=done) more than 7 days ago.
-    // `include_archived` bypasses this so the older long-tail is reachable.
-    if (!includeArchived) {
-        itemsQ = itemsQ.where(
-            sql<boolean>`(status <> 'done' OR updated_at >= NOW() - INTERVAL '7 days')`,
-        );
-    }
+    // The archive is never listed here; `/api/search` reaches it.
+    let itemsQ = db
+        .selectFrom('items_live')
+        .selectAll()
+        .where(sql<boolean>`(status <> 'done' OR updated_at >= NOW() - INTERVAL '7 days')`);
+    if (projectId) itemsQ = itemsQ.where('project_id', '=', projectId);
     const allItems = await itemsQ.orderBy('updated_at', 'desc').execute();
 
     const tasks: ITask[] = [];

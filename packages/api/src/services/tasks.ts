@@ -101,16 +101,15 @@ async function resolveRepoIds(projectId: string, repoIds: string[] | undefined):
 }
 
 export const tasksService = {
-    // `includeArchived` defaults to false: hides tasks closed (status=done)
-    // more than 7 days ago. Set true to bypass the filter (archived view).
-    async list(projectId?: string, includeArchived = false): Promise<ITaskListItem[]> {
-        let q = db.selectFrom('items_live').selectAll().where('type', '=', 'task');
+    // Open Tasks plus those done in the last 7 days. The archive is never
+    // listed: older done Tasks are reachable only through `/api/search`.
+    async list(projectId?: string): Promise<ITaskListItem[]> {
+        let q = db
+            .selectFrom('items_live')
+            .selectAll()
+            .where('type', '=', 'task')
+            .where(sql<boolean>`(status <> 'done' OR updated_at >= NOW() - INTERVAL '7 days')`);
         if (projectId) q = q.where('project_id', '=', projectId);
-        if (!includeArchived) {
-            q = q.where(
-                sql<boolean>`(status <> 'done' OR updated_at >= NOW() - INTERVAL '7 days')`,
-            );
-        }
         const rows = await q.orderBy('created_at', 'desc').execute();
         const tasks = rows.map((r) => rowToTask(r as never));
         const counts = await subTaskCounts(tasks.map((t) => t.id));

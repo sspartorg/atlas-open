@@ -1004,7 +1004,7 @@ export function copilotDenyToolArgs(itemAttached: boolean): string[] {
  * the PR when the run ends. The prompt says so; these flags enforce it.
  * Claude matches `Bash(<prefix>:*)`; Copilot matches `shell(<command>)`.
  */
-export const CLAUDE_DISALLOWED_TOOLS = [
+const CLAUDE_DISALLOWED_TOOLS = [
     'Task',
     'WebFetch',
     'WebSearch',
@@ -1012,7 +1012,7 @@ export const CLAUDE_DISALLOWED_TOOLS = [
     'Bash(git push:*)',
     'Bash(gh:*)',
 ];
-export const COPILOT_DENIED_SHELL = ['shell(git commit)', 'shell(git push)', 'shell(gh)'];
+const COPILOT_DENIED_SHELL = ['shell(git commit)', 'shell(git push)', 'shell(gh)'];
 
 /**
  * Git config the agent's shell gets on top of whatever config files it reads.

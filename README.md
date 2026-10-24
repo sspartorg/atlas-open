@@ -24,7 +24,7 @@ Up to three Tasks run at once, and only one Task per repo at a time.
 - **Jira bridge**: each source is a JQL query, an agent and the repos to use; imported Tasks are assigned to that agent
 - **Guardrails** and guardrail scripts
 - **Reminders**, in-app and push **notifications**, external notifications (Telegram, Microsoft Teams)
-- **Analytics** (delivery), **terminal / CLI sessions**, scratch pad, search
+- **Analytics** (shipped, PRs merged, cycle time, spend), **terminal / CLI sessions**, scratch pad, search
 - **Credentials and secrets**, and an **MCP server** so your AI CLI can drive Atlas
 
 ## Atlas Open vs Atlas
@@ -38,7 +38,7 @@ Atlas (the commercial edition) adds workflows on top of everything above.
 | Marketplace agents | Solo Engineer + 6 on-demand agents | Plus the 18-agent SDLC pipeline catalog (architect, coder, reviewers, fixers, QA...) |
 | How a Task runs | One agent does the whole Task | Workflows: a chain of specialised agents, each with a small scoped context window, with pass/fail loops |
 | Jira bridge, guardrails, reminders, notifications, terminal, MCP | Yes | Yes |
-| Analytics | Delivery | Plus workflow analytics |
+| Analytics | Basics: shipped, PRs merged, cycle time, spend | Plus delivery and workflow analytics |
 | Workflow graph builder, script steps (custom command executors) | No | Yes |
 | Sub-task fan-out, owner gates | No | Yes |
 | Scheduled workflows and agents | No | Yes |

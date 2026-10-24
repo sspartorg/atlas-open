@@ -62,7 +62,9 @@ async function insertRun(opts: {
             input_tokens: opts.input_tokens ?? 0,
             output_tokens: opts.output_tokens ?? 0,
             cache_read_tokens: opts.cache_read_tokens ?? 0,
-            completed_at: opts.completed_at ?? new Date().toISOString(),
+            // A second back: the window ends at the request's `now`, exclusive,
+            // and a run stamped in that same millisecond would fall outside it.
+            completed_at: opts.completed_at ?? new Date(Date.now() - 1000).toISOString(),
         })
         .execute();
 }
@@ -113,7 +115,7 @@ describe('agent-test runs are not spend, and the Dashboard month agrees with Ana
         await insertRun({ id: 'r-test', item_id: probe, total_cost_usd: 5 });
         await testDb
             .insertInto('agent_runs')
-            .values({ id: 'r-free', agent_id: 'agent-coder', item_id: null, status: 'completed', total_cost_usd: 1, completed_at: new Date().toISOString() } as never)
+            .values({ id: 'r-free', agent_id: 'agent-coder', item_id: null, status: 'completed', total_cost_usd: 1, completed_at: new Date(Date.now() - 1000).toISOString() } as never)
             .execute();
 
         const tz = 'Asia/Kolkata';

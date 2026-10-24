@@ -86,6 +86,7 @@ export async function syncAgentDefaults(): Promise<void> {
             });
             stats.prompts_updated += 1;
         }
+        if (existing.prompt_version === 1) await marketplaceService.markCurrentIfIdentical(cat.id);
     }
 
     const installed = await installAgentsWorkflowsNeed();

@@ -322,27 +322,6 @@ describe('PATCH /api/tasks/:id/assign — agent not found (EPICS-EXTRA)', () => 
     });
 });
 
-// TASKS-BRANCH — additional branch coverage for tasks.ts
-describe('GET /api/tasks — include_archived branches', () => {
-    it('accepts include_archived=1 (the ||==="1" arm of the OR on line 23)', async () => {
-        const res = await app.inject({
-            method: 'GET',
-            url: '/api/tasks?include_archived=1',
-        });
-        expect(res.statusCode).toBe(200);
-        expect(Array.isArray(JSON.parse(res.body))).toBe(true);
-    });
-
-    it('accepts include_archived=true (the ===\"true\" arm of the OR on line 23)', async () => {
-        const res = await app.inject({
-            method: 'GET',
-            url: '/api/tasks?include_archived=true',
-        });
-        expect(res.statusCode).toBe(200);
-        expect(Array.isArray(JSON.parse(res.body))).toBe(true);
-    });
-});
-
 describe('PATCH /api/tasks/:id/status — override=1 branch', () => {
     it('accepts override=1 as truthy (the ===\"1\" arm of the OR on line 66)', async () => {
         const res = await app.inject({

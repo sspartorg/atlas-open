@@ -4,10 +4,10 @@ import type { ITask, ITaskFullResponse } from '@atlas/shared';
 import { useToast } from './useToast.js';
 import { reviewedChildrenBlocking, transitionItemOnError } from './useTransitionItem.js';
 
-export function useTasks(projectId?: string, includeArchived = false) {
+export function useTasks(projectId?: string) {
     return useQuery({
-        queryKey: ['tasks', { projectId, includeArchived }],
-        queryFn: () => api.tasks.list(projectId, includeArchived),
+        queryKey: ['tasks', { projectId }],
+        queryFn: () => api.tasks.list(projectId),
     });
 }
 

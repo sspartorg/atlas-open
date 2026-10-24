@@ -110,49 +110,18 @@ describe('tasksService', () => {
             expect(await tasksService.awaitingPickupCount()).toBe(1);
         });
 
-        it('list(_, includeArchived=true) returns done tasks regardless of age', async () => {
-            // Seed a done task whose updated_at is old enough to be filtered
-            // out by the default archive window (`> 7 days`). Then verify
-            // includeArchived=true bypasses that filter and returns the row.
-            // Disable the items_set_updated_at BEFORE-UPDATE trigger for
-            // this test's session so our manual updated_at reset sticks;
-            // the trigger would otherwise clobber it with NOW().
+        it('list() never returns Tasks done more than 7 days ago, scoped or not', async () => {
+            // Disable the items_set_updated_at BEFORE-UPDATE trigger so the
+            // manual updated_at reset sticks; it would otherwise reset to NOW().
             await sql`ALTER TABLE items DISABLE TRIGGER items_set_updated_at`.execute(testDb);
             try {
                 const fresh = await tasksService.create({ project_id: 'p1', title: 'fresh' });
-                const stale = await tasksService.create({
-                    project_id: 'p1',
-                    title: 'stale-done',
-                });
+                const stale = await tasksService.create({ project_id: 'p1', title: 'stale-done' });
                 await tasksService.transition(stale.id, 'done', true);
                 await sql`UPDATE items SET updated_at = NOW() - INTERVAL '30 days' WHERE id = ${stale.id}`.execute(testDb);
 
-                const withoutArchive = await tasksService.list();
-                expect(withoutArchive.map((e) => e.id)).toEqual([fresh.id]);
-
-                const withArchive = await tasksService.list(undefined, true);
-                expect(withArchive.map((e) => e.id).sort()).toEqual(
-                    [fresh.id, stale.id].sort(),
-                );
-            } finally {
-                await sql`ALTER TABLE items ENABLE TRIGGER items_set_updated_at`.execute(testDb);
-            }
-        });
-
-        it('list scoped to projectId + includeArchived=true also bypasses the archive filter', async () => {
-            // Exercises the combined `projectId` where-clause + the
-            // include-archived early return path together.
-            await sql`ALTER TABLE items DISABLE TRIGGER items_set_updated_at`.execute(testDb);
-            try {
-                const done = await tasksService.create({ project_id: 'p1', title: 'archived' });
-                await tasksService.transition(done.id, 'done', true);
-                await sql`UPDATE items SET updated_at = NOW() - INTERVAL '30 days' WHERE id = ${done.id}`.execute(testDb);
-
-                const scoped = await tasksService.list('p1', true);
-                expect(scoped.map((e) => e.id)).toContain(done.id);
-                // And it is filtered out without archive:
-                const notScoped = await tasksService.list('p1');
-                expect(notScoped.map((e) => e.id)).not.toContain(done.id);
+                expect((await tasksService.list()).map((e) => e.id)).toEqual([fresh.id]);
+                expect((await tasksService.list('p1')).map((e) => e.id)).toEqual([fresh.id]);
             } finally {
                 await sql`ALTER TABLE items ENABLE TRIGGER items_set_updated_at`.execute(testDb);
             }

@@ -289,17 +289,20 @@ async function commitsAhead(worktreePath: string, branch: string): Promise<numbe
 }
 
 /**
- * Does HEAD carry commits the repo's base branch lacks? Stop's push gate: a
- * session that changed nothing used to push an empty atlas/terminal/* branch
- * to the remote. Errs towards pushing — a wrong "no" would let the worktree
+ * Does HEAD change anything the repo's base branch lacks? Stop's push gate
+ * and the Stop dialog's "something to push" both ask this. `.gitignore` is
+ * left out because Atlas commits its own scratch-path block there when the
+ * worktree is made — counted as work, it pushed a branch for a session that
+ * changed nothing. Same rule as a Task run's delivery (`hasChanges` in
+ * workflow-engine). Errs towards "yes" — a wrong "no" would let the worktree
  * teardown destroy work.
  */
-async function hasCommitsBeyondBase(worktreePath: string, base: string): Promise<boolean> {
+async function hasChangesBeyondBase(worktreePath: string, base: string): Promise<boolean> {
     try {
-        const res = await exec('git', ['-C', worktreePath, 'rev-list', '--count', `origin/${base}..HEAD`], {
+        await exec('git', ['-C', worktreePath, 'diff', '--quiet', `origin/${base}`, 'HEAD', '--', '.', ':!.gitignore'], {
             timeout: 15_000,
         });
-        return Number(res.stdout.trim()) !== 0;
+        return false;
     } catch {
         return true;
     }
@@ -897,7 +900,13 @@ export async function cliSessionsRoutes(app: FastifyInstance): Promise<void> {
             porcelainUnstaged(session.worktree_path),
             currentBranch(session.worktree_path),
         ]);
-        const ahead = branch ? await commitsAhead(session.worktree_path, branch) : 0;
+        let ahead = branch ? await commitsAhead(session.worktree_path, branch) : 0;
+        // A branch not on origin yet counts 0 above; ask Stop's own push gate
+        // so the dialog never says "nothing to push" when Stop would push.
+        const repo = session.repo_id ? await projectReposService.get(session.repo_id) : null;
+        if (ahead === 0 && repo && (await hasChangesBeyondBase(session.worktree_path, repo.default_branch || 'main'))) {
+            ahead = 1;
+        }
         const body: CliSessionPreflightStopResponse = {
             unstaged,
             current_branch: branch,
@@ -1118,7 +1127,7 @@ export async function cliSessionsRoutes(app: FastifyInstance): Promise<void> {
             if (
                 stopRepo &&
                 stopRepo.git_path &&
-                (committed || (await hasCommitsBeyondBase(worktreePath, stopRepo.default_branch || 'main')))
+                (committed || (await hasChangesBeyondBase(worktreePath, stopRepo.default_branch || 'main')))
             ) {
                 const pushResult = await pushWorktree(worktreePath, branch, stopRepo.credential_id, stopRepo.id);
             pushed = pushResult.pushed;

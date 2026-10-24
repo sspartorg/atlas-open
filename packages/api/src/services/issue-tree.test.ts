@@ -50,9 +50,8 @@ describe('buildIssueTree', () => {
         expect(p1Only.projects.map((p) => p.id)).toEqual(['p1']);
     });
 
-    // Exercise the `includeArchived: true` arm (default is false). A
-    // sub-task whose task is archived drops out of the tree with it.
-    it('includes old done items when includeArchived = true', async () => {
+    // A sub-task whose task is archived drops out of the tree with it.
+    it('leaves out old done Tasks and their sub-tasks', async () => {
         await insertProject('p1', 'ATL');
         await insertAgent();
         // Plant an old `done` task (older than 7 days) with a live sub-task.
@@ -66,9 +65,7 @@ describe('buildIssueTree', () => {
         `.execute(testDb);
         const filtered = await buildIssueTree();
         expect(filtered.tree).toEqual([]);
-        const archived = await buildIssueTree({ includeArchived: true });
-        const task = archived.tree.find((n) => n.id === 'old-done')!;
-        expect(task.children.map((c) => c.id)).toEqual(['old-sub']);
+        expect(filtered.tasks).toEqual([]);
     });
 
     it('top level sorted by updated_at desc', async () => {

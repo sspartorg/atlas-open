@@ -583,6 +583,43 @@ export const marketplaceService = {
         return refreshed!;
     },
 
+    /**
+     * Record a linked agent as on the catalog's current version when its
+     * prompt, settings and checklists already equal that version — e.g. after
+     * the per-boot prompt sync copied a newer catalog prompt onto it. Without
+     * this the agent runs the new content while the UI still offers the
+     * upgrade, and the stale hash reads as an Owner edit. Returns true when it
+     * changed the row.
+     */
+    async markCurrentIfIdentical(localAgentId: string): Promise<boolean> {
+        const agent = await db
+            .selectFrom('agents')
+            .select(['prompt_md', 'settings_json', 'marketplace_source_id', 'marketplace_pulled_version'])
+            .where('id', '=', localAgentId)
+            .executeTakeFirst();
+        if (!agent?.marketplace_source_id) return false;
+        const full = await this.getFull(agent.marketplace_source_id);
+        if (!full || agent.marketplace_pulled_version === full.agent.version) return false;
+        const checklists = await db
+            .selectFrom('agent_checklists')
+            .select(['label', 'sort_order', 'required'])
+            .where('agent_id', '=', localAgentId)
+            .execute();
+        const catalogHash = upgradableHash({
+            prompt_md: full.agent.prompt_md,
+            settings_json: full.agent.settings_json,
+            checklists: full.checklists,
+        });
+        const localHash = upgradableHash({ prompt_md: agent.prompt_md, settings_json: agent.settings_json, checklists });
+        if (localHash !== catalogHash) return false;
+        await db
+            .updateTable('agents')
+            .set({ marketplace_pulled_version: full.agent.version, marketplace_upgradable_hash: catalogHash })
+            .where('id', '=', localAgentId)
+            .execute();
+        return true;
+    },
+
     // Imports an agent bundle (uploaded zip) as a new LOCAL agent. The
     // imported agent is intentionally NOT back-linked to the marketplace:
     // bundles come from "somewhere else" (a colleague, an export file)

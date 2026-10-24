@@ -40,7 +40,7 @@ export function taskNewBannerCopy(agentName: string | null): string {
     if (agentName) {
         return (
             `Write a rough goal — even one line is fine. ${agentName} starts as soon as you ` +
-            `submit and opens a pull request when it is done.`
+            `submit; when it is done, Atlas commits, pushes and opens the pull request.`
         );
     }
     return (
@@ -409,7 +409,7 @@ export function TaskNew() {
                             component="span"
                             sx={{ color: ATLAS_PALETTE.slate40, fontWeight: 400 }}
                         >
-                            — the agent runs this Task end to end and opens a pull request
+                            — the agent works this Task end to end; Atlas opens the pull request
                         </Box>
                     </Typography>
                     <AgentSelect

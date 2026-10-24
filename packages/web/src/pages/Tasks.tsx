@@ -5,8 +5,6 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Skeleton from '@mui/material/Skeleton';
-import Switch from '@mui/material/Switch';
-import FormControlLabel from '@mui/material/FormControlLabel';
 import {
     TaskFiltersBar,
     TaskTable,
@@ -52,7 +50,6 @@ export function Tasks() {
     const statusFilter = params.get('status');
     const filterKey = (params.get('filter') as TaskFilterKey | null) ?? 'all';
     const searchQuery = params.get('q') ?? '';
-    const showArchived = params.get('include_archived') === 'true';
 
     const { data: projects = [], error: projectsError, refetch: refetchProjects } = useProjects();
     const { data: agents = [] } = useAgents();
@@ -69,7 +66,7 @@ export function Tasks() {
         isLoading,
         error: tasksError,
         refetch: refetchTasks,
-    } = useTasks(projectId, showArchived);
+    } = useTasks(projectId);
 
     const ownerName = settings?.owner_name ?? 'Owner';
     const ownerAccent = settings?.accent_color ?? ATLAS_PALETTE.slate;
@@ -104,8 +101,8 @@ export function Tasks() {
         setParams(next, { replace: true });
     }
 
-    // Counts the rows on screen, so it follows every filter and hides
-    // archived Tasks unless they are shown.
+    // Counts the rows on screen, so it follows every filter. Done Tasks older
+    // than 7 days never load here; they are found on the Search page.
     const readyCount = filtered.filter((t) => t.status === 'ready').length;
 
     return (
@@ -122,25 +119,6 @@ export function Tasks() {
                 }
                 actions={
                     <>
-                        <FormControlLabel
-                            control={
-                                <Switch
-                                    size="small"
-                                    checked={showArchived}
-                                    onChange={(e) =>
-                                        setParam(
-                                            'include_archived',
-                                            e.target.checked ? 'true' : null
-                                        )
-                                    }
-                                />
-                            }
-                            label={
-                                <Typography sx={{ fontSize: 13, color: ATLAS_PALETTE.slate60 }}>
-                                    Show archived
-                                </Typography>
-                            }
-                        />
                         {/* Phones: no Kanban, and the FAB creates. */}
                         {!isMobile && <ViewModeToggle value={viewMode} onChange={setViewMode} />}
                         {!isMobile && (

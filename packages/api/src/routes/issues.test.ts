@@ -57,16 +57,6 @@ describe('GET /api/issues/tree', () => {
         expect(Array.isArray(body.tree)).toBe(true);
     });
 
-    it('returns 200 with include_archived=true', async () => {
-        const res = await app.inject({
-            method: 'GET',
-            url: '/api/issues/tree?include_archived=true',
-        });
-        expect(res.statusCode).toBe(200);
-        const body = JSON.parse(res.body) as { tree: unknown[] };
-        expect(Array.isArray(body.tree)).toBe(true);
-    });
-
     it('returns 200 for an unknown project_id (no items, not 404)', async () => {
         // The route does not validate project existence — it returns an empty tree.
         const res = await app.inject({
@@ -76,15 +66,5 @@ describe('GET /api/issues/tree', () => {
         expect(res.statusCode).toBe(200);
         const body = JSON.parse(res.body) as { tree: unknown[] };
         expect(body.tree).toHaveLength(0);
-    });
-
-    it('returns 200 with include_archived=1 (line 13 — include_archived === "1" branch)', async () => {
-        const res = await app.inject({
-            method: 'GET',
-            url: '/api/issues/tree?include_archived=1',
-        });
-        expect(res.statusCode).toBe(200);
-        const body = JSON.parse(res.body) as { tree: unknown[] };
-        expect(Array.isArray(body.tree)).toBe(true);
     });
 });

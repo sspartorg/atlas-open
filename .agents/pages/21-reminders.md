@@ -3,7 +3,7 @@
 **Route:** `/reminders` • **Component:** `packages/web/src/pages/Reminders.tsx` • **Sidenav:** under ALERTS & ADMIN.
 
 ## Purpose
-One-page reminder list with create, edit, pause / resume, snooze, cancel and delete. Reminders fire as in-app notifications and (optionally) external notifications, on the same per-minute scheduler as agents. Daily, weekly and cron schedules run in the Owner's time zone (`settings.quiet_hours_timezone`, the browser zone Settings auto-saves; the subtitle names it, or "server time" when unset). Active list always; History behind a toggle.
+One-page reminder list with create, edit, pause / resume, snooze, cancel and delete. Reminders fire as in-app notifications and (optionally) external notifications, on a per-minute scheduler. Daily, weekly and cron schedules run in the Owner's time zone (`settings.quiet_hours_timezone`, the browser zone Settings auto-saves; the subtitle names it, or "server time" when unset). Active list always; History behind a toggle.
 
 ## States
 - Loading: skeleton rows (`aria-busy`) before the first list; a skeleton while history loads.

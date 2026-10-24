@@ -60,7 +60,7 @@ test.describe('/projects/:id?tab=setup', () => {
         await dialog.getByRole('button', { name: 'Keep editing' }).click();
         await expect(dialog.getByLabel('Bash setup script')).toHaveValue('not saved');
         await dialog.getByRole('button', { name: 'Cancel' }).click();
-        await dialog.getByRole('button', { name: 'Discard' }).click();
+        await dialog.getByRole('button', { name: 'Discard', exact: true }).click();
         await expect(dialog).toBeHidden();
         const [after] = await apiGet<Repo[]>(request, `/api/projects/${PROJECT}/repos`);
         expect(after!.setup_sh_body).toBe(repo.setup_sh_body);

@@ -109,6 +109,42 @@ describe('syncAgentDefaults — catalog-driven reconciliation', () => {
         expect(updated?.prompt_md).toBe(CATALOG);
     });
 
+    it('records the catalog version once the synced agent equals it, so no upgrade is offered', async () => {
+        await insertCatalogEntry('agent-solo', '# v2 body');
+        await testDb.updateTable('marketplace_agents').set({ version: 2 }).where('id', '=', 'agent-solo').execute();
+        await insertInstalledAgent('agent-solo', { prompt_md: '# v1 body', prompt_version: 1 });
+        await testDb
+            .updateTable('agents')
+            .set({ marketplace_source_id: 'agent-solo', marketplace_pulled_version: 1, marketplace_upgradable_hash: 'v1' })
+            .where('id', '=', 'agent-solo')
+            .execute();
+
+        await syncAgentDefaults();
+
+        const row = await testDb
+            .selectFrom('agents')
+            .select(['prompt_md', 'marketplace_pulled_version', 'marketplace_upgradable_hash'])
+            .where('id', '=', 'agent-solo')
+            .executeTakeFirstOrThrow();
+        expect(row.prompt_md).toBe('# v2 body');
+        expect(row.marketplace_pulled_version).toBe(2);
+        expect(row.marketplace_upgradable_hash).not.toBe('v1');
+
+        // Settings the Owner changed keep the upgrade on offer.
+        await testDb
+            .updateTable('agents')
+            .set({ marketplace_pulled_version: 1, settings_json: JSON.stringify({ owner: true }) as never })
+            .where('id', '=', 'agent-solo')
+            .execute();
+        await syncAgentDefaults();
+        const kept = await testDb
+            .selectFrom('agents')
+            .select(['marketplace_pulled_version'])
+            .where('id', '=', 'agent-solo')
+            .executeTakeFirstOrThrow();
+        expect(kept.marketplace_pulled_version).toBe(1);
+    });
+
     it('does NOT touch agent prompt_md when prompt_version > 1 (Owner has edited)', async () => {
         const CATALOG = '# catalog body';
         const OWNER_EDIT = '# Owner custom\n\nno brainstorm-exit on purpose';

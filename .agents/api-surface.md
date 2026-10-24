@@ -96,7 +96,7 @@ A08 â€” `POST /api/agents` and `PATCH /api/agents/:id` accept an optional `
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/tasks?project_id=…&include_archived=…` | `ITaskListItem[]` (Task + `sub_task_count`), newest first. Hides `done` Tasks older than 7 days unless `include_archived=true\|1` |
+| GET | `/api/tasks?project_id=…` | `ITaskListItem[]` (Task + `sub_task_count`), newest first. Open Tasks + those done in the last 7 days (`updated_at`) only; the archive is never listed here — `/api/search` reaches it |
 | GET | `/api/tasks/stats` | `{ total, awaiting_pickup }` — all Tasks / `ready` Tasks. No web caller since the Tasks subtitle counts its listed rows |
 | GET | `/api/tasks/:id` | Single `ITask`, 404 `Task not found` |
 | GET | `/api/tasks/:id/full` | `ITaskFullResponse`: `task`, `project`, `sub_tasks`, `related_links`, `external_links`, `activity`, `agents` (`services/issue-full.ts`) |
@@ -128,7 +128,7 @@ A08 â€” `POST /api/agents` and `PATCH /api/agents/:id` accept an optional `
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/issues/tree?project_id=…&include_archived=…` | `IIssueTreeResponse`: `tree` (Tasks with their sub-tasks nested as `children`; nodes carry `task_id` / `task_title`), `tasks` (raw `ITask[]`), and an inline `projects` dictionary (`services/issue-tree.ts`). **2026-10-14 (ADR 0031):** the `agents` dictionary was removed — every agent with its full prompt, ~156 KB per project page, read by nothing; screens use `GET /api/agents?view=summary`. Consumer: Project Detail. |
+| GET | `/api/issues/tree?project_id=…` | Leaves out `done` items older than 7 days (`updated_at`); the archive is never listed here — `/api/search` reaches it. `IIssueTreeResponse`: `tree` (Tasks with their sub-tasks nested as `children`; nodes carry `task_id` / `task_title`), `tasks` (raw `ITask[]`), and an inline `projects` dictionary (`services/issue-tree.ts`). **2026-10-14 (ADR 0031):** the `agents` dictionary was removed — every agent with its full prompt, ~156 KB per project page, read by nothing; screens use `GET /api/agents?view=summary`. Consumer: Project Detail. |
 
 
 `agentsService.create` and `update` plumb `kind_slug`, `settings_json` and `effort` through `AGENT_SCALAR_FIELDS`; create also stores `designation`. **2026-09-18:** `effort` was missing from that list, so `POST` and `PATCH /api/agents` dropped it silently and every hand-made agent ran at the column default. Defaults on create: `kind_slug='custom'`, `settings_json={}`. Agents have no schedule.

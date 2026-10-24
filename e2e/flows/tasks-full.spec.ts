@@ -6,7 +6,7 @@ import { createProject, deleteProject, insertRepo } from '../helpers/projects.js
 
 // /tasks (table + Kanban) and /tasks/new against the real API, on a project
 // of its own (prefix WTK, 23 Tasks): every filter and the subtitle that counts
-// what is on screen, search by id, sort, paging, the archived switch, a legal
+// what is on screen, search by id, sort, paging, the archive staying off this page, a legal
 // Kanban drag (persisted), a refused one (exactly one toast), and the create
 // form (Submit with no agent → Draft, Save as draft → Draft, priority Low, repos).
 
@@ -143,21 +143,14 @@ test.describe('/tasks table', () => {
         await expect(rows(page)).toHaveCount(n);
     });
 
-    test('Show archived adds the Task closed 10 days ago, and the subtitle follows', async ({ page }) => {
-        await goto(page, `/tasks?project=${encodeURIComponent(NAME)}`);
+    test('the Task closed 10 days ago never loads here; Search finds it', async ({ page }) => {
+        // The old ?include_archived=true no longer reaches the archive.
+        await goto(page, `/tasks?project=${encodeURIComponent(NAME)}&include_archived=true`);
         await page.getByLabel('Search tasks').fill(`WTK-${COUNT}`);
         await expect(page.getByText('No tasks match this view.')).toBeVisible();
-        // The switch follows the URL, which React Router updates a tick later: click, then wait.
-        await page.getByLabel('Show archived').click();
-        await expect(page.getByLabel('Show archived')).toBeChecked();
-        await expect(page).toHaveURL(/include_archived=true/);
-        await expect(rows(page)).toHaveCount(1);
-        await expect(rows(page)).toContainText('Done');
-        await expect(subtitle(page)).toContainText(`1 task · ${NAME}`);
-        await page.getByLabel('Show archived').click();
-        await expect(page.getByLabel('Show archived')).not.toBeChecked();
-        await expect(page).not.toHaveURL(/include_archived/);
-        await expect(rows(page)).toHaveCount(0);
+        await expect(page.getByText('Show archived')).toHaveCount(0);
+        await goto(page, `/search?q=WTK-${COUNT}`);
+        await expect(page.getByRole('main').getByText(`WTK-${COUNT}`).first()).toBeVisible();
     });
 });
 

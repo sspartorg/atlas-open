@@ -14,7 +14,7 @@ Single-page form to draft a Task and either save it as a draft or submit it. Sub
 - Breadcrumb: Tasks › New task; title "New task" (`PageHeader`)
 - Subtitle: `"<agent.name> will start once you submit"` when an agent is picked, else `"Nothing runs until the Task has an agent"`.
 
-**Info banner** — `taskNewBannerCopy(agentName)`: "Write a rough goal — even one line is fine. <agent> starts as soon as you submit and opens a pull request when it is done." with an agent, else "… With no agent picked, the Task is saved as a draft until you assign one from its page."
+**Info banner** — `taskNewBannerCopy(agentName)`: "Write a rough goal — even one line is fine. <agent> starts as soon as you submit; when it is done, Atlas commits, pushes and opens the pull request." with an agent, else "… With no agent picked, the Task is saved as a draft until you assign one from its page."
 
 **Form fields**
 - **Title** — required, autoFocus; inline error on blur / submit.
@@ -22,7 +22,7 @@ Single-page form to draft a Task and either save it as a draft or submit it. Sub
 - **Project** — Select, required; pre-filled from `?project=<id or name>` once projects load (derived, not seeded into state — a fresh load used to leave it empty). Nothing in the app links with it today; it is for bookmarks and external links.
 - **Repos** — shown whenever the picked project has any repo (ADR 0018): `RepoSelect` multi-select, the project's **first** repo preselected, order = pick order, helper "First repo holds specs and other Task-wide files." Always sent as `repo_ids`. With a project selected and nothing picked, Save/Submit are disabled; a project with no repos shows an info alert pointing at its Repos tab instead of the picker.
 - **Priority** — `low | normal | high | urgent`; default `low`.
-- **Agent** — `AgentSelect` over active agents, placeholder "None — save as a draft"; label hint "the agent runs this Task end to end and opens a pull request"; helper "Leave it empty to save a draft; Save as draft never starts it."
+- **Agent** — `AgentSelect` over active agents, placeholder "None — save as a draft"; label hint "the agent works this Task end to end; Atlas opens the pull request"; helper "Leave it empty to save a draft; Save as draft never starts it."
 - **Reporter** — default `OWNER`; options Owner + active agents.
 
 **Actions** (stay enabled; an invalid click sets `submitAttempted` and shows every field error)
