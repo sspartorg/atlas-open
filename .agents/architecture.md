@@ -194,7 +194,7 @@ Agents never start themselves and never route items. In Atlas Open **one agent r
 queue  (assign an agent → tasksService.queueIfDraft: draft → ready, kickWorkflowDispatch)
    ▼
 dispatch (tick or kick): oldest ready Task with an assignee, no live run, no open depends_on,
-         no repo shared with another live run · at most MAX_PARALLEL_RUNS (3) running
+         no repo shared with another live run · at most MAX_CONCURRENT_AGENTS (1) holding the slot
    │  startTaskRun: deps gate · insert workflow_runs (graph_snapshot = soloGraph: start → agent → end,
    │                one live run per item) · Task → in_progress
    │  prepareWorktree: ensureWorktree({item:null, branch}) per repo of the Task (branch atlas/task/<id>)
@@ -230,7 +230,7 @@ stop   → POST /api/workflow-runs/:id/stop, or stop / delete of the step run:
 
 **Git ops and locks.** `ensureWorktree` / `pushWorktree` / `openPullRequest` / `cleanupWorktreeAfterPush` each take `withProjectGitLock`, which is not re-entrant — the engine never wraps them. The worktree path lives only on `workflow_runs`, never on `items.worktree_path`.
 
-**Concurrency.** `agent_runs_one_live_per_item` (migration 003) allows one `queued` / `in_progress` step per item; `workflow_runs_one_live_per_item` allows one `running` / `waiting_for_owner` run per item and covers the gap between the step and delivery. Up to `MAX_PARALLEL_RUNS` (3) Tasks run at once, each in its own worktree. **One Task at a time per repo (ADR 0029):** a Task is not started while another run on a Task that names the same repo is `running` or `waiting_for_owner`, so two PRs never edit the same checkout. A parked run keeps its repo until it is resolved.
+**Concurrency.** `agent_runs_one_live_per_item` (migration 003) allows one `queued` / `in_progress` step per item; `workflow_runs_one_live_per_item` allows one `running` / `waiting_for_owner` run per item and covers the gap between the step and delivery. One agent runs at a time (`MAX_CONCURRENT_AGENTS` = 1, ADR 0033): a Task run or an itemless agent run holds the one slot; everything else waits in `listDispatchQueue()`, shown on `/queue`. **One Task at a time per repo (ADR 0029):** a Task is not started while another run on a Task that names the same repo is `running` or `waiting_for_owner`, so two PRs never edit the same checkout. A parked run keeps its repo until it is resolved.
 
 **Why one agent.** It is the simple model: one agent carries the whole Task in one context window, which is easy to reason about but spends more tokens on a large Task than a chain of narrowly scoped agents would. Multi-agent workflows with scoped context, custom checks and pass/fail loops are the commercial edition (Atlas).
 

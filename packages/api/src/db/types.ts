@@ -15,6 +15,7 @@ type Int = ColumnType<number, number | undefined, number>;
 type IntN = ColumnType<number | null, number | null | undefined, number | null | undefined>;
 type Str = ColumnType<string, string | undefined, string>;
 type StrN = ColumnType<string | null, string | null | undefined, string | null | undefined>;
+type Bool = ColumnType<boolean, boolean | undefined, boolean>;
 type Bool0or1 = ColumnType<number, number | undefined, number>;
 type CreatedAt = Generated<string>;
 type UpdatedAt = ColumnType<string, string | undefined, string | undefined>;
@@ -100,6 +101,18 @@ export interface AgentsTable {
     marketplace_source_id: StrN;
     marketplace_pulled_version: IntN;
     marketplace_upgradable_hash: StrN;
+    // Migration 004 (ADR 0033) — run config: item or not, git delivery, schedule.
+    requires_item: Bool;
+    git_commit: Bool;
+    git_push: Bool;
+    git_open_pr: Bool;
+    schedule_enabled: Bool;
+    schedule_preset: ColumnType<SchedulePreset, SchedulePreset | undefined, SchedulePreset>;
+    schedule_time_of_day: Str;
+    schedule_weekday: IntN;
+    schedule_cron_expression: Str;
+    schedule_next_run_at: TSn;
+    schedule_due_at: TSn;
     created_at: CreatedAt;
     updated_at: UpdatedAt;
 }
@@ -136,6 +149,16 @@ export interface MarketplaceAgentsTable {
     >;
     memory_cadence: Int;
     memory_template_md: Str;
+    // Migration 004 (ADR 0033) — run config: item or not, git delivery, schedule.
+    requires_item: Bool;
+    git_commit: Bool;
+    git_push: Bool;
+    git_open_pr: Bool;
+    schedule_enabled: Bool;
+    schedule_preset: ColumnType<SchedulePreset, SchedulePreset | undefined, SchedulePreset>;
+    schedule_time_of_day: Str;
+    schedule_weekday: IntN;
+    schedule_cron_expression: Str;
     summary: Str;
     version: Int;
     content_hash: Str;

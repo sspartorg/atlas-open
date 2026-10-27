@@ -38,7 +38,8 @@ export function AssigneePickerPopover({
     const ownerName = settings?.owner_name ?? 'Owner';
     const ownerAccent = settings?.accent_color ?? ATLAS_PALETTE.slate;
 
-    const activeAgents = agents.filter((w: AgentSummary) => w.status === 'active');
+    // An agent that runs on its own (ADR 0033) can't take a Task; the API 400s the assign.
+    const activeAgents = agents.filter((w: AgentSummary) => w.status === 'active' && w.requires_item);
     const suggested = suggestedRole ? activeAgents.filter((w) => w.role_id === suggestedRole) : [];
     const others = activeAgents.filter((w) => !suggested.includes(w));
 

@@ -14,6 +14,7 @@ import type {
 import { randomUUID } from 'crypto';
 import { broadcastSSE } from '../routes/events.js';
 
+import { runConfigColumns, runConfigOf } from './agent-schedules.js';
 // Workstream #4 — Validation guard that rejects (cli, model) pairs not in
 // `cli_models`. Throws a tagged Error the route layer recognises and
 // converts to a 400; the composite FK from migration 061 catches anything
@@ -156,6 +157,16 @@ export interface IAgentCreateInput {
     kind_slug?: AgentKindSlug | undefined;
     settings_json?: Record<string, unknown> | undefined;
     checklists?: IChecklistInput[] | undefined;
+    // ADR 0033 — run config; see `runConfigColumns`.
+    requires_item?: boolean | undefined;
+    git_commit?: boolean | undefined;
+    git_push?: boolean | undefined;
+    git_open_pr?: boolean | undefined;
+    schedule_enabled?: boolean | undefined;
+    schedule_preset?: IAgent['schedule_preset'] | undefined;
+    schedule_time_of_day?: string | undefined;
+    schedule_weekday?: number | null | undefined;
+    schedule_cron_expression?: string | undefined;
 }
 
 export interface IAgentUpdateInput {
@@ -179,6 +190,16 @@ export interface IAgentUpdateInput {
     kind_slug?: AgentKindSlug | undefined;
     settings_json?: Record<string, unknown> | undefined;
     checklists?: IChecklistInput[] | undefined;
+    // ADR 0033 — run config; see `runConfigColumns`.
+    requires_item?: boolean | undefined;
+    git_commit?: boolean | undefined;
+    git_push?: boolean | undefined;
+    git_open_pr?: boolean | undefined;
+    schedule_enabled?: boolean | undefined;
+    schedule_preset?: IAgent['schedule_preset'] | undefined;
+    schedule_time_of_day?: string | undefined;
+    schedule_weekday?: number | null | undefined;
+    schedule_cron_expression?: string | undefined;
 }
 
 const AGENT_SCALAR_FIELDS = [
@@ -202,6 +223,22 @@ const AGENT_SCALAR_FIELDS = [
     'kind_slug',
     'settings_json',
 ] as const;
+
+const RUN_CONFIG_FIELDS = [
+    'requires_item',
+    'git_commit',
+    'git_push',
+    'git_open_pr',
+    'schedule_enabled',
+    'schedule_preset',
+    'schedule_time_of_day',
+    'schedule_weekday',
+    'schedule_cron_expression',
+] as const;
+
+function pickRunConfig(input: IAgentCreateInput | IAgentUpdateInput): Partial<IAgent> {
+    return Object.fromEntries(RUN_CONFIG_FIELDS.filter((k) => input[k] !== undefined).map((k) => [k, input[k]]));
+}
 
 function pickAgentScalars(input: IAgentCreateInput | IAgentUpdateInput): Record<string, unknown> {
     const src = input as unknown as Record<string, unknown>;
@@ -238,6 +275,8 @@ const AGENT_SUMMARY_COLUMNS = [
     'id', 'team_managed', 'name', 'category', 'cli', 'model', 'effort', 'framework', 'prompt_version', 'status',
     'accent_color', 'sort_order', 'description', 'designation', 'role_id', 'glyph', 'memory_cadence', 'kind_slug',
     'settings_json', 'marketplace_source_id', 'marketplace_pulled_version', 'marketplace_upgradable_hash',
+    'requires_item', 'git_commit', 'git_push', 'git_open_pr', 'schedule_enabled', 'schedule_preset',
+    'schedule_time_of_day', 'schedule_weekday', 'schedule_cron_expression', 'schedule_next_run_at', 'schedule_due_at',
     'created_at', 'updated_at',
 ] as const satisfies ReadonlyArray<Exclude<keyof DB['agents'], 'prompt_md'>>;
 
@@ -268,6 +307,7 @@ export const agentsService = {
         await assertRoleInCatalog(data.role_id);
         const id = data.id ?? randomUUID();
         const scalars = pickAgentScalars(data);
+        const runConfig = runConfigColumns(runConfigOf({}), pickRunConfig(data));
         const status = (scalars['status'] as IAgent['status']) ?? 'active';
         const created = await db.transaction().execute(async (trx) => {
             const inserted = await trx
@@ -293,6 +333,7 @@ export const agentsService = {
                     // A08 — optional FK to the SDLC role catalog. null
                     // keeps the agent in autonomous/unbound state.
                     role_id: (scalars['role_id'] as string | null | undefined) ?? null,
+                    ...(runConfig as Record<string, never>),
                 })
                 .returningAll()
                 .executeTakeFirstOrThrow();
@@ -336,7 +377,11 @@ export const agentsService = {
             await assertModelInRegistry(cli, model);
         }
         if (data.role_id !== undefined) await assertRoleInCatalog(data.role_id);
-        const scalars = pickAgentScalars(data);
+        const runConfigPatch = pickRunConfig(data);
+        const scalars = {
+            ...pickAgentScalars(data),
+            ...(Object.keys(runConfigPatch).length > 0 ? runConfigColumns(await this.get(id), runConfigPatch) : {}),
+        };
         const promptMdChanged = 'prompt_md' in data && data.prompt_md !== undefined;
         const updated = await db.transaction().execute(async (trx) => {
             let row: IAgent;

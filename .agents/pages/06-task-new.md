@@ -53,7 +53,7 @@ Single-page form to draft a Task and either save it as a draft or submit it. Sub
 - Post-onboarding only.
 
 ## Edge cases / quirks
-- **The assignee is the runner** — one agent per Task; it runs once the Task is `ready`, at most `MAX_PARALLEL_RUNS = 3` Tasks at once and one Task per repo at a time (`workflow-engine.ts`).
+- **The assignee is the runner** — one agent per Task; it runs once the Task is `ready`, one agent at a time (`MAX_CONCURRENT_AGENTS` = 1, ADR 0033) and one Task per repo at a time; an agent that runs on its own (`requires_item` off) is not offered (`workflow-engine.ts`).
 - A create error (e.g. an agent deactivated since the list loaded) toasts the API's message; nothing is saved.
 - "OWNER" is a select sentinel mapped to `null` in the payload.
 - The draft guard covers app-level navigation only (`BrowserRouter`, no `useBlocker`); **Cancel**, the breadcrumb and the post-submit redirect leave without asking.

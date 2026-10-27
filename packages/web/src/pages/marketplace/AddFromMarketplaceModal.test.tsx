@@ -19,6 +19,8 @@ const agent: IMarketplaceAgentSummary = {
     installed_agent_id: null,
     installed_version: null,
     upgrade_available: false,
+    requires_item: true,
+    schedule_enabled: false,
 };
 
 describe('AddFromMarketplaceModal', () => {

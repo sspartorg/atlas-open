@@ -226,6 +226,25 @@ describe('AssigneePickerPopover', () => {
         expect(items.some((el) => el.textContent?.includes('InactiveBot'))).toBe(false);
     });
 
+    it('agents that run on their own are NOT listed', async () => {
+        const loner = makeAgent({ id: 'agent-loner', name: 'LonerBot', requires_item: false });
+        server.use(
+            http.get(`${BASE}/agents`, () => HttpResponse.json([ACTIVE_AGENT, loner])),
+            ...defaultHandlers
+        );
+        renderWithProviders(
+            <AssigneePickerPopover
+                anchorEl={makeAnchor()}
+                open
+                onClose={vi.fn()}
+                assigneeAgentId={null}
+                onAssign={vi.fn()}
+            />
+        );
+        expect(await screen.findByText('Coder')).toBeInTheDocument();
+        expect(screen.queryByText('LonerBot')).not.toBeInTheDocument();
+    });
+
     it('suggestedRole="po" lists PO-role agents first under a "Suggested" header', async () => {
         server.use(
             http.get(`${BASE}/agents`, () =>

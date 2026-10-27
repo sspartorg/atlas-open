@@ -63,6 +63,8 @@ export function useUpdateAgent() {
         onSuccess: (updated) => {
             void queryClient.invalidateQueries({ queryKey: ['agents'] });
             void queryClient.setQueryData(['agents', updated.id], updated);
+            // A schedule edit moves the agent in or out of the Queue page's Scheduled list.
+            void queryClient.invalidateQueries({ queryKey: ['queue'] });
         },
         // Default error toast so PATCH failures aren't silent. Caller-supplied
         // onError on individual mutate() calls still runs (react-query fires

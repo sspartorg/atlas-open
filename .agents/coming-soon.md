@@ -34,7 +34,7 @@ This is intentional, not a stub; it's used so devs can play with the app without
 
 These are features of the commercial Atlas, not stubs: Atlas Open has no UI for them and they are not planned here. Do not add rows for them above.
 
-Workflows (graph builder, chains of specialised agents, pass/fail loops), script steps, sub-task fan-out, owner gates, scheduled workflows and agents, the 18-agent SDLC pipeline catalog, workflow templates and marketplace publishing, workflow evals, CI follow-through auto-fix, team config sync, workflow analytics.
+Workflows (graph builder, chains of specialised agents, pass/fail loops), script steps, sub-task fan-out, owner gates, scheduled workflows, the 18-agent SDLC pipeline catalog, workflow templates and marketplace publishing, workflow evals, CI follow-through auto-fix, team config sync, workflow analytics.
 
 ---
 

@@ -6,6 +6,7 @@ import type {
     ApiErrorBody,
     ApiErrorKind,
     IAgent,
+    IQueue,
     IMarketplaceAgentFull,
     IMarketplaceAgentSummary,
     IMarketplaceUpgradeDiff,
@@ -264,6 +265,10 @@ export const api = {
         dashboard: (tz: string = viewerTz()) => get<DashboardResponse>(`/dashboard?tz=${encodeURIComponent(tz)}`),
         project: (id: string) => get<ProjectCounts>(`/counts/project/${id}`),
         queueByAgent: () => get<Record<string, number>>('/counts/queue-by-agent'),
+    },
+
+    queue: {
+        get: () => get<IQueue>('/queue'),
     },
 
     analytics: {

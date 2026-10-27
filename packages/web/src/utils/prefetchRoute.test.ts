@@ -13,6 +13,7 @@ vi.mock('../pages/Dashboard.js', () => pageStub);
 vi.mock('../pages/ScratchPad.js', () => pageStub);
 vi.mock('../pages/Projects.js', () => pageStub);
 vi.mock('../pages/Tasks.js', () => pageStub);
+vi.mock('../pages/Queue.js', () => pageStub);
 vi.mock('../pages/Agents.js', () => pageStub);
 vi.mock('../pages/Marketplace.js', () => pageStub);
 vi.mock('../pages/McpTools.js', () => pageStub);
@@ -106,12 +107,12 @@ describe('prefetchRoute', () => {
     it('every loader arrow in the routes map resolves cleanly (function coverage)', async () => {
         // Directly invoke every loader — the vi.mock stubs above resolve each
         // page module to a no-op React component so nothing heavy loads. This
-        // exercises the 15 arrow functions the MODE guard skips inside
+        // exercises the 16 arrow functions the MODE guard skips inside
         // prefetchRoute() itself.
         const results = await Promise.all(
             Object.values(routes).map((loader) => loader()),
         );
-        expect(results).toHaveLength(15); // 14 unique pages + `home` alias
+        expect(results).toHaveLength(16); // 15 unique pages + `home` alias
         for (const mod of results) {
             expect(mod).toBeDefined();
         }

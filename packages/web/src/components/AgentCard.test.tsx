@@ -290,4 +290,21 @@ describe('AgentCard — qualification chip', () => {
         renderWithProviders(<AgentCard agent={makeAgent()} qualification="qualified" />);
         expect(screen.queryByText('Qualified')).not.toBeInTheDocument();
     });
+
+    it('shows the schedule chip with the next fire and the runs-on-its-own chip', () => {
+        const next = new Date(2026, 4, 16, 7, 5).toISOString();
+        renderWithProviders(
+            <AgentCard
+                agent={makeAgent({ schedule_enabled: true, schedule_next_run_at: next, requires_item: false })}
+            />
+        );
+        expect(screen.getByText('Scheduled · next 07:05')).toBeInTheDocument();
+        expect(screen.getByText('Runs on its own')).toBeInTheDocument();
+    });
+
+    it('shows no run chips for an unscheduled Task agent', () => {
+        renderWithProviders(<AgentCard agent={makeAgent({ schedule_enabled: true, schedule_next_run_at: null })} />);
+        expect(screen.queryByText(/Scheduled · next/)).not.toBeInTheDocument();
+        expect(screen.queryByText('Runs on its own')).not.toBeInTheDocument();
+    });
 });

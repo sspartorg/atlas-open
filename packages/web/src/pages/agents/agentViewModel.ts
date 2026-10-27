@@ -131,7 +131,7 @@ export interface AgentRuntimeStats {
     /** True when the most recent TERMINAL run ended in `error`. Distinct from
      *  the `runtimeError` prop on AgentCard, which means "the runs query
      *  failed to load" — feeding that into the status label made the Agents
-     *  grid disagree with the Queue page for the same agent. */
+     *  grid disagree with the Agent Detail hero for the same agent. */
     lastRunErrored: boolean;
     lastRunAt: string | null;
     totalRunsThisMonth: number;

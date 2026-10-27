@@ -5,16 +5,18 @@ import { refreshExpiring as refreshExpiringAppTokens } from './github-app-tokens
 import { externalLinks } from './external-links.js';
 import { jiraSync } from './jira-sync.js';
 import { onStepFinished, reconcileWorkflowRuns, tickWorkflowDispatch } from './workflow-engine.js';
+import { markDueAgents } from './agent-schedules.js';
 
 // Single clock-driven poller. One setInterval ticks every minute and runs,
 // in order: the stuck-run watchdog, due reminders, the quiet-hours flush of
 // held outward sends, GitHub App token pre-warm, the Task-run reconcile
-// sweep, PR-state sync, the Jira bridge, and Task dispatch.
+// sweep, PR-state sync, the Jira bridge, agent schedules, and dispatch.
 //
-// Agents have no schedules or queues of their own: a Ready Task with an
-// assigned agent is dispatched by the engine. The tick is the fallback —
-// queueing a Task, a Task turning Ready or Done, and a run ending each kick a
-// dispatch pass straight away (`kickWorkflowDispatch`).
+// ADR 0033 — one queue, one slot. A Ready Task with an assigned agent, a Run
+// now, and an agent's schedule firing all wait for it, and the engine
+// dispatches. The tick is the fallback — queueing a Task, a Task turning
+// Ready or Done, a Run now, and a run ending each kick a dispatch pass
+// straight away (`kickWorkflowDispatch`).
 //
 // Logging posture: silent on uninteresting ticks.
 
@@ -92,6 +94,14 @@ export async function tickAgentScheduler(): Promise<void> {
         await jiraSync.tick(now);
     } catch (err) {
         schedLog(`[jira] tick failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Before dispatch, so a fire this minute can take the slot this tick.
+    try {
+        const fired = await markDueAgents(now);
+        if (fired > 0) schedLog(`[agent-schedule] ${fired} agent schedule(s) fired`);
+    } catch (err) {
+        schedLog(`[agent-schedule] tick failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     try {

@@ -154,7 +154,7 @@ describe('loadCatalog', () => {
         writeManifest(folder);
         const clean = loadCatalog(root)[0]!;
 
-        writeManifest(folder, { max_rounds: 5, requires_item: true, cron_expr: null, handoff_prompt_md: 'x' });
+        writeManifest(folder, { max_rounds: 5, requires_worktree: true, push_code: true, raises_pr: true, cron_expr: null, handoff_prompt_md: 'x' });
         writeFileSync(
             join(folder, 'handoff_rules.json'),
             JSON.stringify([{ target_agent_id: 'a', kind: 'on-pass', status: 'done' }]),

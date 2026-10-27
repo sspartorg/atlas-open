@@ -41,7 +41,7 @@ import { LiveDot } from './LiveDot.js';
 interface Props {
     agent: IAgent;
     runs?: IAgentRun[];
-    /** Ready + in-progress items assigned to this agent — the Queue page's count. */
+    /** Ready + in-progress items assigned to this agent, counted by the API. */
     queueDepth?: number;
     isFavorite?: boolean;
     onToggleFavorite?: () => void;
@@ -61,6 +61,27 @@ interface Props {
     qualification?: QualificationVerdict | undefined;
     /** Set by the parent when this agent's CLI binary isn't installed. */
     cliWarning?: string | null;
+}
+
+function RunPill({ label }: { label: string }) {
+    return (
+        <Box
+            component="span"
+            sx={{
+                px: 1,
+                height: 18,
+                borderRadius: '9px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                bgcolor: ATLAS_PALETTE.slate06,
+                color: ATLAS_PALETTE.slate60,
+                fontSize: 10.5,
+                fontWeight: 600,
+            }}
+        >
+            {label}
+        </Box>
+    );
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -90,7 +111,7 @@ export function AgentCard({
     const stats = useMemo(() => getRuntimeStats(runs), [runs]);
 
     const isPaused = agent.status === 'inactive';
-    // One definition, shared with the Queue page and the Agent Detail hero.
+    // One definition, shared with the Agent Detail hero.
     // queueDepth counts Ready items, which exist before any run is queued.
     const statusLabel = resolveAgentStatusLabel(
         agent.status,
@@ -99,6 +120,10 @@ export function AgentCard({
         stats.lastRunErrored
     );
     const statusColor = agentStatusColor(statusLabel);
+    const scheduleLabel =
+        agent.schedule_enabled && agent.schedule_next_run_at
+            ? `Scheduled · next ${new Date(agent.schedule_next_run_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}`
+            : null;
 
     const lastRunLabel = runtimeError
         ? 'last run —'
@@ -276,6 +301,12 @@ export function AgentCard({
                     <Typography sx={{ fontSize: 11.5, color: ATLAS_PALETTE.slate60, mt: '2px' }}>
                         {agentSubtitle(agent)}
                     </Typography>
+                    {(scheduleLabel || !agent.requires_item) && (
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 1 }}>
+                            {scheduleLabel && <RunPill label={scheduleLabel} />}
+                            {!agent.requires_item && <RunPill label="Runs on its own" />}
+                        </Box>
+                    )}
                 </Box>
 
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>

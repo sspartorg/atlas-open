@@ -59,7 +59,7 @@ The run record is a `workflow_runs` row on the built-in `solo` workflow (seeded 
 ## Edge cases / quirks
 - Stopping keeps what the agent committed but opens no PR.
 - Resuming a run parked for days first refreshes its branch onto the latest default branch.
-- At most `MAX_PARALLEL_RUNS = 3` Tasks run at once, and one Task per repo at a time (ADR 0029); a queued Task waits on the Tasks page until a slot frees, so it has no run yet.
+- One agent runs at a time (ADR 0033), and one Task per repo at a time (ADR 0029); a queued Task waits on `/queue` until the slot frees, so it has no run yet.
 - While a run is `running` its Task's status and assignee are locked (409 from `workflow-lock.ts`); a parked run does not lock.
 
 ## Connectivity

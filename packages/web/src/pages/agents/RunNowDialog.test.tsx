@@ -6,6 +6,7 @@ import { server } from '../../test-setup.js';
 import { defaultHandlers } from '../../test-utils/mock-handlers.js';
 import { renderWithProviders } from '../../test-utils/renderWithProviders.js';
 import { makeAgent } from '../../test-utils/factories.js';
+import { Toast } from '../../components/Toast.js';
 import { RunNowDialog } from './RunNowDialog.js';
 
 const BASE = 'http://localhost:3000/api';
@@ -101,6 +102,9 @@ describe('RunNowDialog', () => {
         renderWithProviders(<RunNowDialog agent={scout} open onClose={() => {}} />);
         await userEvent.click(await screen.findByRole('button', { name: /Preview prompt/i }));
         await waitFor(() => expect(body).toMatchObject({ issue_type: null, issue_id: null }));
+        // Closing the preview leaves the Run now dialog open.
+        await userEvent.click(await screen.findByRole('button', { name: 'Close' }));
+        await waitFor(() => expect(screen.queryByText('# Agent Prompt')).not.toBeInTheDocument());
     });
 
     it('re-enables Preview prompt after a compile error', async () => {
@@ -134,5 +138,32 @@ describe('RunNowDialog', () => {
         expect(
             await screen.findByText(/copilot is not installed on this machine/)
         ).toBeInTheDocument();
+    });
+
+    it('says the run was queued when another run holds the slot', async () => {
+        server.use(
+            http.get(`${BASE}/queue`, () =>
+                HttpResponse.json({
+                    slots: 1,
+                    running: [{ kind: 'task', id: 'ATL-1', title: 'T', agent_id: 'a', agent_name: 'A', accent_color: '#000000', since: '2026-05-16T00:00:00.000Z', run_id: 'wr1', blocked_reason: null }],
+                    waiting: [],
+                    scheduled: [],
+                })
+            ),
+            ...defaultHandlers,
+            http.post(`${BASE}/run`, () => HttpResponse.json({ runId: 'run-q' }))
+        );
+        renderWithProviders(<><RunNowDialog agent={scout} open onClose={() => {}} /><Toast /></>);
+        await screen.findByText(/^Run AI News Scout$/);
+        await new Promise((r) => setTimeout(r, 50));
+        await userEvent.click(screen.getByRole('button', { name: /Run now/i }));
+        expect(await screen.findByText('Queued — it starts when the current run finishes')).toBeInTheDocument();
+    });
+
+    it('says the run started when the slot is free', async () => {
+        server.use(...defaultHandlers, http.post(`${BASE}/run`, () => HttpResponse.json({ runId: 'run-s' })));
+        renderWithProviders(<><RunNowDialog agent={scout} open onClose={() => {}} /><Toast /></>);
+        await userEvent.click(await screen.findByRole('button', { name: /Run now/i }));
+        expect(await screen.findByText('AI News Scout run started')).toBeInTheDocument();
     });
 });

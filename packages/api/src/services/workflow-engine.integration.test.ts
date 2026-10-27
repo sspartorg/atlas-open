@@ -13,8 +13,14 @@ import type { RunOutcomeKind, RunStatus } from '@atlas/shared';
 // step row, the way the real runner's INSERT does.
 const spawned: Array<{ agentId: string; nodeId: string; runId: string; skipSetup: boolean }> = [];
 vi.mock('./agent-runner.js', () => ({
-    spawnAgentRun: vi.fn(async (opts: { agentId: string; issueId?: string | null; workflowRun?: { id: string; nodeId: string; skipSetup?: boolean; retryOf?: string } | null }) => {
+    spawnAgentRun: vi.fn(async (opts: { agentId: string; issueId?: string | null; existingRunId?: string; workflowRun?: { id: string; nodeId: string; skipSetup?: boolean; retryOf?: string } | null }) => {
         const { testDb } = await import('../../tests/_pg-db.js');
+        // An itemless run from the queue: the real runner UPDATEs the waiting row.
+        if (opts.existingRunId) {
+            await testDb.updateTable('agent_runs').set({ status: 'in_progress', prompt_snapshot: 'p' }).where('id', '=', opts.existingRunId).execute();
+            spawned.push({ agentId: opts.agentId, nodeId: '', runId: opts.existingRunId, skipSetup: false });
+            return opts.existingRunId;
+        }
         const id = randomUUID();
         await testDb
             .insertInto('agent_runs')
@@ -57,7 +63,9 @@ import { closeTestDb, testDb, truncateAll } from '../../tests/_pg-db.js';
 import { insertAgent, insertItem, insertProject } from '../../tests/_items.js';
 import {
     cancelWorkflowRun,
+    countBusySlots,
     kickWorkflowDispatch,
+    listDispatchQueue,
     onStepFinished,
     reconcileWorkflowRuns,
     resumeWorkflowRun,
@@ -69,6 +77,8 @@ import {
 } from './workflow-engine.js';
 import { commentsService } from './comments.js';
 import { tasksService } from './tasks.js';
+import { queueAgentRun } from './agent-schedules.js';
+import { computeWorktreePath } from './worktree-orchestrator.js';
 
 /** Finishes the most recently spawned step the way the runner would. */
 async function finishStep(status: RunStatus, outcome: RunOutcomeKind | null = 'done', reason?: string): Promise<void> {
@@ -495,5 +505,152 @@ describe('task run — multi-repo Tasks (ADR 0017/0018)', () => {
         await finishStep('completed', 'done');
         expect(git.pushWorktree).toHaveBeenCalledTimes(1);
         expect(await linksOf()).toEqual(['https://github.com/o/core/pull/1']);
+    });
+});
+
+describe('ADR 0033 — one slot for every run', () => {
+    beforeEach(async () => {
+        await insertItem({ id: 'ATL-3', type: 'task', project_id: 'p1', title: 'Other repo', status: 'ready', assignee_agent_id: 'agent-solo', repo_ids: ['other'] });
+    });
+    const waitingTask = async () => (await listDispatchQueue()).map((e) => e.id);
+
+    it('starts one Task at a time even when another repo is free', async () => {
+        expect(await tickWorkflowDispatch()).toBe(1);
+        expect(await countBusySlots()).toBe(1);
+        expect(await tickWorkflowDispatch()).toBe(0);
+        const queue = await listDispatchQueue();
+        expect(queue).toHaveLength(1);
+        expect(queue[0]?.blocked_reason).toBeNull();
+
+        await finishStep('completed', 'done');
+        await vi.waitFor(async () => expect(await itemOf(queue[0]?.id ?? '')).toMatchObject({ status: 'in_progress' }));
+    });
+
+    it('a parked run frees the slot', async () => {
+        expect(await tickWorkflowDispatch()).toBe(1);
+        const [next = ''] = await waitingTask();
+        await finishStep('completed', 'asked_question', 'unclear');
+        await vi.waitFor(async () => expect(await itemOf(next)).toMatchObject({ status: 'in_progress' }));
+    });
+
+    it('a queued itemless run waits its turn, holds the slot, and hands it on when it ends', async () => {
+        await testDb.updateTable('items').set({ status: 'draft' }).where('id', 'in', ['ATL-2', 'ATL-3']).execute();
+        const runId = await queueAgentRun('agent-solo', { collapse: false });
+        // The update trigger stamps updated_at now: after the queued run.
+        await testDb.updateTable('items').set({ status: 'ready' }).where('id', '=', 'ATL-3').execute();
+        expect((await listDispatchQueue()).map((e) => e.kind)).toEqual(['agent_run', 'task']);
+
+        expect(await tickWorkflowDispatch()).toBe(1);
+        await vi.waitFor(() => expect(spawned).toEqual([expect.objectContaining({ runId })]));
+        expect(await countBusySlots()).toBe(1);
+        expect(await itemOf('ATL-3')).toMatchObject({ status: 'ready' });
+
+        await testDb.updateTable('agent_runs').set({ status: 'completed' }).where('id', '=', runId).execute();
+        await onStepFinished(runId);
+        await vi.waitFor(async () => expect(await itemOf('ATL-3')).toMatchObject({ status: 'in_progress' }));
+    });
+
+    it('a failed spawn of an itemless run errors the row and frees the slot', async () => {
+        await testDb.updateTable('items').set({ status: 'draft' }).where('id', 'in', ['ATL-2', 'ATL-3']).execute();
+        const { spawnAgentRun } = await import('./agent-runner.js');
+        vi.mocked(spawnAgentRun).mockRejectedValueOnce(new Error('cli missing'));
+        const runId = await queueAgentRun('agent-solo');
+        expect(await tickWorkflowDispatch()).toBe(1);
+        await vi.waitFor(async () =>
+            expect(await testDb.selectFrom('agent_runs').select(['status', 'outcome_summary']).where('id', '=', runId).executeTakeFirstOrThrow()).toEqual({
+                status: 'error',
+                outcome_summary: 'cli missing',
+            }),
+        );
+    });
+});
+
+describe('ADR 0033 — a schedule gates pickup', () => {
+    beforeEach(async () => {
+        await testDb
+            .updateTable('agents')
+            .set({ schedule_enabled: true, schedule_next_run_at: new Date(Date.now() + 3_600_000).toISOString() })
+            .where('id', '=', 'agent-solo')
+            .execute();
+    });
+
+    it("holds a scheduled agent's Tasks until a fire, which buys exactly one", async () => {
+        await insertItem({ id: 'ATL-3', type: 'task', project_id: 'p1', title: 'Second', status: 'ready', assignee_agent_id: 'agent-solo', repo_ids: ['other'] });
+        expect(await tickWorkflowDispatch()).toBe(0);
+        expect((await listDispatchQueue()).map((e) => e.blocked_reason)).toEqual(['awaiting_schedule', 'awaiting_schedule']);
+
+        await testDb.updateTable('agents').set({ schedule_due_at: new Date().toISOString() }).where('id', '=', 'agent-solo').execute();
+        expect(await tickWorkflowDispatch()).toBe(1);
+        const agent = await testDb.selectFrom('agents').select('schedule_due_at').where('id', '=', 'agent-solo').executeTakeFirstOrThrow();
+        expect(agent.schedule_due_at).toBeNull();
+        expect((await listDispatchQueue()).map((e) => e.blocked_reason)).toEqual(['awaiting_schedule']);
+    });
+
+    it('skips a fire that finds none of its Tasks ready', async () => {
+        await testDb.updateTable('items').set({ status: 'draft' }).where('id', '=', 'ATL-2').execute();
+        await testDb.updateTable('agents').set({ schedule_due_at: new Date().toISOString() }).where('id', '=', 'agent-solo').execute();
+        expect(await tickWorkflowDispatch()).toBe(0);
+        const agent = await testDb.selectFrom('agents').select('schedule_due_at').where('id', '=', 'agent-solo').executeTakeFirstOrThrow();
+        expect(agent.schedule_due_at).toBeNull();
+    });
+});
+
+describe("ADR 0033 — the agent's git flags decide delivery", () => {
+    const flags = (git_commit: boolean, git_push: boolean, git_open_pr: boolean) =>
+        testDb.updateTable('agents').set({ git_commit, git_push, git_open_pr }).where('id', '=', 'agent-solo').execute();
+
+    it('commit + push without a PR: a branch, no PR, the Task is done', async () => {
+        await flags(true, true, false);
+        const runId = await startTaskRun('ATL-2');
+        await finishStep('completed', 'done');
+        expect(git.pushWorktree).toHaveBeenCalledTimes(1);
+        expect(git.openPullRequest).not.toHaveBeenCalled();
+        expect(git.cleanupWorktreeAfterPush).toHaveBeenCalledTimes(1);
+        expect(await runOf(runId)).toMatchObject({ status: 'completed', pr_url: null });
+        expect(await itemOf('ATL-2')).toMatchObject({ status: 'done' });
+    });
+
+    it('commit only: nothing leaves the machine and the worktree stays', async () => {
+        await flags(true, false, false);
+        await startTaskRun('ATL-2');
+        expect(git.ensureWorktree).toHaveBeenCalledWith(expect.objectContaining({ pushUpstream: false }));
+        await finishStep('completed', 'done');
+        expect(git.pushWorktree).not.toHaveBeenCalled();
+        expect(git.cleanupWorktreeAfterPush).not.toHaveBeenCalled();
+        expect(await itemOf('ATL-2')).toMatchObject({ status: 'done' });
+    });
+
+    it('all off: changes stay uncommitted and the Owner is told where', async () => {
+        await flags(false, false, false);
+        await startTaskRun('ATL-2');
+        await finishStep('completed', 'done');
+        expect(git.pushWorktree).not.toHaveBeenCalled();
+        expect(git.cleanupWorktreeAfterPush).not.toHaveBeenCalled();
+        const note = await testDb.selectFrom('notifications').select('message').where('message', 'like', 'Finished ATL-2%').executeTakeFirstOrThrow();
+        expect(note.message).toContain('changes left uncommitted in /tmp/atlas-run-test');
+    });
+
+    it('with commits off, refuses to reset a worktree an earlier run left dirty', async () => {
+        await flags(false, false, false);
+        const repo = await testDb.selectFrom('project_repos').select(['id', 'git_path']).where('id', '=', 'p1').executeTakeFirstOrThrow();
+        const path = computeWorktreePath(repo.git_path ?? '', repo.id, 'atlas/task/ATL-2');
+        initRepo(path);
+        writeFileSync(join(path, 'left.txt'), 'unsaved\n');
+        try {
+            const runId = await startTaskRun('ATL-2');
+            expect(git.ensureWorktree).not.toHaveBeenCalled();
+            expect(await runOf(runId)).toMatchObject({ status: 'waiting_for_owner' });
+            expect(await parkKind(runId)).toBe('setup_failed');
+        } finally {
+            rmSync(path, { recursive: true, force: true });
+        }
+    });
+
+    it('a stopped run keeps the flags but never opens a PR', async () => {
+        await flags(true, false, false);
+        const runId = await startTaskRun('ATL-2');
+        await cancelWorkflowRun(runId);
+        expect(git.pushWorktree).not.toHaveBeenCalled();
+        expect(git.openPullRequest).not.toHaveBeenCalled();
     });
 });

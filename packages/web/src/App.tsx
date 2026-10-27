@@ -35,6 +35,7 @@ const ProjectDetail = lazyNamed(() => import('./pages/ProjectDetail.js'), 'Proje
 const Tasks = lazyNamed(() => import('./pages/Tasks.js'), 'Tasks');
 const TaskDetail = lazyNamed(() => import('./pages/TaskDetail.js'), 'TaskDetail');
 const TaskNew = lazyNamed(() => import('./pages/TaskNew.js'), 'TaskNew');
+const Queue = lazyNamed(() => import('./pages/Queue.js'), 'Queue');
 const ProjectGuardrails = lazyNamed(
     () => import('./pages/ProjectGuardrails.js'),
     'ProjectGuardrails'
@@ -278,6 +279,14 @@ export function App() {
                                 element={
                                     <Wrap name="Tasks">
                                         <Tasks />
+                                    </Wrap>
+                                }
+                            />
+                            <Route
+                                path="/queue"
+                                element={
+                                    <Wrap name="Queue">
+                                        <Queue />
                                     </Wrap>
                                 }
                             />

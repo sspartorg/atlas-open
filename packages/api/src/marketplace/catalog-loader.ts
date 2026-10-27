@@ -14,17 +14,16 @@ const CATALOG_ROOT = resolve(__dirname, 'catalog');
 
 // Agent routing/scheduling fields dropped by ADR 0014 (migration 036). Older
 // manifest.json files may still carry them; strip them so they neither leak
-// into marketplace_agents nor perturb content_hash.
+// into marketplace_agents nor perturb content_hash. ADR 0033 brought back
+// `requires_item`, `schedule_preset` and `schedule_time_of_day` under the
+// same names; the rest stay gone.
 const DROPPED_MANIFEST_KEYS = [
     'handoff_prompt_md',
     'max_rounds',
-    'requires_item',
     'requires_worktree',
     'push_code',
     'raises_pr',
     'schedule_hours',
-    'schedule_preset',
-    'schedule_time_of_day',
     'schedule_weekdays',
     'schedule_day_of_month',
     'cron_expr',

@@ -48,4 +48,27 @@ describe('FleetStrip', () => {
         renderWithProviders(<FleetStrip agents={agents(45)} liveCount={0} spend={null} />);
         expect(screen.getByText('+5')).toBeInTheDocument();
     });
+
+    it('links the queue: the slot count and how many wait', async () => {
+        runs([]);
+        server.use(
+            http.get('http://localhost:3000/api/queue', () =>
+                HttpResponse.json({ slots: 1, running: [], waiting: [{}, {}], scheduled: [] })
+            )
+        );
+        renderWithProviders(<FleetStrip agents={agents(1)} liveCount={0} spend={null} />);
+        const link = await screen.findByRole('link', { name: '1 slot · 2 waiting' });
+        expect(link).toHaveAttribute('href', '/queue');
+    });
+
+    it('pluralises slots', async () => {
+        runs([]);
+        server.use(
+            http.get('http://localhost:3000/api/queue', () =>
+                HttpResponse.json({ slots: 2, running: [], waiting: [], scheduled: [] })
+            )
+        );
+        renderWithProviders(<FleetStrip agents={agents(1)} liveCount={0} spend={null} />);
+        expect(await screen.findByRole('link', { name: '2 slots · 0 waiting' })).toBeInTheDocument();
+    });
 });
