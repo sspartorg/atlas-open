@@ -25,7 +25,9 @@ src/
 │   └── ...
 └── services/           → Business logic. DB calls live here, not in routes.
     ├── agent-runner.ts       → CLI spawning for one agent run; reports every terminal exit to the Task runner (`workflow-engine.ts`)
-    ├── workflow-engine.ts    → Task runner: one Task, one agent (`startTaskRun`, `soloGraph`); park/resume, one crash retry, commit (the only commit path) + push + PR, dispatch tick (`MAX_PARALLEL_RUNS` = 3, one Task per repo). Run records are `workflow_runs` rows on the built-in `solo` record (migration 020)
+    ├── workflow-engine.ts    → Task runner: one Task, one agent (`startTaskRun`, `soloGraph`); park/resume, one crash retry, commit (the only commit path) + push + PR, dispatch tick (one slot, `MAX_CONCURRENT_AGENTS`; `listDispatchQueue`; per-agent git flags — ADR 0033). Run records are `workflow_runs` rows on the built-in `solo` record (migration 020)
+    ├── agent-schedules.ts    → ADR 0033: agent run config validation (`runConfigColumns`), schedule fires (`markDueAgents`), queued itemless runs (`queueAgentRun`)
+    ├── queue.ts              → `GET /api/queue`: the one slot and everything waiting for it
     ├── workflow-lock.ts      → Global preHandler: 409 on item status/assign while a run holds the item
     ├── external-notifications.ts → Provider-agnostic dispatcher (gating + quiet hours)
     └── transports/*.ts       → Per-provider outbound senders (Telegram, Teams)

@@ -99,6 +99,7 @@ export function useSSE() {
                 // A Task run view lists its steps' statuses.
                 invalidate(['workflow-run']);
                 invalidate(['dashboard']);
+                invalidate(['queue']);
                 invalidate(['sidenav-counts']);
                 invalidate(['runs']);
                 if (event.agentId) {
@@ -114,6 +115,7 @@ export function useSSE() {
             }
             if (event.type === 'agent_status') {
                 invalidate(['workflow-run']);
+                invalidate(['queue']);
                 invalidate(['agents']);
                 invalidate(['runs']);
                 if (event.agentId) {
@@ -130,6 +132,7 @@ export function useSSE() {
             }
             if (event.type === 'run_queued') {
                 invalidate(['runs']);
+                invalidate(['queue']);
                 invalidate(['dashboard']);
                 invalidate(['sidenav-counts']);
                 if (event.agentId) {
@@ -142,6 +145,7 @@ export function useSSE() {
             }
             if (event.type === 'counts_changed') {
                 invalidate(['sidenav-counts']);
+                invalidate(['queue']);
                 invalidate(['dashboard']);
                 // A needs_you row drops out of the feed once its item leaves
                 // waiting_for_info / in_review (notStaleNeedsYou, API side).
@@ -199,6 +203,7 @@ export function useSSE() {
             // arrive separately as `counts_changed`, so only run reads are
             // refreshed here.
             if (event.type === 'workflow_run_updated') {
+                invalidate(['queue']);
                 if (event.workflowRunId) {
                     invalidate(['workflow-run', event.workflowRunId]);
                 }

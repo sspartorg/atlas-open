@@ -2,6 +2,7 @@ import { db } from './kysely-client.js';
 import { loadCatalog, type CatalogEntry } from '../marketplace/catalog-loader.js';
 import { sourcesFor, type RegulationSource } from '../agents/sources/regulations-matrix.js';
 
+import { runConfigOf } from '../services/agent-schedules.js';
 // Theme 09 — defensive boot check that the regulations matrix has
 // at least one source per project_type × region we ship. Catches
 // matrix typos in the seed module (which is exercised by `pnpm
@@ -78,6 +79,7 @@ async function syncMarketplaceCatalog(): Promise<CatalogEntry[]> {
                 kind_slug: entry.manifest.kind_slug,
                 settings_json: entry.manifest.settings_json,
                 memory_cadence: entry.manifest.memory_cadence,
+                ...runConfigOf(entry.manifest),
                 memory_template_md: entry.memory_md,
                 summary: entry.manifest.summary,
                 version: nextVersion,

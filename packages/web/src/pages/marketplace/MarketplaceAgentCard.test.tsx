@@ -22,6 +22,8 @@ function makeSummary(overrides: Partial<IMarketplaceAgentSummary> = {}): IMarket
         installed_agent_id: null,
         installed_version: null,
         upgrade_available: false,
+        requires_item: true,
+        schedule_enabled: false,
         ...overrides,
     };
 }
@@ -374,5 +376,19 @@ describe('MarketplaceAgentCard', () => {
         // The material-icon span should contain the fallback "smart_toy"
         const glyphSpan = document.querySelector('.material-symbols-rounded');
         expect(glyphSpan?.textContent).toBe('smart_toy');
+    });
+
+    it('labels an agent that works on a Task, without a schedule chip', () => {
+        renderWithProviders(<MarketplaceAgentCard agent={makeSummary()} onOpen={() => {}} onAfterInstall={() => {}} />);
+        expect(screen.getByText('On a Task')).toBeInTheDocument();
+        expect(screen.queryByText('Schedule suggested')).not.toBeInTheDocument();
+    });
+
+    it('labels an agent that runs on its own and suggests a schedule', () => {
+        renderWithProviders(
+            <MarketplaceAgentCard agent={makeSummary({ requires_item: false, schedule_enabled: true })} onOpen={() => {}} onAfterInstall={() => {}} />
+        );
+        expect(screen.getByText('Runs on its own')).toBeInTheDocument();
+        expect(screen.getByText('Schedule suggested')).toBeInTheDocument();
     });
 });

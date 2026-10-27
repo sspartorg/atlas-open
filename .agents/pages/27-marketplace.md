@@ -36,6 +36,10 @@ Engineer", the general-purpose agent you assign Tasks to) plus `agent-ai-news`,
   - partial → toast `Added N agents · couldn't add <ids>` with the per-id reasons in `detail`, **keep the failures selected** so Retry is one click, and stay on the page
   - none succeeded → toast `Couldn't add the selected agents` + the same detail, failures stay selected
 
+**Run-config chips on `MarketplaceAgentCard` (ADR 0033)**
+- "On a Task" or "Runs on its own", from `requires_item` on the summary.
+- "Schedule suggested" shows when the catalog ships a schedule. It still installs off.
+
 ## Modals / drawers
 None on this route. The rename-on-conflict flow lives on the detail page.
 

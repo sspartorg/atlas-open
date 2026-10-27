@@ -31,7 +31,7 @@ interface Props {
     agent: IAgent;
     view: AgentView;
     stats: AgentRuntimeStats;
-    /** Ready + in-progress items assigned to this agent — the Queue page's count. */
+    /** Ready + in-progress items assigned to this agent, counted by the API. */
     queueDepth: number;
     onRunNow: () => void;
     onPauseToggle: () => void;

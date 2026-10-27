@@ -40,6 +40,10 @@ Grid of all agent cards, grouped by category. Per-card actions: open, edit, paus
 
 **Browse the Marketplace** button (empty state) → navigates to `/agents/marketplace`. The marketplace is the only install path; each install creates an `agents` row with `marketplace_source_id` set so the catalog's upgrade / detach / reinstall affordances stay accurate. The prior "Install the Default Agents" button (and the `POST /api/agents/restore-defaults` server endpoint behind it) was removed on 2026-06-04 — it bulk-installed all `AGENT_SEEDS` entries without marketplace back-links, duplicating the same "graveyard" anti-pattern boot-time auto-install had.
 
+**Run-config pills on `AgentCard` (ADR 0033)**
+- "Scheduled · next HH:MM" shows when `schedule_enabled` and `schedule_next_run_at` are set.
+- "Runs on its own" shows when `requires_item` is false.
+
 ## Why these affordances exist
 - **Add Agent (header)** — Creating agents is part of day-to-day work ("I need a marketing agent now"), not a one-time setup; header-pin keeps it close.
 - **Category grouping** — Prevents mixing "code agents" with "content agents" in a single scan.

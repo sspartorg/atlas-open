@@ -25,6 +25,8 @@ function makeSummary(overrides: Partial<IMarketplaceAgentSummary> = {}): IMarket
         installed_agent_id: null,
         installed_version: null,
         upgrade_available: false,
+        requires_item: true,
+        schedule_enabled: false,
         ...overrides,
     };
 }

@@ -240,6 +240,11 @@ export function MarketplaceAgentCard({
                 {agent.summary || 'No summary available.'}
             </Typography>
 
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                <Chip size="small" variant="outlined" label={agent.requires_item ? 'On a Task' : 'Runs on its own'} />
+                {agent.schedule_enabled && <Chip size="small" variant="outlined" label="Schedule suggested" />}
+            </Box>
+
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 'auto', pt: 2 }}>
                 {hasUpgrade ? (
                     <Chip

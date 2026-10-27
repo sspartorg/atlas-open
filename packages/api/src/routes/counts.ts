@@ -1,10 +1,16 @@
 import type { FastifyInstance } from 'fastify';
 import { countsService } from '../services/counts.js';
 import { normalizeTz } from '../services/analytics-window.js';
+import { getQueue } from '../services/queue.js';
 
 export async function countsRoutes(app: FastifyInstance) {
     app.get('/api/counts', async (_req, reply) => {
         return reply.send(await countsService.getSidenavCounts());
+    });
+
+    // ADR 0033 — the one slot and everything waiting for it.
+    app.get('/api/queue', async (_req, reply) => {
+        return reply.send(await getQueue());
     });
 
     app.get('/api/counts/queue-by-agent', async (_req, reply) => {

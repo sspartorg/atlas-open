@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+    deliveryChainError,
     AnalyticsQuerySchema,
     CreateJiraSourceSchema,
     JiraStatusMapSchema,
@@ -1123,5 +1124,32 @@ describe('AnalyticsQuerySchema', () => {
         expect(AnalyticsQuerySchema.safeParse({ tz: 'Mars/Olympus' }).success).toBe(false);
         expect(AnalyticsQuerySchema.safeParse({ window: '1y' }).success).toBe(false);
         expect(AnalyticsQuerySchema.safeParse({ days: '30' }).success).toBe(false);
+    });
+});
+
+describe('ADR 0033 — agent run config', () => {
+    const base = { name: 'A', category: 'software-dev', cli: 'claude', model: 'm', accent_color: '#007AC9' } as const;
+
+    it('deliveryChainError names the broken link, ignoring fields left out', () => {
+        expect(deliveryChainError({})).toBeNull();
+        expect(deliveryChainError({ git_commit: true, git_push: true, git_open_pr: true })).toBeNull();
+        expect(deliveryChainError({ git_commit: false, git_push: true })).toBe('git_push needs git_commit');
+        expect(deliveryChainError({ git_push: false, git_open_pr: true })).toBe('git_open_pr needs git_push');
+        expect(deliveryChainError({ git_push: true })).toBeNull();
+    });
+
+    it('CreateAgentSchema takes the run config and refuses a broken chain', () => {
+        expect(CreateAgentSchema.parse({ ...base, requires_item: false, schedule_enabled: true, schedule_preset: 'weekly', schedule_weekday: 1, schedule_time_of_day: '08:00' })).toMatchObject({
+            requires_item: false,
+            schedule_preset: 'weekly',
+        });
+        expect(CreateAgentSchema.safeParse({ ...base, git_commit: false, git_push: true }).success).toBe(false);
+        expect(CreateAgentSchema.safeParse({ ...base, schedule_time_of_day: '25:00' }).success).toBe(false);
+    });
+
+    it('UpdateAgentSchema checks only the flags it is sent', () => {
+        expect(UpdateAgentSchema.parse({ git_push: true })).toEqual({ git_push: true });
+        expect(UpdateAgentSchema.safeParse({ git_push: false, git_open_pr: true }).success).toBe(false);
+        expect(UpdateAgentSchema.safeParse({ schedule_weekday: 7 }).success).toBe(false);
     });
 });

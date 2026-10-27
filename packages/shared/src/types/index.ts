@@ -226,8 +226,62 @@ export interface IAgent {
      * is available.
      */
     marketplace_pulled_version: number | null;
+    /** ADR 0033 — `true`: the agent works a Task (assignable). `false`: it runs on its own, in a scratch dir, never touching git. */
+    requires_item: boolean;
+    /** ADR 0033 — what Atlas does with a Task run's changes. Chained: push needs commit, a PR needs push. Ignored when `requires_item` is false. */
+    git_commit: boolean;
+    git_push: boolean;
+    git_open_pr: boolean;
+    /** ADR 0033 — when set, the agent only starts work at its schedule's fires. */
+    schedule_enabled: boolean;
+    schedule_preset: SchedulePreset;
+    schedule_time_of_day: string;
+    schedule_weekday: number | null;
+    /** Materialised from the preset on save; the Owner's own text for `custom`. */
+    schedule_cron_expression: string;
+    /** Read-only: the next fire, or null while the schedule is off. */
+    schedule_next_run_at: string | null;
+    /** Read-only: a fire passed and has not been consumed yet. Missed fires collapse into one. */
+    schedule_due_at: string | null;
     created_at: string;
     updated_at: string;
+}
+
+export type QueueBlockedReason = 'repo_busy' | 'dependency' | 'awaiting_schedule';
+
+/** One run on the Queue page: a Task run (`kind: 'task'`) or an itemless agent run. */
+export interface IQueueEntry {
+    kind: 'task' | 'agent_run';
+    /** The Task id for `task`, the agent_runs id for `agent_run`. */
+    id: string;
+    title: string;
+    agent_id: string;
+    agent_name: string;
+    accent_color: string;
+    /** When it joined the queue (waiting) or started (running). */
+    since: string;
+    /** The workflow run (task) or agent run (agent_run) once one exists. */
+    run_id: string | null;
+    /** Waiting entries only: why dispatch is skipping it. Null = next in line. */
+    blocked_reason: QueueBlockedReason | null;
+}
+
+export interface IScheduledAgent {
+    agent_id: string;
+    agent_name: string;
+    accent_color: string;
+    requires_item: boolean;
+    schedule_cron_expression: string;
+    schedule_next_run_at: string | null;
+    schedule_due_at: string | null;
+}
+
+export interface IQueue {
+    slots: number;
+    running: IQueueEntry[];
+    /** In dispatch order: the first entry with no `blocked_reason` starts next. */
+    waiting: IQueueEntry[];
+    scheduled: IScheduledAgent[];
 }
 
 export type AgentKindSlug =
@@ -1761,6 +1815,16 @@ export interface IMarketplaceAgent {
     kind_slug: AgentKindSlug;
     settings_json: Record<string, unknown>;
     memory_cadence: number;
+    /** ADR 0033 — defaults copied onto the agent at install. The schedule ships off; the Owner turns it on. */
+    requires_item: boolean;
+    git_commit: boolean;
+    git_push: boolean;
+    git_open_pr: boolean;
+    schedule_enabled: boolean;
+    schedule_preset: SchedulePreset;
+    schedule_time_of_day: string;
+    schedule_weekday: number | null;
+    schedule_cron_expression: string;
     /** Optional starter memory body. Most catalog entries ship empty. */
     memory_template_md: string;
     /** Short blurb shown on marketplace cards. */
@@ -1789,6 +1853,9 @@ export interface IMarketplaceAgentSummary {
     accent_color: string;
     glyph: string;
     version: number;
+    /** ADR 0033 — card chips: "On a Task" vs "Runs on its own", and a suggested schedule. */
+    requires_item: boolean;
+    schedule_enabled: boolean;
     /** Whether some local agent has marketplace_source_id === this id.
      *  Detached agents (source_id NULL) are NOT counted. */
     is_installed: boolean;
@@ -1872,6 +1939,16 @@ export interface IAgentBundleManifest {
     summary: string;
     version: number;
     published_at: string;
+    /** ADR 0033 — run config. Optional: a bundle without it gets the defaults (works a Task, commit + push + PR, no schedule). */
+    requires_item?: boolean;
+    git_commit?: boolean;
+    git_push?: boolean;
+    git_open_pr?: boolean;
+    schedule_enabled?: boolean;
+    schedule_preset?: SchedulePreset;
+    schedule_time_of_day?: string;
+    schedule_weekday?: number | null;
+    schedule_cron_expression?: string;
 }
 
 // ── Analytics ──────────────────────

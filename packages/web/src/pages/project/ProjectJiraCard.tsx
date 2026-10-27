@@ -300,7 +300,8 @@ function JiraSourceDialog({
     const [error, setError] = useState<string | null>(null);
 
     // The API refuses an inactive agent; keep the source's current one listed.
-    const options = agents.filter((a) => a.status === 'active' || a.id === source?.agent_id);
+    // Imported Tasks are assigned to this agent, so one that runs on its own (ADR 0033) can't be picked.
+    const options = agents.filter((a) => (a.status === 'active' && a.requires_item) || a.id === source?.agent_id);
     const busy = create.isPending || update.isPending;
     const canSave = jql.trim().length > 0 && repoIds.length > 0 && !busy;
 

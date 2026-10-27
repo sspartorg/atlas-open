@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import { randomUUID } from 'crypto';
 import { sql } from 'kysely';
-import { spawnAgentRun, runOutputRegistry, cancelRun } from '../services/agent-runner.js';
-import { cancelWorkflowRun, onStepFinished } from '../services/workflow-engine.js';
+import { runOutputRegistry, cancelRun } from '../services/agent-runner.js';
+import { cancelWorkflowRun, kickWorkflowDispatch, onStepFinished } from '../services/workflow-engine.js';
+import { queueAgentRun } from '../services/agent-schedules.js';
 import { broadcastSSE } from './events.js';
 import { asAgentRun } from '../services/agents.js';
 import { db } from '../db/kysely-client.js';
@@ -60,52 +60,11 @@ export async function runRoutes(app: FastifyInstance) {
         if (!agent) throw new ApiError('not_found', 'Agent not found', 404);
         if (agent.status !== 'active') throw new ApiError('conflict', 'Agent is not active', 400);
 
-        // Insert synchronously so the 202 carries a real run id and returns in
-        // ~50 ms; `existingRunId` tells spawnAgentRun to UPDATE this row instead
-        // of inserting a second one. Background failures land on the row.
-        const runId = randomUUID();
-        const now = new Date().toISOString();
-        await db
-            .insertInto('agent_runs')
-            .values({
-                id: runId,
-                agent_id,
-                item_id: null,
-                project_id: project_id ?? null,
-                status: 'queued',
-                prompt_snapshot: null,
-                started_at: now,
-            })
-            .execute();
-
-        broadcastSSE({ type: 'run_queued', agentId: agent_id, runId });
-
-        queueMicrotask(() => {
-            void spawnAgentRun({
-                agentId: agent_id,
-                projectId: project_id ?? null,
-                existingRunId: runId,
-            }).catch(async (err: unknown) => {
-                req.log.error({ err, runId }, 'spawn-failed');
-                try {
-                    await db
-                        .updateTable('agent_runs')
-                        .set({
-                            status: 'error',
-                            completed_at: new Date().toISOString(),
-                            outcome_summary: (err as Error).message,
-                        })
-                        .where('id', '=', runId)
-                        .execute();
-                } catch (updateErr) {
-                    /* v8 ignore next */
-                    req.log.error(
-                        { err: updateErr, runId },
-                        'spawn-failed: could not mark row as error'
-                    );
-                }
-            });
-        });
+        // ADR 0033 — one agent at a time: the run waits in the queue for the
+        // slot, and dispatch spawns it. A second Run now while one waits
+        // queues a second run; only schedule fires collapse.
+        const runId = await queueAgentRun(agent_id, { projectId: project_id ?? null, collapse: false });
+        void kickWorkflowDispatch('run_now');
 
         return reply.status(202).send({ runId });
     });

@@ -427,6 +427,24 @@ describe('App', () => {
         expect(document.location.pathname).toBe('/');
     });
 
+    it('serves the Queue page at /queue (ADR 0033)', async () => {
+        queryClient.clear();
+        window.history.pushState({}, '', '/queue');
+        server.use(
+            http.get(`${BASE}/settings`, () =>
+                HttpResponse.json({ id: 1, owner_name: 'Owner', onboarding_complete: 1 })
+            ),
+            http.get(`${BASE}/settings/env`, () => HttpResponse.json({ vars: [] })),
+            ...defaultHandlers
+        );
+        render(
+            <ThemeModeProvider>
+                <App />
+            </ThemeModeProvider>
+        );
+        expect(await screen.findByText(/One agent runs at a time/, {}, { timeout: 5000 })).toBeInTheDocument();
+    });
+
     it('RouteGuard: onboarding_complete=1 at /onboarding → Navigate to / (L204 true, L205-206)', async () => {
         // To hit lines 205-206, we need to be at /onboarding with onboarding_complete=1.
         // Push location to /onboarding before rendering the App.

@@ -48,7 +48,7 @@ Tab switching is plain `useTabParam(tabSlug)`. (The legacy `LinearProgress` mid-
 - **Role section** — Designation, Memory cadence; **Save role** → `PATCH /agents/:id` `{ designation, memory_cadence }`.
 - **Quality checklist** card (`QualityChecklistCard`, between Role and Commit discipline) — loads `GET /agents/:id/checklists`; rows are editable labels with a delete icon (opens a confirm dialog, local until saved); **Add check**; **Save checklist** → `PUT /agents/:id/checklists` `{ items: [{ label, sort_order, required }] }`. Copy: "The agent reports each check in its outcome. A failed required check stops the work from being delivered." (the run parks on the Owner). (Moved here from the removed Handoffs tab; formerly "Pre-handoff checklist".)
 - **Commit discipline** tile — last 10 commit verifications as coloured dots: green = compliant (files changed, left for Atlas to commit), amber = partial (the agent committed itself), grey = clean.
-- Removed: Schedule presets / cron / Next pass preview, Concurrent runs, Max rounds, Item required, Requires worktree, Push code, Raises PR.
+- Removed: Concurrent runs, Max rounds, Requires worktree. Item required, the schedule and the git delivery flags came back with ADR 0033 (Overview → Schedule & delivery).
 
 ### Prompt (`PromptTab`)
 - Guardrails-style **Edit / Split / Preview** view-mode toggle on the editor card. The editor pane is a plain `<textarea>` (mono font); the preview pane renders via the shared `MarkdownPreview` component. Header shows `Active prompt · v{n}` and the slugified file name; footer shows saved-status + line count + Save / Discard.
@@ -104,6 +104,17 @@ Procedural-memory editor backed by the `agent_memory` table.
 - Body: `EditableMarkdownCard` (`GET /api/agents/:id/memory` on read; `PUT /api/agents/:id/memory` on Save).
 - Regenerate: `POST /api/agents/:id/memory/regenerate`. Mirrors `agent-runner`'s gating — real CLI when `ATLAS_AI_ENABLED=true`, simulated body otherwise. The simulated body is intentional, not a stub.
 - **Regeneration history** (Theme 08 + A06): list of recent `memory_regenerations` rows, newest first. Each row: trigger badge (manual / cadence / high_signal / mcp_update), an amber **BOUNDARY** chip when `boundary_flags.length > 0` (tooltip lists the detected flag slugs), version delta `vN → vM`, char-diff (`+added`, `−removed`), relative time. The chip is informational — the row's body still persisted (soft filter). See `detectBoundaryViolations()` in `services/agent-memory.ts` for the heuristic.
+
+### Overview → Schedule & delivery (`ScheduleDeliverySection.tsx`, ADR 0033)
+- **Works on a Task** switch (`requires_item`). When it is off, a hint reads "Runs in a scratch folder; never touches git." The git switches are hidden, and Task assignee pickers stop listing the agent.
+- **Commit / Push / Open pull request** switches (`git_commit`, `git_push`, `git_open_pr`) are chained by `chainDelivery`:
+  - Turning on PR turns on push and commit.
+  - Turning on push turns on commit.
+  - Turning off commit turns off push and PR.
+  - Turning off push turns off PR.
+  - With commit off, a hint reads "Changes stay uncommitted in the Task's worktree."
+- **Run on a schedule** switch (`schedule_enabled`) reveals `SchedulePresetFields` (preset cards, weekday, custom cron). A **Time of day** input appears for daily and weekly. "Next run:" shows `schedule_next_run_at`.
+- **Discard** appears once the form is dirty. **Save schedule & delivery** sends `PATCH /api/agents/:id` with every run-config field. The server materialises the cron and the next fire, and the form adopts the returned agent. A broken chain returns 400.
 
 ## Sidebar (`AgentSidebar`)
 - **Identity** panel — Role, Color (clickable → `EditAgentColorModal`), Glyph (clickable → `GlyphPickerModal`). Slug is intentionally hidden (internal identifier).

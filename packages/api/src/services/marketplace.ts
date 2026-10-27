@@ -30,6 +30,7 @@ import type {
     SdlcRole,
 } from '@atlas/shared';
 
+import { installRunConfig, runConfigOf } from './agent-schedules.js';
 /**
  * Local agent slug is already taken. The collision is resolved at the UI
  * layer by asking the Owner for a different slug — the catalog copy is
@@ -84,6 +85,7 @@ function toMarketplaceAgent(r: Record<string, unknown>): IMarketplaceAgent {
         /* v8 ignore next -- settings_json is NOT NULL DEFAULT '{}' at the DB level; `??` branch is unreachable defensive code */
         settings_json: (r['settings_json'] as Record<string, unknown>) ?? {},
         memory_cadence: r['memory_cadence'] as number,
+        ...runConfigOf(r as Partial<IAgent>),
         /* v8 ignore next -- memory_template_md is NOT NULL DEFAULT '' at the DB level; `??` branch is unreachable defensive code */
         memory_template_md: (r['memory_template_md'] as string) ?? '',
         /* v8 ignore next -- summary is NOT NULL DEFAULT '' at the DB level; `??` branch is unreachable defensive code */
@@ -113,6 +115,7 @@ function toManifest(agent: IMarketplaceAgent): IAgentBundleManifest {
         kind_slug: agent.kind_slug,
         settings_json: agent.settings_json,
         memory_cadence: agent.memory_cadence,
+        ...runConfigOf(agent),
         summary: agent.summary,
         version: agent.version,
         published_at: agent.published_at,
@@ -138,6 +141,7 @@ function manifestFromLocalAgent(agent: IAgent, summary: string): IAgentBundleMan
         kind_slug: agent.kind_slug,
         settings_json: agent.settings_json,
         memory_cadence: agent.memory_cadence,
+        ...runConfigOf(agent),
         summary,
         // Exported bundle carries a self-version of 1 unless the local
         // agent has a pinned marketplace_pulled_version (rare for export).
@@ -246,6 +250,8 @@ export const marketplaceService = {
                 accent_color: r['accent_color'] as string,
                 glyph: r['glyph'] as string,
                 version: catalogVersion,
+                requires_item: r['requires_item'] as boolean,
+                schedule_enabled: r['schedule_enabled'] as boolean,
                 is_installed: isInstalled,
                 // is_linked is now equivalent to is_installed; kept on the
                 // shape for one release for back-compat with older clients.
@@ -372,6 +378,7 @@ export const marketplaceService = {
                     memory_cadence: m.memory_cadence,
                     kind_slug: m.kind_slug,
                     settings_json: m.settings_json,
+                    ...installRunConfig(m),
                     // marketplace_source_id points at the CATALOG id (m.id),
                     // not the local slug — that's how upgrades keep flowing
                     // even after the user installs under a custom slug.
@@ -659,6 +666,7 @@ export const marketplaceService = {
                     memory_cadence: m.memory_cadence,
                     kind_slug: m.kind_slug,
                     settings_json: m.settings_json,
+                    ...installRunConfig(m),
                     marketplace_source_id: null,
                     marketplace_pulled_version: null,
                 })

@@ -10,7 +10,7 @@ import DownloadRounded from '@mui/icons-material/DownloadRounded';
 import { api } from '../api/api.js';
 import { useSetPageTitle } from '../components/shell/index.js';
 import { useToast } from '../hooks/useToast.js';
-import { ATLAS_PALETTE } from '../theme/tokens.js';
+import { ATLAS_PALETTE, TYPOGRAPHY } from '../theme/tokens.js';
 import { Breadcrumb } from '../components/Breadcrumb.js';
 import { PAGE_TITLE_SX } from '../components/PageHeader.js';
 import { AddFromMarketplaceModal } from './marketplace/AddFromMarketplaceModal.js';
@@ -43,6 +43,8 @@ function KvRow({ k, v }: { k: string; v: string | number }) {
         </Box>
     );
 }
+
+const onOff = (on: boolean) => (on ? 'on' : 'off');
 
 export function MarketplaceAgentDetail() {
     const { id } = useParams<{ id: string }>();
@@ -334,6 +336,27 @@ export function MarketplaceAgentDetail() {
                             <KvRow k="role_id" v={agent.role_id ?? '—'} />
                             {agent.designation && <KvRow k="designation" v={agent.designation} />}
                             <KvRow k="memory_cadence" v={agent.memory_cadence} />
+                        </Box>
+                        <Box>
+                            <Typography sx={SECTION_LABEL_SX}>Runs</Typography>
+                            <KvRow k="Works on" v={agent.requires_item ? 'Task' : 'On its own'} />
+                            <Box sx={KV_ROW_SX}>
+                                <Typography sx={{ fontSize: 12, color: ATLAS_PALETTE.slate60 }}>
+                                    Suggested schedule
+                                </Typography>
+                                <Typography sx={{ fontSize: 12, color: ATLAS_PALETTE.slate }}>
+                                    <Box component="span" sx={{ fontFamily: TYPOGRAPHY.fontFamilyMono }}>
+                                        {agent.schedule_cron_expression || '—'}
+                                    </Box>
+                                    {!agent.schedule_enabled && ' (off until you turn it on)'}
+                                </Typography>
+                            </Box>
+                            {agent.requires_item && (
+                                <KvRow
+                                    k="Delivery"
+                                    v={`Commit ${onOff(agent.git_commit)} · Push ${onOff(agent.git_push)} · PR ${onOff(agent.git_open_pr)}`}
+                                />
+                            )}
                         </Box>
                         {Object.keys(agent.settings_json ?? {}).length > 0 && (
                             <Box>

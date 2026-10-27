@@ -32,6 +32,13 @@ handoff rules or git flags: a Task's run handles worktree, commit, push and PR.
 - **Runtime** (status, framework, role_id, designation, memory_cadence) / **Custom settings** label blocks.
 - **Quality checklist** — the agent's quality gate, reported in `atlas-outcome`.
 
+**Runs block (ADR 0033)** — sits next to Runtime and has these rows:
+- **Works on**: Task or On its own.
+- **Suggested schedule**: the cron in mono, plus "(off until you turn it on)" when the catalog ships it off.
+- **Delivery**: Commit / Push / PR, each on or off. This row is shown only for agents that work Tasks.
+
+Install copies the whole run config onto the agent (`installRunConfig`).
+
 ## Modals / drawers
 - `AddFromMarketplaceModal` — takes a slug (defaults to the catalog id) and calls `handleInstall(slug)`. Two faces:
   - **first attempt** — explains that a fresh local copy is made and that local edits never travel back to the marketplace

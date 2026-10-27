@@ -17,6 +17,7 @@ export const routes: Record<string, () => Promise<unknown>> = {
     'scratch-pad': () => import('../pages/ScratchPad.js'),
     projects: () => import('../pages/Projects.js'),
     tasks: () => import('../pages/Tasks.js'),
+    queue: () => import('../pages/Queue.js'),
     agents: () => import('../pages/Agents.js'),
     marketplace: () => import('../pages/Marketplace.js'),
     'mcp-tools': () => import('../pages/McpTools.js'),

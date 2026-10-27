@@ -32,6 +32,15 @@ const baseAgent = {
     prompt_md: '# coder prompt',
     prompt_version: 1,
     sort_order: 1,
+    requires_item: true,
+    git_commit: true,
+    git_push: true,
+    git_open_pr: false,
+    schedule_enabled: false,
+    schedule_preset: 'daily' as const,
+    schedule_time_of_day: '09:00',
+    schedule_weekday: null,
+    schedule_cron_expression: '0 9 * * *',
     created_at: '2026-05-16T00:00:00.000Z',
     updated_at: '2026-05-16T00:00:00.000Z',
 };
@@ -284,6 +293,35 @@ describe('MarketplaceAgentDetail page', () => {
         // "Add to my agents" is still rendered (based on isInstalled default false)
         // but there is no summaryRow → the modal block is skipped
         expect(document.body).toBeTruthy();
+    });
+
+    it('renders the Runs block: a Task agent with its delivery and an off schedule', async () => {
+        server.use(
+            http.get(`${BASE}/marketplace/agents/agent-coder`, () => HttpResponse.json(fullPayload)),
+            http.get(`${BASE}/marketplace/agents`, () => HttpResponse.json([summaryRow]))
+        );
+        renderAt('/marketplace/agent-coder');
+        await screen.findAllByText('Coder');
+        expect(screen.getByText('Task')).toBeInTheDocument();
+        expect(screen.getByText('0 9 * * *')).toBeInTheDocument();
+        expect(screen.getByText(/off until you turn it on/)).toBeInTheDocument();
+        expect(screen.getByText('Commit on · Push on · PR off')).toBeInTheDocument();
+    });
+
+    it('renders the Runs block for an agent that runs on its own with its schedule on', async () => {
+        const payload = {
+            agent: { ...baseAgent, requires_item: false, schedule_enabled: true, schedule_cron_expression: '' },
+            checklists: [],
+        };
+        server.use(
+            http.get(`${BASE}/marketplace/agents/agent-coder`, () => HttpResponse.json(payload)),
+            http.get(`${BASE}/marketplace/agents`, () => HttpResponse.json([summaryRow]))
+        );
+        renderAt('/marketplace/agent-coder');
+        await screen.findAllByText('Coder');
+        expect(screen.getByText('On its own')).toBeInTheDocument();
+        expect(screen.queryByText(/off until you turn it on/)).not.toBeInTheDocument();
+        expect(screen.queryByText('Delivery')).not.toBeInTheDocument();
     });
 
     it('renders framework row when agent.framework is set', async () => {

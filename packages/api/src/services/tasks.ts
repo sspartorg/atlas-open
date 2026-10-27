@@ -31,6 +31,15 @@ interface CreateInput {
     is_test?: boolean;
 }
 
+/** ADR 0033 — an agent that needs no item runs on its own; a Task can't hold it. */
+async function assertAssignable(agentId: string | null | undefined): Promise<void> {
+    if (!agentId) return;
+    const agent = await db.selectFrom('agents').select(['name', 'requires_item']).where('id', '=', agentId).executeTakeFirst();
+    if (agent && !agent.requires_item) {
+        throw new ApiError('validation_error', `${agent.name} runs on its own and can't be assigned a Task. Turn on "Works on a Task" for it first`, 400);
+    }
+}
+
 /**
  * Assigning an agent queues a draft Task: dispatch only picks up Ready Tasks,
  * and "pick an agent, then also set Ready" was one step too many.
@@ -122,6 +131,7 @@ export const tasksService = {
     },
 
     async create(data: CreateInput, actorAgentId: string | null = null): Promise<ITask> {
+        await assertAssignable(data.assignee_agent_id);
         const repoIds = await resolveRepoIds(data.project_id, data.repo_ids);
         const row = await createItem({
             project_id: data.project_id,
@@ -223,6 +233,7 @@ export const tasksService = {
     ): Promise<ITask> {
         const before = await this.get(id);
         if (!before) throw new Error('Task not found');
+        await assertAssignable(agentId);
         await patchItem(id, { assignee_agent_id: agentId });
         await eventsLog.record({
             item_id: id,

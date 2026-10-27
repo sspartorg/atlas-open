@@ -254,6 +254,9 @@ export const PUSH_DELIVERY_STATUSES: PushDeliveryStatus[] = [
 // viewer's rendered width differ strands unerased cells, and with one PTY
 // and N viewers a dynamic geometry can never be mismatch-free. Do not add
 // a resize path — see packages/api/src/services/cli-session-host.ts.
+/** ADR 0033 — the free edition runs one agent at a time, Task or itemless. */
+export const MAX_CONCURRENT_AGENTS = 1;
+
 export const TERMINAL_COLS = 120;
 export const TERMINAL_ROWS = 30;
 

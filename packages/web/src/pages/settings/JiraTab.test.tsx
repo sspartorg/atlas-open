@@ -120,6 +120,8 @@ describe('JiraTab', () => {
         expect(screen.getByText('Disconnect Jira?')).toBeInTheDocument();
         await user.click(screen.getByRole('button', { name: 'Cancel' }));
         expect(deleted).toBe(false);
+        // The cancelled dialog fades out; until it is gone the page behind it is aria-hidden.
+        await waitFor(() => expect(screen.queryByText('Disconnect Jira?')).not.toBeInTheDocument());
 
         await user.click(screen.getByRole('button', { name: 'Disconnect' }));
         const dialog = await screen.findByRole('dialog');
@@ -128,7 +130,7 @@ describe('JiraTab', () => {
         expect(await screen.findByText('Disconnected from Jira')).toBeInTheDocument();
         expect(screen.queryByDisplayValue('https://acme.atlassian.net')).not.toBeInTheDocument();
         expect(screen.getByPlaceholderText('Paste your Jira API token')).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Disconnect' })).not.toBeInTheDocument();
+        await waitFor(() => expect(screen.queryByRole('button', { name: 'Disconnect' })).not.toBeInTheDocument());
     });
 
     // Sources moved to each project's Jira tab (migration 010); their tests

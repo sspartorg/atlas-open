@@ -11,6 +11,7 @@ import { useMutation } from '@tanstack/react-query';
 import type { IAgent } from '@atlas/shared';
 import { api } from '../../api/api.js';
 import { useToast } from '../../hooks/useToast.js';
+import { useQueue } from '../../hooks/useQueue.js';
 import { ATLAS_PALETTE } from '../../theme/tokens.js';
 import { PromptPreviewDialog } from './PromptPreviewDialog.js';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert.js';
@@ -27,11 +28,17 @@ interface Props {
 export function RunNowDialog({ open, agent, onClose }: Props) {
     const navigate = useNavigate();
     const toast = useToast();
+    const { data: queue } = useQueue();
+    const slotBusy = queue ? queue.running.length >= queue.slots : false;
 
     const triggerRun = useMutation({
         mutationFn: () => api.run.trigger(agent.id, null, null),
         onSuccess: ({ runId }) => {
-            toast.show({ message: `${agent.name} run queued`, detail: runId.slice(0, 8) });
+            toast.show(
+                slotBusy
+                    ? { message: 'Queued — it starts when the current run finishes', detail: runId.slice(0, 8) }
+                    : { message: `${agent.name} run started`, detail: runId.slice(0, 8) }
+            );
             onClose();
             navigate(`/agents/${agent.id}/runs/${runId}`);
         },
@@ -83,8 +90,9 @@ export function RunNowDialog({ open, agent, onClose }: Props) {
                         mb: 3,
                     }}
                 >
-                    Starts a run with no item. It spawns immediately and streams output into the
-                    Runs tab. To run an agent on a Task, assign the Task to it.
+                    Starts a run with no item. One agent runs at a time: if another run holds the
+                    slot, this one waits in the Queue. Output streams into the Runs tab. To run an
+                    agent on a Task, assign the Task to it.
                 </Typography>
 
                 {triggerRun.error && (

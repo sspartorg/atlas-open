@@ -69,7 +69,8 @@ export function TaskNew() {
         ? (projects.find((p) => p.id === defaultProjectName || p.name === defaultProjectName)?.id ?? '')
         : '';
 
-    const activeAgents = useMemo(() => agents.filter((w) => w.status === 'active'), [agents]);
+    // Agents that run on their own (ADR 0033) can't take a Task; the API 400s the assign.
+    const activeAgents = useMemo(() => agents.filter((w) => w.status === 'active' && w.requires_item), [agents]);
 
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');

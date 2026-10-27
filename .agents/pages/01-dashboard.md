@@ -28,6 +28,8 @@ Layout: Greeting → Fleet strip → Awaiting You | In Motion (only when either 
 
 The panels are read-only listings; clicking a row navigates to `/tasks/:id` or `/sub-tasks/:id` (`utils/itemPath.ts`).
 
+**FleetStrip queue link (ADR 0033)** — "1 slot · N waiting" (from `useQueue`) links to `/queue`.
+
 ## Why these affordances exist
 - **Add your first project (empty state)** — Every other surface renders empty without at least one project; the empty state funnels here rather than offering distracting alternatives.
 - **Credentials Alert (empty state)** — Surfacing the credential gap before the new-project modal saves a failed clone round-trip on private repos.

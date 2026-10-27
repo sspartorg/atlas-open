@@ -37,6 +37,8 @@ function mockSources(initial: IJiraSource[]) {
                 makeAgent({ id: 'agent-coder', name: 'Solo Engineer', status: 'active' }),
                 // The API refuses an inactive agent, so it must not be offered.
                 makeAgent({ id: 'agent-paused', name: 'Paused one', status: 'inactive' }),
+                // Imported Tasks are assigned to it, so an itemless agent is not offered either.
+                makeAgent({ id: 'agent-loner', name: 'Loner', requires_item: false }),
             ])
         ),
         http.get(`${BASE}/integrations/jira`, () =>
@@ -99,6 +101,7 @@ describe('ProjectJiraCard', () => {
         const listbox = await screen.findByRole('listbox');
         expect(within(listbox).getByText('Solo Engineer')).toBeInTheDocument();
         expect(within(listbox).queryByText('Paused one')).not.toBeInTheDocument();
+        expect(within(listbox).queryByText('Loner')).not.toBeInTheDocument();
         await userEvent.click(within(listbox).getByText('Solo Engineer'));
 
         await userEvent.click(screen.getByRole('button', { name: 'Save' }));

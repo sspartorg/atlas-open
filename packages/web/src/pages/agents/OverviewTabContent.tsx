@@ -19,6 +19,7 @@ import { useCliModels } from '../../hooks/useCliModels.js';
 import { FormSection, FormRow } from '../../components/FormSection.js';
 import { api } from '../../api/api.js';
 import { QualityChecklistCard } from './QualityChecklistCard.js';
+import { ScheduleDeliverySection } from './ScheduleDeliverySection.js';
 
 interface Props {
     agent: IAgent;
@@ -252,6 +253,8 @@ export function OverviewTabContent({ agent, view }: Props) {
                     ) : null}
                 </Box>
             </FormSection>
+
+            <ScheduleDeliverySection agent={agent} />
         </Box>
     );
 }

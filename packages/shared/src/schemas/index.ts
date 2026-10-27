@@ -79,8 +79,42 @@ export const AgentChecklistItemInputSchema = z.object({
     required: z.boolean().default(true),
 });
 
-// ADR 0014 — an agent is prompt + memory + checklist + CLI config. Schedule,
-// routing and git delivery belong to the workflows that use it.
+export const SchedulePresetSchema = z.enum(['hourly', 'every_4h', 'daily', 'weekly', 'custom']);
+
+/**
+ * ADR 0033 — Atlas's git delivery is chained: a push needs a commit and a PR
+ * needs a push. Returns the broken link, or null. Fields left undefined are
+ * not checked, so the API runs it again on the merged row of a PATCH.
+ */
+export function deliveryChainError(f: { git_commit?: boolean | undefined; git_push?: boolean | undefined; git_open_pr?: boolean | undefined }): string | null {
+    if (f.git_push === true && f.git_commit === false) return 'git_push needs git_commit';
+    if (f.git_open_pr === true && f.git_push === false) return 'git_open_pr needs git_push';
+    return null;
+}
+
+// ADR 0033 — what an agent works on, when it starts, and what Atlas does
+// with its changes. Optional on create (the DB defaults keep today's
+// behaviour) and on update.
+const AgentRunConfigFieldsSchema = {
+    requires_item: z.boolean().optional(),
+    git_commit: z.boolean().optional(),
+    git_push: z.boolean().optional(),
+    git_open_pr: z.boolean().optional(),
+    schedule_enabled: z.boolean().optional(),
+    schedule_preset: SchedulePresetSchema.optional(),
+    schedule_time_of_day: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM 24-hour required').optional(),
+    schedule_weekday: z.number().int().min(0).max(6).nullable().optional(),
+    schedule_cron_expression: z.string().max(120).optional(),
+};
+
+function refineDeliveryChain(v: { git_commit?: boolean | undefined; git_push?: boolean | undefined; git_open_pr?: boolean | undefined }, ctx: z.RefinementCtx): void {
+    const error = deliveryChainError(v);
+    if (error) ctx.addIssue({ code: z.ZodIssueCode.custom, message: error, path: ['git_push'] });
+}
+
+// ADR 0014 — an agent is prompt + memory + checklist + CLI config. ADR 0033
+// adds back the run config the free edition needs: item or not, schedule,
+// and git delivery.
 const AgentCoreFieldsSchema = {
     name: z.string().min(1).max(100),
     category: AgentCategorySchema,
@@ -107,13 +141,16 @@ const AgentCoreFieldsSchema = {
     // boundary; per-kind shape lives in @atlas/shared/agents/settings-schemas
     // and is validated by the service layer when appropriate.
     settings_json: z.record(z.string(), z.unknown()).optional(),
+    ...AgentRunConfigFieldsSchema,
 };
 
-export const CreateAgentSchema = z.object({
-    id: z.string().min(1).optional(),
-    ...AgentCoreFieldsSchema,
-    checklists: z.array(AgentChecklistItemInputSchema).optional(),
-});
+export const CreateAgentSchema = z
+    .object({
+        id: z.string().min(1).optional(),
+        ...AgentCoreFieldsSchema,
+        checklists: z.array(AgentChecklistItemInputSchema).optional(),
+    })
+    .superRefine(refineDeliveryChain);
 
 export const UpdateAgentSchema = z
     .object({
@@ -141,8 +178,10 @@ export const UpdateAgentSchema = z
         // Theme 09 — JSONB blob of per-archetype config; unstructured here.
         settings_json: z.record(z.string(), z.unknown()).optional(),
         checklists: z.array(AgentChecklistItemInputSchema).optional(),
+        ...AgentRunConfigFieldsSchema,
     })
-    .strict();
+    .strict()
+    .superRefine(refineDeliveryChain);
 
 export const AgentChecklistsPutSchema = z.object({
     items: z.array(AgentChecklistItemInputSchema),
@@ -871,7 +910,6 @@ export const NotificationFilterSchema = z.object({
     limit: z.coerce.number().int().min(1).max(500).optional(),
 });
 
-export const SchedulePresetSchema = z.enum(['hourly', 'every_4h', 'daily', 'weekly', 'custom']);
 export const ScheduleConflictPolicySchema = z.enum(['skip', 'stash', 'abort']);
 
 export const ProjectScheduleSchema = z.object({

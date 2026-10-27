@@ -17,6 +17,12 @@
   "settings_json": {},
   "memory_cadence": 1,
   "summary": "Pulls your Jira-assigned items into Atlas as draft Tasks.",
-  "version": 1,
-  "published_at": "2026-07-01T00:00:00Z"
+  "version": 2,
+  "published_at": "2026-07-01T00:00:00Z",
+  "requires_item": false,
+  "schedule_enabled": false,
+  "schedule_preset": "hourly",
+  "schedule_time_of_day": "09:00",
+  "schedule_weekday": null,
+  "schedule_cron_expression": "0 * * * *"
 }

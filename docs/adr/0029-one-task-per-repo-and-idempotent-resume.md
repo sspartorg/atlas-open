@@ -15,7 +15,7 @@ Three smaller problems came up in the same run:
 
 ## Decision
 
-- **One Task at a time per repo.** Dispatch does not start a ready Task while another top-level run on a Task that names one of the same repos is `running` or `waiting_for_owner`. A parked run keeps its repo until the Owner resolves it. Parallelism is still allowed across different repos, up to the install-wide limit (`MAX_PARALLEL_RUNS`, 3, in `services/workflow-engine.ts`).
+- **One Task at a time per repo.** Dispatch does not start a ready Task while another top-level run on a Task that names one of the same repos is `running` or `waiting_for_owner`. A parked run keeps its repo until the Owner resolves it. Parallelism is still allowed across different repos, up to the install-wide limit (`MAX_PARALLEL_RUNS`, 3, in `services/workflow-engine.ts`). *(Superseded by ADR 0033: one agent at a time.)*
 - **Resume is idempotent.** Resuming a run that is already `running` succeeds. A finished run still refuses.
 - **No git-history tests.** The automation agent may not write tests that read git history, a diff, or another branch. It tests files on disk.
 - **Atlas artifacts stay out of commits.** `specs/` and `tests/qa/` are excluded from run commits, as recorded in `services/atlas-artifacts.ts`.

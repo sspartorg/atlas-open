@@ -45,6 +45,7 @@ const NAV_GROUPS: NavGroup[] = [
                 countKey: 'projects',
             },
             { key: 'tasks', icon: 'flag', label: 'Tasks', path: '/tasks', countKey: 'tasks' },
+            { key: 'queue', icon: 'queue', label: 'Queue', path: '/queue', countKey: 'queue' },
             { key: 'terminal', icon: 'terminal', label: 'Terminal', path: '/terminal' },
             {
                 key: 'terminal-standalone',

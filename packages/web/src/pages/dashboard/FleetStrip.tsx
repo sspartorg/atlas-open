@@ -1,11 +1,14 @@
 import type { ReactNode } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import Box from '@mui/material/Box';
+import Link from '@mui/material/Link';
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { ATLAS_PALETTE, ELEVATION } from '../../theme/tokens.js';
 import { LiveDot } from '../../components/LiveDot.js';
 import { useActiveRuns } from '../../hooks/useActiveRuns.js';
+import { useQueue } from '../../hooks/useQueue.js';
 import { formatCostUsd, formatTokenCount } from '../../utils/formatCost.js';
 import type { ICostTotals } from './costTotals.js';
 import type { AgentSummary } from '../../api/types.js';
@@ -70,6 +73,7 @@ function Cell({
 // agent, green while working), what's live, and what this month cost.
 export function FleetStrip({ agents, liveCount, spend }: IFleetStripProps) {
     const { agentIds: busy } = useActiveRuns();
+    const { data: queue } = useQueue();
     const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)', { noSsr: true });
     // Working agents first so they're visible even when the row is capped.
     const ordered = [...agents].sort((a, b) => Number(busy.has(b.id)) - Number(busy.has(a.id)));
@@ -155,6 +159,14 @@ export function FleetStrip({ agents, liveCount, spend }: IFleetStripProps) {
             >
                 <Typography sx={{ fontSize: 12, color: ATLAS_PALETTE.slate60 }}>
                     {live ? 'Agents at work right now' : 'All quiet right now'}
+                    {queue && (
+                        <>
+                            {' · '}
+                            <Link component={RouterLink} to="/queue" sx={{ fontSize: 12 }}>
+                                {queue.slots} {queue.slots === 1 ? 'slot' : 'slots'} · {queue.waiting.length} waiting
+                            </Link>
+                        </>
+                    )}
                 </Typography>
             </Cell>
 

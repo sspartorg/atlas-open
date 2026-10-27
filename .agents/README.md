@@ -74,6 +74,7 @@ This folder is the **single source of truth for application behavior** — what 
 - [`pages/30-analytics.md`](pages/30-analytics.md) — `/analytics`
 - [`pages/36-fleet-performance.md`](pages/36-fleet-performance.md) — `/agents/performance`
 - [`pages/37-run-detail.md`](pages/37-run-detail.md) — `/runs/:runId`
+- [`pages/38-queue.md`](pages/38-queue.md) — `/queue`
 
 ---
 

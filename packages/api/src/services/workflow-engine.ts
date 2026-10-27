@@ -16,6 +16,8 @@ import { rmSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
+    MAX_CONCURRENT_AGENTS,
+    type IQueueEntry,
     type IRunOutcome,
     type IWorkflowGraph,
     type IWorkflowNode,
@@ -41,6 +43,7 @@ import {
     pushWorktree,
     openPullRequest,
     cleanupWorktreeAfterPush,
+    computeWorktreePath,
 } from './worktree-orchestrator.js';
 import { buildGitAuth, cleanupGitConfig } from './git-credentials.js';
 import { gitInvokeEnv } from './git-env.js';
@@ -53,9 +56,6 @@ const exec = promisify(execFile);
 
 /** The built-in run record every Task run belongs to (migration 020). */
 export const SOLO_WORKFLOW_ID = 'solo';
-
-/** How many Tasks run at once across the install. */
-export const MAX_PARALLEL_RUNS = 3;
 
 // A `running` run with no live step for this long is presumed orphaned (API
 // restart, a terminal path that never reported back). Longer than the worst
@@ -258,6 +258,7 @@ export async function startTaskRun(itemId: string): Promise<string> {
 async function prepareWorktree(run: RunRow): Promise<string | null> {
     if (!run.branch || !run.project_id) return null;
     const branch = run.branch;
+    const flags = await deliveryFlags(run);
     try {
         // ADR 0017 — one checkout per repo of the Task; several sit side by
         // side in one workspace, which becomes the run's worktree_path (cwd).
@@ -266,7 +267,14 @@ async function prepareWorktree(run: RunRow): Promise<string | null> {
             if (!repo.git_path) {
                 throw new Error(workspace ? `Repo ${repo.name} has no cloned repository on disk` : 'Project has no cloned repository on disk');
             }
-            if (run.worktree_path) await commitPending(path, repo.credential_id, await commitMessage(run));
+            if (flags.commit) {
+                if (run.worktree_path) await commitPending(path, repo.credential_id, await commitMessage(run));
+            } else {
+                // ensureWorktree resets a worktree it reuses. With commits off,
+                // that would throw away what an earlier run left uncommitted.
+                const existing = workspace ? path : computeWorktreePath(repo.git_path, repo.id, branch);
+                if (await isDirty(existing)) throw new Error(`${existing} holds uncommitted changes from an earlier run. Commit or discard them, then resume`);
+            }
             // item: null — the path lives on workflow_runs only. Writing it to
             // items.worktree_path would let the boot orphan reaper push and
             // delete the worktree mid-run.
@@ -279,7 +287,7 @@ async function prepareWorktree(run: RunRow): Promise<string | null> {
                     credential_id: repo.credential_id,
                     default_branch: repo.default_branch,
                 },
-                pushUpstream: true,
+                pushUpstream: flags.push,
                 ...(workspace ? { path } : {}),
             });
             run.worktree_path = workspace ?? wt.path;
@@ -357,7 +365,11 @@ export async function onStepFinished(agentRunId: string): Promise<void> {
         ])
         .where('id', '=', agentRunId)
         .executeTakeFirst();
-    if (!step?.workflow_run_id || !step.node_id) return;
+    if (!step?.workflow_run_id || !step.node_id) {
+        // ADR 0033 — an itemless run held the one slot; hand it on.
+        if (step && !step.workflow_run_id) void kickWorkflowDispatch('agent_run_finished');
+        return;
+    }
     const run = await loadRun(step.workflow_run_id);
     // A stale report (the run already moved on, was stopped or parked) must
     // not advance anything.
@@ -504,6 +516,8 @@ async function park(
     run.status = 'waiting_for_owner';
     await recordRunEvent(run.id, 'parked', reason, kind);
     broadcastRun(run, 'waiting_for_owner', nodeId);
+    // A parked run holds no slot (ADR 0033): the next in line can start now.
+    void kickWorkflowDispatch('parked');
     const eventKey = failed ? 'workflow.failed' : 'item.status_changed:waiting_for_info';
     if (!run.item_id) {
         await notifyOwner(run, `A run needs you: ${reason}`, 'needs_you', eventKey);
@@ -572,6 +586,32 @@ export async function continueResumedRun(runId: string): Promise<void> {
 
 // ─── Delivery / cancel ──────────────────────────────────────────────────────
 
+export interface DeliveryFlags {
+    commit: boolean;
+    push: boolean;
+    openPr: boolean;
+}
+
+/** ADR 0033 — the Task's agent decides what Atlas does with the run's changes. */
+async function deliveryFlags(run: Pick<RunRow, 'item_id'>): Promise<DeliveryFlags> {
+    const item = run.item_id ? await loadItem(run.item_id) : undefined;
+    const agent = item?.assignee_agent_id
+        ? await db.selectFrom('agents').select(['git_commit', 'git_push', 'git_open_pr']).where('id', '=', item.assignee_agent_id).executeTakeFirst()
+        : undefined;
+    if (!agent) return { commit: true, push: true, openPr: true };
+    return { commit: agent.git_commit, push: agent.git_commit && agent.git_push, openPr: agent.git_commit && agent.git_push && agent.git_open_pr };
+}
+
+async function isDirty(worktreePath: string): Promise<boolean> {
+    try {
+        const status = await exec('git', ['-C', worktreePath, 'status', '--porcelain'], { env: gitInvokeEnv(null), timeout: 60_000 });
+        return status.stdout.trim() !== '';
+    } catch {
+        // Not a checkout (yet): nothing to lose.
+        return false;
+    }
+}
+
 /** `<task key>: <task title>`, e.g. `ATL-12: Fix login`. */
 async function commitMessage(run: Pick<RunRow, 'id' | 'item_id'>): Promise<string> {
     const item = run.item_id ? await loadItem(run.item_id) : undefined;
@@ -623,9 +663,13 @@ async function hasChanges(worktreePath: string, base: string): Promise<boolean> 
     }
 }
 
-async function deliver(run: RunRow, opts: { openPr: boolean }): Promise<DeliveryResult> {
+async function deliver(run: RunRow, opts: DeliveryFlags): Promise<DeliveryResult> {
     const log: string[] = [];
     const result: DeliveryResult = { pushed: false, prUrl: null, prUrls: [], failure: null, log };
+    if (!opts.commit) {
+        if (run.worktree_path) log.push(`changes left uncommitted in ${run.worktree_path}`);
+        return result;
+    }
     if (!run.worktree_path || !run.branch || !run.project_id) return result;
     const project = await db.selectFrom('projects').select(['id', 'name']).where('id', '=', run.project_id).executeTakeFirst();
     if (!project) return result;
@@ -653,6 +697,10 @@ async function deliver(run: RunRow, opts: { openPr: boolean }): Promise<Delivery
         const base = repo.default_branch?.trim() ? repo.default_branch : 'main';
         const committed = await commitPending(path, repo.credential_id, message);
         if (committed) log.push(tag + committed);
+        if (!opts.push) {
+            log.push(`${tag}not pushed; the work stays on ${branch} in ${path}`);
+            continue;
+        }
         if (workspace && !(await hasChanges(path, base))) {
             log.push(`${tag}no changes`);
             continue;
@@ -721,8 +769,8 @@ async function deliver(run: RunRow, opts: { openPr: boolean }): Promise<Delivery
     }
 
     // Any delivery failure keeps the worktrees so a resumed run can retry
-    // from exactly this state.
-    if (!result.failure) {
+    // from exactly this state. Unpushed work (ADR 0033) lives only there.
+    if (!result.failure && opts.push) {
         for (const { repo, path } of repos) {
             if (!repo.git_path) continue;
             const cleanup = await cleanupWorktreeAfterPush({
@@ -744,7 +792,7 @@ async function finishRun(run: RunRow): Promise<void> {
     await db.updateTable('workflow_runs').set({ current_node_id: END_NODE }).where('id', '=', run.id).execute();
     run.current_node_id = END_NODE;
     broadcastRun(run, 'running', END_NODE);
-    const delivery = await deliver(run, { openPr: true });
+    const delivery = await deliver(run, await deliveryFlags(run));
     if (delivery.failure) {
         // Parked at End: fixing the cause (e.g. the project credential) and
         // resuming re-runs delivery against the kept worktree.
@@ -800,9 +848,9 @@ export async function cancelWorkflowRun(runId: string): Promise<void> {
         await cancelRun(step.id).catch(() => ({ cancelled: false }));
     }
 
-    // Keep what the agent committed, but a stopped run opens no PR.
+    // Keep what the agent changed, but a stopped run opens no PR.
     try {
-        await deliver(run, { openPr: false });
+        await deliver(run, { ...(await deliveryFlags(run)), openPr: false });
     } catch {
         /* the worktree stays on disk when delivery fails */
     }
@@ -837,83 +885,176 @@ export async function reconcileWorkflowRuns(now: Date = new Date()): Promise<num
     return stale.length;
 }
 
-async function oldestReadyItem(): Promise<string | null> {
-    const row = await db
-        .selectFrom('items as i')
-        .select('i.id')
-        .where('i.type', '=', 'task')
-        .where('i.status', '=', 'ready')
-        .where('i.assignee_agent_id', 'is not', null)
-        .where(({ not, exists, selectFrom }) =>
-            not(
-                exists(
-                    selectFrom('workflow_runs as wr')
-                        .select('wr.id')
-                        .whereRef('wr.item_id', '=', 'i.id')
-                        .where('wr.status', 'in', ['running', 'waiting_for_owner']),
-                ),
-            ),
-        )
-        // One Task at a time per repo (ADR 0029). Two runs in the same checkout
-        // edit the same files, so their pull requests conflict.
-        .where(sql<boolean>`not exists (
-            select 1 from workflow_runs busy
-            join items bi on bi.id = busy.item_id
-            where busy.status in ('running', 'waiting_for_owner')
-              and bi.repo_ids ?| array(select jsonb_array_elements_text(i.repo_ids))
-        )`)
-        // Skip items still waiting on a depends_on target, so one blocked
-        // item doesn't hold the whole queue (startTaskRun would refuse it).
-        .where(({ not, exists, selectFrom }) =>
-            not(
-                exists(
-                    selectFrom('item_links as l')
-                        .innerJoin('items as t', 't.id', 'l.to_id')
-                        .select('l.from_id')
-                        .whereRef('l.from_id', '=', 'i.id')
-                        .where('l.relation_type', '=', 'depends_on')
-                        .where('t.status', '!=', 'done'),
-                ),
-            ),
-        )
-        .orderBy('i.updated_at', 'asc')
-        // Items updated in one statement share updated_at; tie-break for FIFO.
-        .orderBy('i.id', 'asc')
-        .limit(1)
-        .executeTakeFirst();
-    return row?.id ?? null;
+interface DispatchCandidate extends IQueueEntry {
+    /** Set on a Task whose agent has a schedule: that fire is consumed when it starts. */
+    scheduled: boolean;
 }
 
 /**
- * One dispatch pass: start ready Tasks up to `MAX_PARALLEL_RUNS`, each in its
- * own worktree. Parked runs don't hold a slot, so one unanswered question
- * doesn't stall every other Task.
+ * ADR 0033 — everything waiting for the one slot, in dispatch order: ready,
+ * assigned Tasks and itemless agent runs (Run now, or an itemless agent's
+ * schedule firing), oldest first. Dispatch starts the first entry with no
+ * `blocked_reason`; the Queue page shows this same list, so it never
+ * disagrees with what runs next.
+ */
+export async function listDispatchQueue(): Promise<DispatchCandidate[]> {
+    const tasks = await sql<{
+        id: string;
+        title: string;
+        agent_id: string;
+        agent_name: string;
+        accent_color: string;
+        since: string | Date;
+        scheduled: boolean;
+        due: boolean;
+        dependency: boolean;
+        repo_busy: boolean;
+    }>`
+        select i.id, i.title, a.id as agent_id, a.name as agent_name, a.accent_color,
+               i.updated_at as since, a.schedule_enabled as scheduled,
+               (a.schedule_due_at is not null) as due,
+               exists (
+                   select 1 from item_links l join items t on t.id = l.to_id
+                   where l.from_id = i.id and l.relation_type = 'depends_on' and t.status != 'done'
+               ) as dependency,
+               -- One Task at a time per repo (ADR 0029): a parked run still holds its repo.
+               exists (
+                   select 1 from workflow_runs busy join items bi on bi.id = busy.item_id
+                   where busy.status in ('running', 'waiting_for_owner')
+                     and bi.repo_ids ?| array(select jsonb_array_elements_text(i.repo_ids))
+               ) as repo_busy
+        from items i
+        join agents a on a.id = i.assignee_agent_id
+        where i.type = 'task' and i.status = 'ready'
+          and not exists (
+              select 1 from workflow_runs wr
+              where wr.item_id = i.id and wr.status in ('running', 'waiting_for_owner')
+          )
+    `.execute(db);
+    const runs = await db
+        .selectFrom('agent_runs as r')
+        .innerJoin('agents as a', 'a.id', 'r.agent_id')
+        .select(['r.id', 'r.agent_id', 'a.name as agent_name', 'a.accent_color', 'r.created_at as since'])
+        .where('r.status', '=', 'queued')
+        .where('r.started_at', 'is', null)
+        .where('r.workflow_run_id', 'is', null)
+        .execute();
+    const iso = (v: string | Date) => new Date(v).toISOString();
+    const entries: DispatchCandidate[] = [
+        ...tasks.rows.map((t) => ({
+            kind: 'task' as const,
+            id: t.id,
+            title: t.title,
+            agent_id: t.agent_id,
+            agent_name: t.agent_name,
+            accent_color: t.accent_color,
+            since: iso(t.since),
+            run_id: null,
+            scheduled: t.scheduled,
+            blocked_reason: t.dependency ? ('dependency' as const) : t.repo_busy ? ('repo_busy' as const) : t.scheduled && !t.due ? ('awaiting_schedule' as const) : null,
+        })),
+        ...runs.map((r) => ({
+            kind: 'agent_run' as const,
+            id: r.id,
+            title: `${r.agent_name} run`,
+            agent_id: r.agent_id,
+            agent_name: r.agent_name,
+            accent_color: r.accent_color,
+            since: iso(r.since),
+            run_id: r.id,
+            scheduled: false,
+            blocked_reason: null,
+        })),
+    ];
+    // Items updated in one statement share updated_at; the id tie-break keeps FIFO.
+    return entries.sort((x, y) => x.since.localeCompare(y.since) || x.id.localeCompare(y.id));
+}
+
+/**
+ * Runs holding the slot: Task runs that are `running` (a parked run waits on
+ * the Owner and holds nothing), and itemless agent runs that started. Agent
+ * test runs are QA of the agent, not work, and stay outside the cap.
+ */
+export async function countBusySlots(): Promise<number> {
+    const row = await sql<{ n: number }>`
+        select (select count(*) from workflow_runs where status = 'running')::int
+             + (select count(*) from agent_runs r
+                where r.status in ('queued', 'in_progress') and r.started_at is not null
+                  and r.workflow_run_id is null and r.item_id is null
+                  and not exists (select 1 from agent_test_runs t where t.agent_run_id = r.id))::int as n
+    `.execute(db);
+    return Number(row.rows[0]?.n ?? 0);
+}
+
+/**
+ * One dispatch pass: start whatever is next in line while a slot is free
+ * (`MAX_CONCURRENT_AGENTS`, ADR 0033). Parked runs don't hold the slot, so one
+ * unanswered question doesn't stall the queue.
  */
 export function tickWorkflowDispatch(): Promise<number> {
     return enqueueDispatch(() => dispatchPass());
 }
 
 async function dispatchPass(): Promise<number> {
-    const running = await db
-        .selectFrom('workflow_runs')
-        .select((eb) => eb.fn.countAll().as('n'))
-        .where('status', '=', 'running')
-        .executeTakeFirst();
     let started = 0;
-    for (let free = MAX_PARALLEL_RUNS - Number(running?.n ?? 0); free > 0; free--) {
-        const itemId = await oldestReadyItem();
-        if (!itemId) break;
+    // An entry that failed to start leaves the queue; this only guards a
+    // status write that failed too from spinning the loop.
+    const tried = new Set<string>();
+    while ((await countBusySlots()) < MAX_CONCURRENT_AGENTS) {
+        const queue = await listDispatchQueue();
+        const next = queue.find((e) => !e.blocked_reason && !tried.has(e.id));
+        if (!next) {
+            await dropUnusedFires(queue);
+            break;
+        }
+        tried.add(next.id);
+        if (next.kind === 'agent_run') {
+            await startQueuedAgentRun(next.id, next.agent_id);
+            started++;
+            continue;
+        }
+        // A scheduled agent's fire buys one Task.
+        if (next.scheduled) await db.updateTable('agents').set({ schedule_due_at: null }).where('id', '=', next.agent_id).execute();
         try {
-            await startTaskRun(itemId);
+            await startTaskRun(next.id);
             started++;
         } catch (err) {
-            // One queue for every Task: a Task that cannot start steps out of
+            // One queue for everything: a Task that cannot start steps out of
             // it (waiting for the Owner) instead of blocking the ones behind it.
-            await setItemStatus(itemId, 'waiting_for_info', `run_start_failed: ${(err as Error).message}`.slice(0, 280));
-            await reportDispatchFailure(itemId, (err as Error).message);
+            await setItemStatus(next.id, 'waiting_for_info', `run_start_failed: ${(err as Error).message}`.slice(0, 280));
+            await reportDispatchFailure(next.id, (err as Error).message);
         }
     }
     return started;
+}
+
+/** A scheduled agent's fire that found none of its Tasks startable is skipped, not saved for later. */
+async function dropUnusedFires(queue: DispatchCandidate[]): Promise<void> {
+    const due = await db.selectFrom('agents').select('id').where('schedule_due_at', 'is not', null).where('requires_item', '=', true).execute();
+    const stale = due.map((a) => a.id).filter((id) => !queue.some((e) => e.kind === 'task' && e.agent_id === id && e.blocked_reason === null));
+    if (stale.length > 0) await db.updateTable('agents').set({ schedule_due_at: null }).where('id', 'in', stale).execute();
+}
+
+async function startQueuedAgentRun(runId: string, agentId: string): Promise<void> {
+    // started_at is what moves the run from waiting to holding the slot.
+    const claimed = await db
+        .updateTable('agent_runs')
+        .set({ started_at: new Date().toISOString() })
+        .where('id', '=', runId)
+        .where('status', '=', 'queued')
+        .where('started_at', 'is', null)
+        .returning('project_id')
+        .executeTakeFirst();
+    if (!claimed) return;
+    void spawnAgentRun({ agentId, projectId: claimed.project_id, existingRunId: runId }).catch(async (err: unknown) => {
+        appLog().error({ err, runId }, '[task-dispatch] itemless run failed to spawn');
+        await db
+            .updateTable('agent_runs')
+            .set({ status: 'error', completed_at: new Date().toISOString(), outcome_summary: (err as Error).message })
+            .where('id', '=', runId)
+            .execute();
+        void kickWorkflowDispatch('agent_run_failed');
+    });
 }
 
 // ponytail: in-memory, so a restart re-notifies once.
