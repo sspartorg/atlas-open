@@ -1607,7 +1607,7 @@ describe('cleanupWorktreeAfterPush', () => {
 
         // Locate the Step 4 fetch call by argv and inspect the env it ran
         // with — this is the load-bearing assertion: the env MUST silence
-        // GCM (GIT_CONFIG_NOSYSTEM=1, etc.) AND MUST point GIT_CONFIG_GLOBAL
+        // GCM (no system credential helper, etc.) AND MUST point GIT_CONFIG_GLOBAL
         // at the per-call temp config so the http.extraheader authenticates
         // the fetch.
         const fetchCall = execFileMock.mock.calls.find(
@@ -1618,7 +1618,9 @@ describe('cleanupWorktreeAfterPush', () => {
         );
         expect(fetchCall, 'Step 4 fetch should be invoked when credentialId is set').toBeDefined();
         const opts = fetchCall![2] as { env: NodeJS.ProcessEnv };
-        expect(opts.env.GIT_CONFIG_NOSYSTEM).toBe('1');
+        // The system config is wrapped (helper reset) or skipped, never read
+        // raw; git-env.test.ts checks the wrapper against real git.
+        expect(opts.env.GIT_CONFIG_SYSTEM ?? opts.env.GIT_CONFIG_NOSYSTEM).toBeTruthy();
         expect(opts.env.GIT_TERMINAL_PROMPT).toBe('0');
         expect(opts.env.GCM_INTERACTIVE).toBe('Never');
         expect(opts.env.GCM_GUI_PROMPT).toBe('false');

@@ -1,11 +1,15 @@
+import { fileURLToPath } from 'node:url';
 import { expect, type APIRequestContext } from '@playwright/test';
 
 // Direct calls to the e2e API (global-setup.ts) for seeding what a spec needs.
 
-export const API = 'http://127.0.0.1:7001';
+// E2E_API_PORT / E2E_WEB_PORT move the stack off ports another app holds.
+export const E2E_API_PORT = Number(process.env['E2E_API_PORT']) || 7001;
+export const E2E_WEB_PORT = Number(process.env['E2E_WEB_PORT']) || 7010;
+export const API = `http://127.0.0.1:${E2E_API_PORT}`;
 // Mirrors global-setup.ts: the env file the e2e API reads and writes, and the
 // port its Telegram calls go to.
-export const E2E_ENV_FILE = new URL('../../e2e-logs/e2e.env', import.meta.url).pathname;
+export const E2E_ENV_FILE = fileURLToPath(new URL('../../e2e-logs/e2e.env', import.meta.url));
 export const FAKE_TELEGRAM_PORT = 7091;
 // The e2e seed's only project (fixtures/run-seed.ts).
 const PROJECT_ID = 'e2e-terminal-project';

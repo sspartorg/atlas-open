@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
 import { goto } from '../helpers/nav.js';
 import { API, apiGet } from '../helpers/api.js';
@@ -10,9 +11,10 @@ import { API, apiGet } from '../helpers/api.js';
 
 test.afterAll(() => {
     execFileSync('pnpm', ['exec', 'tsx', 'e2e/fixtures/run-seed.ts'], {
-        cwd: resolve(new URL('.', import.meta.url).pathname, '../..'),
+        cwd: resolve(fileURLToPath(new URL('.', import.meta.url)), '../..'),
         env: { ...process.env, DATABASE_URL: 'postgres://atlas:atlas@localhost:5600/atlas_open_e2e' },
         stdio: 'ignore',
+        shell: process.platform === 'win32',
     });
 });
 

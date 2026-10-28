@@ -230,7 +230,7 @@ export function ResetWorkspaceModal({ open, onClose }: Props) {
                         onClick={() => void handleReset()}
                         disabled={!canSubmit}
                         startIcon={
-                            resetting ? <CircularProgress size={14} color="inherit" /> : undefined
+                            resetting ? <CircularProgress aria-hidden size={14} color="inherit" /> : undefined
                         }
                         sx={{ textTransform: 'none', fontWeight: 600 }}
                     >

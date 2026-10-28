@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, expect, chromium } from '@playwright/test';
-import { SEEDED_AGENT, createTask } from '../helpers/api.js';
+import { E2E_WEB_PORT, SEEDED_AGENT, createTask } from '../helpers/api.js';
 import { sql } from '../helpers/db.js';
 
 // Browser push through Google's real push service (FCM) into installed Google
@@ -17,7 +17,7 @@ import { sql } from '../helpers/db.js';
 test.skip(process.env['E2E_LIVE'] !== '1', 'live spec: run with `pnpm e2e:live`');
 test.describe.configure({ timeout: 240_000 });
 
-const ORIGIN = 'http://127.0.0.1:7010';
+const ORIGIN = `http://127.0.0.1:${E2E_WEB_PORT}`;
 
 test('real Chrome + FCM: Send test and a run park both pop up', async ({ request }) => {
     sql('DELETE FROM push_subscriptions');

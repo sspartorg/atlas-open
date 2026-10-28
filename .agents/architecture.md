@@ -97,7 +97,7 @@ the ports / container swapped.
 Every spawn point in the process model is a cross-platform binary:
 
 - `docker` / `docker compose` â€” invoked by `src/scripts/db-up.ts` and `db-down.ts` (pure Node, no PowerShell).
-- `git` â€” invoked directly by `clone-runner.ts`, `reclone-runner.ts`, `auto-fetch-runner.ts`, `git-status.ts`, `git-verify.ts`. `clone-runner` and `reclone-runner` set `GIT_TERMINAL_PROMPT=0` + the GCM-suppressing env vars so credential helpers never pop UI.
+- `git` â€” invoked directly by `clone-runner.ts`, `reclone-runner.ts`, `auto-fetch-runner.ts`, `git-status.ts`, `git-verify.ts`. `clone-runner` and `reclone-runner` set `GIT_TERMINAL_PROMPT=0` + the GCM-suppressing env vars so credential helpers never pop UI. Every service gets that env from `git-env.ts` `gitInvokeEnv`, which points `GIT_CONFIG_SYSTEM` at a wrapper that includes `/etc/gitconfig` and then resets `credential.helper`: GCM never runs, the Owner's global helper still does, and Git for Windows' `core.autocrlf` still applies at system scope, so a clean CRLF checkout does not read as dirty.
 - `rm -rf` is implemented via `fs.rm({ recursive, force })` in `delete-runner.ts`.
 - `explorer.exe` / `open` / `xdg-open` â€” branched per `process.platform` in the `POST /api/projects/:id/repos/:repoId/reveal` handler (ADR 0018: a project has no folder; its repos do).
 - `claude` / `gh` (the agent CLIs) â€” Atlas assumes the user has the right one on `PATH`; the `cli` column on each agent picks which.

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -32,6 +32,9 @@ function matchesSearch(t: ITaskListItem, q: string): boolean {
     const needle = q.toLowerCase();
     return [t.id, t.title, t.description].some((v) => v.toLowerCase().includes(needle));
 }
+
+// Module-wide, so a remount never reuses a number an old history entry holds.
+let pickSeq = 0;
 
 export function Tasks() {
     useSetPageTitle('Tasks');
@@ -94,11 +97,32 @@ export function Tasks() {
         };
     }, [scopedTasks, statusFilter, searchQuery]);
 
+    // The URL changes before the re-render commits (navigations run in a
+    // transition), so each pick builds on the last one written, not on this
+    // render's params (which would bring a cleared filter back). Picks carry
+    // a number in history state, and `pending` holds the ones not yet on
+    // screen. Commits arrive in order, so a commit of a pending pick settles
+    // every earlier one; while later picks are still pending it is stale and
+    // ignored. Any other change (Back, Forward, a link) is taken as is.
+    const location = useLocation();
+    const latestParams = useRef(params);
+    const pending = useRef<number[]>([]);
+    useEffect(() => {
+        const pick = (location.state as { tasksPick?: number } | null)?.tasksPick;
+        const at = pick === undefined ? -1 : pending.current.indexOf(pick);
+        if (at !== -1) {
+            pending.current = pending.current.slice(at + 1);
+            if (pending.current.length > 0) return;
+        }
+        latestParams.current = params;
+    }, [params, location.state]);
     function setParam(key: string, value: string | null) {
-        const next = new URLSearchParams(params);
+        const next = new URLSearchParams(latestParams.current);
         if (value === null || value === '') next.delete(key);
         else next.set(key, value);
-        setParams(next, { replace: true });
+        latestParams.current = next;
+        pending.current.push(++pickSeq);
+        setParams(next, { replace: true, state: { tasksPick: pickSeq } });
     }
 
     // Counts the rows on screen, so it follows every filter. Done Tasks older

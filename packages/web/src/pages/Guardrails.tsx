@@ -247,7 +247,7 @@ export function Guardrails() {
                                 disabled={saveAll.isPending}
                                 startIcon={
                                     saveAll.isPending ? (
-                                        <CircularProgress size={14} color="inherit" />
+                                        <CircularProgress aria-hidden size={14} color="inherit" />
                                     ) : undefined
                                 }
                                 sx={{ textTransform: 'none', fontWeight: 600 }}

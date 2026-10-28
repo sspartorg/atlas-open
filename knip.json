@@ -24,7 +24,8 @@
         }
     },
     "ignore": [
-        "e2e/fixtures/**"
+        "e2e/fixtures/**",
+        "**/coverage/**"
     ],
     "ignoreDependencies": [
         "@secretlint/secretlint-rule-preset-recommend"

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { goto } from '../helpers/nav.js';
+import { API } from '../helpers/api.js';
 
 // Accessibility of every Settings tab and the credentials page, in light and
 // dark mode: axe (WCAG 2.1 A/AA) finds no violations.
@@ -36,7 +37,7 @@ for (const mode of ['light', 'dark'] as const) {
 }
 
 test('the project Jira tab (sources + status mapping) has no WCAG A/AA violations', async ({ page, request }) => {
-    const projects = (await (await request.get('http://127.0.0.1:7001/api/projects')).json()) as { id: string }[];
+    const projects = (await (await request.get(`${API}/api/projects`)).json()) as { id: string }[];
     await goto(page, `/projects/${projects[0]!.id}?tab=jira`);
     await page.waitForTimeout(500);
     const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
