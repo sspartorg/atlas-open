@@ -113,7 +113,8 @@ test.describe('Add repo, clone', () => {
         await expect(row(page, 'alpha')).toBeVisible();
         await expect(row(page, 'alpha')).toContainText('Ready');
         await expect(row(page, 'alpha')).toContainText('main');
-        expect(readFileSync(join(body.destination, 'README.md'), 'utf8')).toBe('# rgh-alpha\n');
+        // CRLF where the host's git says core.autocrlf (Git for Windows).
+        expect(readFileSync(join(body.destination, 'README.md'), 'utf8').replace(/\r\n/g, '\n')).toBe('# rgh-alpha\n');
         const [r] = (await repos(request)).filter((x) => x.name === 'alpha');
         expect(r).toMatchObject({ git_path: body.destination, git_url: url, clone_status: 'ready', credential_id: credId, default_branch: 'main' });
         // The token never reaches the folder's git config.
@@ -436,6 +437,8 @@ test.describe('auto-fetch, run now', () => {
 
 test.describe('Generate AI scaffold', () => {
     test('Generate makes a Task on the AI Readiness agent for the picked repo; its run pushes the Task branch to GitHub and opens a PR', async ({ page, request }) => {
+        // execFile('gh') on Windows resolves gh.exe only, so the API reaches the real gh, not fixtures/fake-gh/gh.cmd.
+        test.skip(process.platform === 'win32', 'fake gh is not reachable by execFile on Windows');
         const repoId = (await repos(request)).find((r) => r.name === 'base')?.id ?? '';
         const agentBefore = one(`SELECT count(*) FROM agents WHERE id = 'agent-ai-readiness'`);
         const prsBefore = fakeGhCalls().length;

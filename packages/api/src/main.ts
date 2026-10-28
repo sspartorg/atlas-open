@@ -14,6 +14,7 @@ import { bootStep } from './utils/boot-errors.js';
 import { startMcpHost, stopMcpHost, type IMcpHostHandle } from './plugins/mcp-host.js';
 import { apiPort } from './config.js';
 import { envFileService } from './services/env-file.js';
+import { gitInvokeEnv } from './services/git-env.js';
 
 const isDev = process.env['NODE_ENV'] !== 'production';
 
@@ -154,6 +155,8 @@ async function failOrphanedRuns(opts: { cutoffMs: number }): Promise<void> {
 }
 
 async function main(): Promise<void> {
+    // Builds the system-gitconfig wrapper now, not on the first request.
+    gitInvokeEnv(null);
     await bootStep('migration', migrateLatest);
     await bootStep('seed', runSeed);
     // Boot-time reap: every in_progress row is by definition a leftover

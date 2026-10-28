@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { E2E_WEB_PORT } from './e2e/helpers/api.js';
 
 // Playwright E2E config.
 //
@@ -47,7 +48,7 @@ export default defineConfig({
         // 2026-06-23 — 7010, not 6000. 6000 is X11 on the WHATWG bad-ports
         // blocklist (Chromium blocks ERR_UNSAFE_PORT, Node fetch refuses
         // it). Kept in sync with WEB_PORT in `e2e/global-setup.ts`.
-        baseURL: 'http://127.0.0.1:7010',
+        baseURL: `http://127.0.0.1:${E2E_WEB_PORT}`,
         trace: 'on-first-retry',
         screenshot: 'only-on-failure',
         video: 'off',

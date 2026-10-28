@@ -332,7 +332,7 @@ function SetupScriptsDialog({
                             disabled={!dirty || update.isPending}
                             startIcon={
                                 update.isPending ? (
-                                    <CircularProgress size={14} color="inherit" />
+                                    <CircularProgress aria-hidden size={14} color="inherit" />
                                 ) : null
                             }
                             sx={{ textTransform: 'none', fontWeight: 600 }}

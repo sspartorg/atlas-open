@@ -12,7 +12,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const API = 'http://127.0.0.1:7001';
+import { API } from '../helpers/api.js';
 const PROJECT = 'acme-notes';
 const REPO_API = 'acme-notes-api';
 const REPO_WEB = 'acme-notes-web';

@@ -1342,7 +1342,7 @@ async function cleanupWorktreeAfterPushInner(opts: {
     // network blip surfaces as a warning, never as a thrown failure.
     //
     // GCM safety (this is the bug fix): network fetch MUST go through
-    // `gitInvokeEnv(gitConfigPath)` so `GIT_CONFIG_NOSYSTEM=1` blocks
+    // `gitInvokeEnv(gitConfigPath)` so its system-config wrapper blocks
     // /etc/gitconfig's `credential.helper = manager` and the
     // `http.extraheader` from our temp config authenticates the request.
     // Without these, Git for Windows hands the auth challenge to GCM,

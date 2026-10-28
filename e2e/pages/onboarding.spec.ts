@@ -13,7 +13,7 @@ import { test, expect } from '@playwright/test';
 // are fully open. The `request` fixture is Node-side; relative URLs
 // work because the e2e API is bound to http://127.0.0.1:7001.
 
-const API = 'http://127.0.0.1:7001';
+import { API } from '../helpers/api.js';
 
 test.describe('/onboarding', () => {
     test.afterEach(async ({ request }) => {

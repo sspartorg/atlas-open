@@ -135,6 +135,11 @@ export function createAtlasTheme(mode: ThemeMode): Theme {
             MuiButtonBase: {
                 styleOverrides: { root: { '&.Mui-focusVisible': FOCUS_RING } },
             },
+            // A progressbar needs a name (axe aria-progressbar-name); a spinner's own aria-label wins.
+            // A spinner inside a button takes aria-hidden, or the name joins the button's.
+            MuiCircularProgress: {
+                defaultProps: { 'aria-label': 'Loading' },
+            },
 
             MuiButton: {
                 styleOverrides: {
@@ -307,6 +312,7 @@ export function createAtlasTheme(mode: ThemeMode): Theme {
             },
 
             MuiLinearProgress: {
+                defaultProps: { 'aria-label': 'Loading' },
                 styleOverrides: {
                     root: { borderRadius: 4, background: ATLAS_PALETTE.slate08 },
                 },

@@ -893,7 +893,7 @@ export function CredentialModal({ open, mode, onClose }: Props) {
                                     disabled={isPending}
                                     endIcon={
                                         isPending ? (
-                                            <CircularProgress size={14} color="inherit" />
+                                            <CircularProgress aria-hidden size={14} color="inherit" />
                                         ) : (
                                             <CheckCircleOutline />
                                         )

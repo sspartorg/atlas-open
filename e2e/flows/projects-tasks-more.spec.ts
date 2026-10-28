@@ -181,6 +181,8 @@ test.describe('Setup tab and guard-rails', () => {
 });
 
 test.describe('setup scripts run for real', () => {
+    // The .sh tests save setup_sh_body; Windows runs setup_ps1_body instead (project-setup-runner.ts).
+    const posixOnly = () => test.skip(process.platform === 'win32', 'the .sh setup script runs on POSIX only');
     const repoUrl = () => `${API}/api/projects/${projectId}/repos/${projectId}-r`;
     const startSession = (request: APIRequestContext) => request.post(`${API}/api/cli/sessions`, { data: { project_id: projectId, title: 'MOR setup' } });
     async function endSession(request: APIRequestContext, body: { id: string; worktree_path?: string | null }) {
@@ -201,6 +203,7 @@ test.describe('setup scripts run for real', () => {
     });
 
     test('the .sh saved on the Setup tab runs in the session\'s worktree with ${variable.KEY} from the project\'s secrets', async ({ page, request }) => {
+        posixOnly();
         const put = await request.put(`${API}/api/projects/${projectId}/env`, { data: { vars: [{ key: 'MARTEN_TOKEN', value: 'burrow-secret-42' }] } });
         expect(put.status(), await put.text()).toBeLessThan(300);
         await goto(page, `/projects/${projectId}?tab=setup`);
@@ -226,6 +229,7 @@ test.describe('setup scripts run for real', () => {
     });
 
     test('a failing script refuses the session (400 project_setup_failed) with its output, secrets masked, and leaves no session', async ({ request }) => {
+        posixOnly();
         await request.put(`${API}/api/projects/${projectId}/env`, { data: { vars: [{ key: 'MARTEN_TOKEN', value: 'burrow-secret-42' }] } });
         await request.patch(repoUrl(), { data: { setup_sh_body: 'echo "using ${variable.MARTEN_TOKEN}"\necho "npm install failed" >&2\nexit 3' } });
         const before = one(`SELECT count(*) FROM cli_sessions WHERE project_id = '${projectId}'`);
@@ -246,6 +250,7 @@ test.describe('setup scripts run for real', () => {
     });
 
     test('an unknown ${variable.KEY} is refused before anything runs', async ({ request }) => {
+        posixOnly();
         await request.patch(repoUrl(), { data: { setup_sh_body: `echo "\${variable.NOT_A_SECRET}" > "${OUT}"` } });
         const res = await startSession(request);
         expect(res.status()).toBe(400);

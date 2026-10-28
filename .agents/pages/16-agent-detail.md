@@ -3,7 +3,7 @@
 **Route:** `/agents/:id` • **Component:** `packages/web/src/pages/AgentDetail.tsx` • **Slug:** `agents`
 
 ## Purpose
-Edit an agent's configuration, prompt, quality checklist, procedural memory, and inspect its tests, measured performance and runs. 6 tabs via `?tab=` query param. Agents carry no schedules, handoff rules, round caps or git-delivery flags: a Task's run handles worktree, commit, push and PR. Per-agent Allowed Tools picker was removed by B14 (`d3cc9bf`) — spawned CLIs inherit Owner's user-level MCP config; the constitution carries `FORBIDDEN_TOOLS_SECTION` as the safety net.
+Edit an agent's configuration, prompt, quality checklist, procedural memory, and inspect its tests, measured performance and runs. 6 tabs via `?tab=` query param. Agents carry no handoff rules or round caps. A Task's run handles worktree, commit, push and PR, gated by the agent's schedule and git-delivery flags (Overview → Schedule & delivery, ADR 0033). Per-agent Allowed Tools picker was removed by B14 (`d3cc9bf`) — spawned CLIs inherit Owner's user-level MCP config; the constitution carries `FORBIDDEN_TOOLS_SECTION` as the safety net.
 
 ## States
 - **Loading**: centered spinner

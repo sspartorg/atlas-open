@@ -4,6 +4,7 @@ import { writeFileSync, mkdirSync, existsSync, createWriteStream, rmSync } from 
 import { resolve, join, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fakeGithubGitEnv } from './helpers/fake-github.js';
+import { E2E_API_PORT, E2E_WEB_PORT } from './helpers/api.js';
 
 const execFileP = promisify(execFile);
 // Playwright loads globalSetup as ESM in 1.40+; __dirname isn't
@@ -24,13 +25,13 @@ const __dirname = dirname(__filename);
 const E2E_DB = 'atlas_open_e2e';
 // The dev postgres container (docker compose `atlas-open-postgres`, host port 5600).
 const dbUrl = (dbName: string) => `postgres://atlas:atlas@localhost:5600/${dbName}`;
-const API_PORT = 7001;
+const API_PORT = E2E_API_PORT;
 // 2026-06-23 — moved off 6000 (X11 server port) because it sits on the
 // WHATWG "bad ports" blocklist. Node's undici-backed fetch refuses it
 // (`bad port` error) and bundled Chromium blocks it as ERR_UNSAFE_PORT,
 // so both the global-setup HTTP probe AND the actual test browser
 // navigation would otherwise fail before any spec runs.
-const WEB_PORT = 7010;
+const WEB_PORT = E2E_WEB_PORT;
 const REPO_ROOT = resolve(__dirname, '..');
 // The API under test gets its own data dir and env file: Reset Workspace
 // wipes <dataDir> and the Environment tab rewrites the env

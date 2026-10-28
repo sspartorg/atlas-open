@@ -406,7 +406,7 @@ export function StartSessionDialog({
                     onClick={handleStart}
                     disabled={!projectId || isPending}
                     startIcon={
-                        isPending ? <CircularProgress size={16} color="inherit" /> : <AddRounded />
+                        isPending ? <CircularProgress aria-hidden size={16} color="inherit" /> : <AddRounded />
                     }
                     sx={{
                         textTransform: 'none',

@@ -4,7 +4,7 @@ import { goto } from '../helpers/nav.js';
 // The e2e seed creates Task ETM-1 ("E2E linked task", in_progress) in the
 // E2E Terminal project, with one sub-task ETM-2 ("E2E seeded sub-task").
 
-const API = 'http://127.0.0.1:7001';
+import { API } from '../helpers/api.js';
 
 test.describe('/tasks/:id', () => {
     test('happy-path: renders Task id and Conversation section', async ({ page }) => {

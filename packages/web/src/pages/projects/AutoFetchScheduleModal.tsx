@@ -484,7 +484,7 @@ export function AutoFetchScheduleModal({ open, project, repo, onClose }: Props) 
                                 disabled={save.isPending}
                                 startIcon={
                                     save.isPending ? (
-                                        <CircularProgress size={14} color="inherit" />
+                                        <CircularProgress aria-hidden size={14} color="inherit" />
                                     ) : (
                                         <CheckCircleOutline sx={{ fontSize: 18 }} />
                                     )

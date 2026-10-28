@@ -310,7 +310,7 @@ export function SharedSecretsTab() {
                         variant="contained"
                         startIcon={
                             save.isPending ? (
-                                <CircularProgress size={14} sx={{ color: ATLAS_PALETTE.white }} />
+                                <CircularProgress aria-hidden size={14} sx={{ color: ATLAS_PALETTE.white }} />
                             ) : (
                                 <SaveRounded sx={{ fontSize: 16 }} />
                             )

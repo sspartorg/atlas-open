@@ -216,6 +216,7 @@ test.describe('/projects/:id', () => {
 
 test.describe('delete project failures', () => {
     test('a purge whose folder cannot be removed ends in "Delete failed" with Try again; a folder outside the workspace is kept', async ({ page, request }) => {
+        test.skip(process.platform === 'win32', 'a read-only parent (chmod 0o555) does not block deletes on Windows');
         // Inside the workspace but in a read-only parent: the purge step fails.
         mkdirSync(join(LOCKED, 'repo'), { recursive: true });
         writeFileSync(join(LOCKED, 'repo', 'file.txt'), 'x');

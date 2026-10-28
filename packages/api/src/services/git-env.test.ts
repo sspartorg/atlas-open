@@ -5,18 +5,34 @@
  * `gitConfigPath !== null ? { GIT_CONFIG_GLOBAL: path } : {}`.
  */
 
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { gitInvokeEnv } from './git-env.js';
+
+/** A fresh git-env (it caches the system config) reading `systemConfig` as /etc/gitconfig. */
+async function withSystemConfig(dir: string, systemConfig: string) {
+    const system = join(dir, 'system-gitconfig');
+    writeFileSync(system, systemConfig);
+    vi.stubEnv('GIT_CONFIG_SYSTEM', system);
+    // The wrapper lands in the data dir; keep it inside this test's dir.
+    vi.stubEnv('ATLAS_DATA_DIR', dir);
+    vi.resetModules();
+    return (await import('./git-env.js')).gitInvokeEnv;
+}
 
 describe('gitInvokeEnv', () => {
     it('returns GCM-silencing env vars without GIT_CONFIG_GLOBAL when path is null', () => {
         const env = gitInvokeEnv(null);
         expect(env['GIT_TERMINAL_PROMPT']).toBe('0');
-        expect(env['GIT_CONFIG_NOSYSTEM']).toBe('1');
         expect(env['GCM_INTERACTIVE']).toBe('Never');
         expect(env['GCM_GUI_PROMPT']).toBe('false');
         expect(env['GCM_MODAL_PROMPT']).toBe('false');
         expect(env['GIT_CONFIG_GLOBAL']).toBeUndefined();
+        // The system config is either wrapped (helper reset) or skipped, never read raw.
+        expect(env['GIT_CONFIG_SYSTEM'] ?? env['GIT_CONFIG_NOSYSTEM']).toBeTruthy();
     });
 
     it('adds GIT_CONFIG_GLOBAL when a config path is provided', () => {
@@ -25,7 +41,67 @@ describe('gitInvokeEnv', () => {
         expect(env['GIT_CONFIG_GLOBAL']).toBe(path);
         // GCM silencers are still set.
         expect(env['GIT_TERMINAL_PROMPT']).toBe('0');
-        expect(env['GIT_CONFIG_NOSYSTEM']).toBe('1');
+    });
+
+    it('keeps the system config at system scope, minus its credential helper', async () => {
+        // Git for Windows' /etc/gitconfig: autocrlf=true and GCM. Skipping the whole
+        // file made clean CRLF checkouts read as dirty.
+        const dir = mkdtempSync(join(tmpdir(), 'atlas-git-env-'));
+        try {
+            const invokeEnv = await withSystemConfig(dir, '[core]\n\tautocrlf = true\n[credential]\n\thelper = manager\n');
+            const global = join(dir, 'global-gitconfig');
+            writeFileSync(global, '[credential]\n\thelper = store\n');
+            vi.stubEnv('GIT_CONFIG_GLOBAL', global);
+            const git = (...args: string[]) =>
+                execFileSync('git', ['-C', dir, ...args], { env: invokeEnv(null), encoding: 'utf8' }).replace(/\r/g, '');
+            git('init', '-q');
+            expect(git('config', 'core.autocrlf')).toBe('true\n');
+            // The empty value drops GCM; the Owner's own global helper still follows it.
+            expect(git('config', '--get-all', 'credential.helper')).toBe('manager\n\nstore\n');
+            // A repo's own setting still beats the system one.
+            git('config', 'core.autocrlf', 'false');
+            expect(git('config', 'core.autocrlf')).toBe('false\n');
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it('writes the wrapper again when something deletes it under a running API', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'atlas-git-env-'));
+        try {
+            const invokeEnv = await withSystemConfig(dir, '[core]\n\tautocrlf = true\n');
+            const wrapper = invokeEnv(null)['GIT_CONFIG_SYSTEM'] as string;
+            rmSync(wrapper);
+            expect(invokeEnv(null)['GIT_CONFIG_SYSTEM']).toBe(wrapper);
+            expect(existsSync(wrapper)).toBe(true);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it('skips the system config on git older than 2.32 (no GIT_CONFIG_SYSTEM there)', async () => {
+        vi.doMock('node:child_process', async (orig) => ({
+            ...(await orig<Record<string, unknown>>()),
+            execFileSync: () => 'git version 2.25.1\n',
+        }));
+        try {
+            vi.resetModules();
+            const { gitInvokeEnv: invokeEnv } = await import('./git-env.js');
+            expect(invokeEnv(null)).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1' });
+            expect(invokeEnv(null)['GIT_CONFIG_SYSTEM']).toBe(process.env['GIT_CONFIG_SYSTEM']);
+        } finally {
+            vi.doUnmock('node:child_process');
+        }
+    });
+
+    it('skips the system config when there is none', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'atlas-git-env-'));
+        try {
+            const invokeEnv = await withSystemConfig(dir, '');
+            expect(invokeEnv(null)['GIT_CONFIG_NOSYSTEM']).toBe('1');
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     afterEach(() => vi.unstubAllEnvs());

@@ -306,7 +306,7 @@ test.describe('Repos tab', () => {
         await expect(dialog).toContainText('1 uncommitted files will be stashed to .git/atlas-stash/ before pulling. Restore them afterwards with git stash pop.');
         await dialog.getByRole('button', { name: 'Stash & pull' }).click();
         await expect(dialog.getByText('Pulled from remote', { exact: true })).toBeVisible({ timeout: 30_000 });
-        await expect(dialog.getByText(/Your stashed files are kept in .*\.git\/atlas-stash\//)).toBeVisible();
+        await expect(dialog.getByText(/Your stashed files are kept in .*\.git[\\/]atlas-stash[\\/]/)).toBeVisible();
         expect(existsSync(join(git.clone, 'upstream-2.txt'))).toBe(true);
     });
 

@@ -176,9 +176,10 @@ describe('agentRunEnv', () => {
             const env = agentRunEnv('claude', 'm', cfg);
             const get = (key: string) =>
                 execFileSync('git', ['config', '--get-all', key], { env, cwd: dir, encoding: 'utf8' }).replace(/\n$/, '').split('\n');
-            // `--get-all` lists every value; the reset leaves only the empty one last.
-            expect(get('credential.helper')).toEqual(['store', '']);
-            expect(get('http.extraheader')).toEqual(['AUTHORIZATION: basic c2VjcmV0', '']);
+            // `--get-all` lists every value (this machine's system ones first, if
+            // any); the reset leaves the empty one last, after the config's own.
+            expect(get('credential.helper').slice(-2)).toEqual(['store', '']);
+            expect(get('http.extraheader').slice(-2)).toEqual(['AUTHORIZATION: basic c2VjcmV0', '']);
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }

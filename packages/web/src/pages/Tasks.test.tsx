@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../test-setup.js';
 import { defaultHandlers } from '../test-utils/mock-handlers.js';
 import { renderWithProviders } from '../test-utils/renderWithProviders.js';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Tasks } from './Tasks.js';
 import { makeProject, makeTaskListItem, makeAgent } from '../test-utils/factories.js';
 
@@ -519,5 +520,81 @@ describe('Tasks page', () => {
         } finally {
             window.matchMedia = origMatchMedia;
         }
+    });
+
+    it('after Back, the next filter pick builds on the entry Back went to', async () => {
+        // The sidebar link pushes /tasks with no state while the page stays mounted.
+        function Nav() {
+            const navigate = useNavigate();
+            const { search } = useLocation();
+            return (
+                <>
+                    <output data-testid="search">{search}</output>
+                    <button onClick={() => navigate('/tasks')}>link</button>
+                    <button onClick={() => navigate(-1)}>back</button>
+                </>
+            );
+        }
+        async function pickStatus(name: string) {
+            fireEvent.click(screen.getByText('Status:'));
+            const items = await screen.findAllByRole('menuitem');
+            fireEvent.click(items.find((el) => el.textContent?.trim().startsWith(name)) as HTMLElement);
+        }
+        const search = () => screen.getByTestId('search').textContent;
+        server.use(...baseHandlers());
+        renderWithProviders(<><Tasks /><Nav /></>, { initialEntries: ['/tasks'] });
+        await screen.findByText('All');
+        await pickStatus('Ready');
+        await waitFor(() => expect(search()).toBe('?status=ready'));
+        fireEvent.click(screen.getByText('link'));
+        await waitFor(() => expect(search()).toBe(''));
+        await pickStatus('Draft');
+        await waitFor(() => expect(search()).toBe('?status=draft'));
+        fireEvent.click(screen.getByText('back'));
+        await waitFor(() => expect(search()).toBe('?status=ready'));
+        fireEvent.click(screen.getByText('Assigned to me'));
+        await waitFor(() => expect(search()).toBe('?status=ready&filter=mine'));
+    });
+
+    it('after Back twice then Forward, the next pick builds on the entry Forward went to', async () => {
+        // Three entries (ready, draft, done) via the sidebar link; Forward lands
+        // on draft, whose pick is newer than ready's and older than done's.
+        function Nav() {
+            const navigate = useNavigate();
+            const { search } = useLocation();
+            return (
+                <>
+                    <output data-testid="search">{search}</output>
+                    <button onClick={() => navigate('/tasks')}>link</button>
+                    <button onClick={() => navigate(-1)}>back</button>
+                    <button onClick={() => navigate(1)}>forward</button>
+                </>
+            );
+        }
+        async function pickStatus(name: string) {
+            fireEvent.click(screen.getByText('Status:'));
+            const items = await screen.findAllByRole('menuitem');
+            fireEvent.click(items.find((el) => el.textContent?.trim().startsWith(name)) as HTMLElement);
+        }
+        const search = () => screen.getByTestId('search').textContent;
+        server.use(...baseHandlers());
+        renderWithProviders(<><Tasks /><Nav /></>, { initialEntries: ['/tasks'] });
+        await screen.findByText('All');
+        for (const [name, value] of [['Ready', 'ready'], ['Draft', 'draft'], ['Done', 'done']]) {
+            if (value !== 'ready') {
+                fireEvent.click(screen.getByText('link'));
+                await waitFor(() => expect(search()).toBe(''));
+            }
+            await pickStatus(name as string);
+            await waitFor(() => expect(search()).toBe(`?status=${value}`));
+        }
+        fireEvent.click(screen.getByText('back'));
+        await waitFor(() => expect(search()).toBe('?status=draft'));
+        fireEvent.click(screen.getByText('back'));
+        await waitFor(() => expect(search()).toBe('?status=ready'));
+        fireEvent.click(screen.getByText('forward'));
+        await waitFor(() => expect(search()).toBe('?status=draft'));
+        fireEvent.click(screen.getByText('Assigned to AI'));
+        await waitFor(() => expect(search()).toBe('?status=draft&filter=ai'));
     });
 });

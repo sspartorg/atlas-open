@@ -1053,7 +1053,7 @@ export function ProjectEnvSecretsModal({ open, project, displayId, onClose }: Pr
                             }
                             startIcon={
                                 save.isPending ? (
-                                    <CircularProgress size={14} color="inherit" />
+                                    <CircularProgress aria-hidden size={14} color="inherit" />
                                 ) : null
                             }
                             sx={{

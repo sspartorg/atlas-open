@@ -152,7 +152,7 @@ export function ConfirmDeleteModal({ open, entityKind, entityTitle, onConfirm, o
                         color="error"
                         startIcon={
                             busy ? (
-                                <CircularProgress size={14} color="inherit" />
+                                <CircularProgress aria-hidden size={14} color="inherit" />
                             ) : (
                                 <DeleteOutlineRounded />
                             )

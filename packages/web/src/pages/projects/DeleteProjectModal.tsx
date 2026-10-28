@@ -723,7 +723,7 @@ export function DeleteProjectModal({ open, project, displayId, onClose }: Props)
                                 variant="contained"
                                 color="error"
                                 disabled
-                                startIcon={<CircularProgress size={14} color="inherit" />}
+                                startIcon={<CircularProgress aria-hidden size={14} color="inherit" />}
                                 sx={{ textTransform: 'none', fontWeight: 600 }}
                             >
                                 Deleting…

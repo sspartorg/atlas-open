@@ -306,7 +306,7 @@ export function StartStandaloneSessionDialog({
                     onClick={handleStart}
                     disabled={!folderPath.trim() || isPending}
                     startIcon={
-                        isPending ? <CircularProgress size={16} color="inherit" /> : <AddRounded />
+                        isPending ? <CircularProgress aria-hidden size={16} color="inherit" /> : <AddRounded />
                     }
                     sx={{
                         textTransform: 'none',

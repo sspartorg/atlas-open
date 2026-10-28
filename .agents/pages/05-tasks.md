@@ -24,6 +24,7 @@ List every Task across all projects (ADR 0015: a Task is the top-level item; its
 - Assignee chips — All / Assigned to me (no agent) / Assigned to AI; counts scoped to the other active filters
 - **By project** dropdown, **Status** dropdown (unified `IssueStatus` set; first option **Any**) — both are buttons (Enter / Space open them); the project chip shows the picked project. **Search tasks** field matches id, title and description (`/` focuses it)
 - State lives in the URL (`?project` by name — an id also works, `?status`, `?filter`, `?q`)
+- Each pick builds on the last one written, not on the render's params: the URL changes before the re-render commits, so quick picks (Assigned to AI, then All, then a Status) never bring a cleared filter back.
 
 **TaskTable**
 - Columns: ID, Task, Sub-tasks (`sub_task_count`), Reporter, Assignee, Status, Updated; ID / Task / Updated sortable

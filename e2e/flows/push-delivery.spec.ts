@@ -1,6 +1,7 @@
 import { createECDH, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:https';
+import { fileURLToPath } from 'node:url';
 import { test, expect, type APIRequestContext } from '@playwright/test';
 import { goto } from '../helpers/nav.js';
 import { API, SEEDED_AGENT, apiGet, closeTask, createTask } from '../helpers/api.js';
@@ -16,7 +17,7 @@ import { sql } from '../helpers/db.js';
 const PUSH_PORT = 7094;
 const ENDPOINT = `https://127.0.0.1:${PUSH_PORT}/push/e2e-device`;
 // Written by global-setup, which also makes the API trust it.
-const TLS = new URL('../../e2e-logs/push-tls/', import.meta.url).pathname;
+const TLS = fileURLToPath(new URL('../../e2e-logs/push-tls/', import.meta.url));
 
 interface Received {
     headers: Record<string, string | string[] | undefined>;

@@ -349,7 +349,7 @@ function ConfirmRemoveModelDialog({
                         color="error"
                         startIcon={
                             busy ? (
-                                <CircularProgress size={14} color="inherit" />
+                                <CircularProgress aria-hidden size={14} color="inherit" />
                             ) : (
                                 <DeleteOutlineRounded />
                             )

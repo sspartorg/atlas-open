@@ -562,7 +562,7 @@ export function Onboarding() {
                                     disabled={submitState === 'submitting'}
                                     endIcon={
                                         submitState === 'submitting' ? (
-                                            <CircularProgress size={14} color="inherit" />
+                                            <CircularProgress aria-hidden size={14} color="inherit" />
                                         ) : (
                                             <Check />
                                         )

@@ -325,7 +325,7 @@ export function StopSessionModal({ open, sessionId, onClose, onClosed }: Props) 
                                     commitMessage.trim().length === 0)
                             }
                             startIcon={
-                                stop.isPending ? <CircularProgress size={16} /> : <StopRounded />
+                                stop.isPending ? <CircularProgress aria-hidden size={16} /> : <StopRounded />
                             }
                         >
                             {stop.isPending

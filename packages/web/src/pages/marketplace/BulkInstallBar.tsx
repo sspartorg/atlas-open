@@ -64,7 +64,7 @@ export function BulkInstallBar({ count, busy, onClear, onSelectAll, onAdd }: Pro
                 variant="contained"
                 onClick={onAdd}
                 disabled={busy}
-                startIcon={busy ? <CircularProgress size={14} color="inherit" /> : undefined}
+                startIcon={busy ? <CircularProgress aria-hidden size={14} color="inherit" /> : undefined}
                 sx={{
                     textTransform: 'none',
                     fontWeight: 600,

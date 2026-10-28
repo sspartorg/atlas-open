@@ -14,7 +14,7 @@ import { goto } from '../helpers/nav.js';
 // and the diff endpoint that the Accept-Upgrade modal calls. A future spec
 // can inject an upgrade state via a catalog version bump in the seed.
 
-const API = 'http://127.0.0.1:7001';
+import { API } from '../helpers/api.js';
 
 test.describe('Marketplace upgrade flow', () => {
     // Test 1: GET /api/marketplace/agents returns Solo Engineer with version info
