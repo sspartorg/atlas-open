@@ -4,6 +4,7 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import ButtonBase from '@mui/material/ButtonBase';
 import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from '../../components/ButtonSpinner.js';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
@@ -332,7 +333,7 @@ function SetupScriptsDialog({
                             disabled={!dirty || update.isPending}
                             startIcon={
                                 update.isPending ? (
-                                    <CircularProgress aria-hidden size={14} color="inherit" />
+                                    <ButtonSpinner />
                                 ) : null
                             }
                             sx={{ textTransform: 'none', fontWeight: 600 }}

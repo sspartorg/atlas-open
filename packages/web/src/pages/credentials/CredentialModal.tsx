@@ -14,7 +14,7 @@ import Radio from '@mui/material/Radio';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import RadioGroup from '@mui/material/RadioGroup';
 import Alert from '@mui/material/Alert';
-import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from '../../components/ButtonSpinner.js';
 import VpnKeyOutlined from '@mui/icons-material/VpnKeyOutlined';
 import VisibilityOutlined from '@mui/icons-material/VisibilityOutlined';
 import VisibilityOffOutlined from '@mui/icons-material/VisibilityOffOutlined';
@@ -893,7 +893,7 @@ export function CredentialModal({ open, mode, onClose }: Props) {
                                     disabled={isPending}
                                     endIcon={
                                         isPending ? (
-                                            <CircularProgress aria-hidden size={14} color="inherit" />
+                                            <ButtonSpinner />
                                         ) : (
                                             <CheckCircleOutline />
                                         )

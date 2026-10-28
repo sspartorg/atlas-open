@@ -1,28 +1,28 @@
 # Data Model
 
-> **2026-05 â€” Postgres migration in progress.** The DB engine is now Postgres 16 (docker compose service `atlas-open-postgres`, host port 5600 â†’ container port 5432). Schema is a single Knex migration: `packages/api/src/db/migrations/001_baseline.ts`. Items live in a **single `items` table with a `type` discriminator** and a `parent_id`/`parent_type` pair. Since migration 037 (ADR 0015, `docs/adr/0015-one-task-one-pr.md`) there are exactly two kinds: `task` (top level) and `sub_task` (a Task's child); epics became Tasks and stories / bugs / sub-bugs became sub-tasks. The legacy polymorphic side tables (`comments`, `issue_events`, `agent_runs`, `notifications`) now use a single `item_id` FK to `items` with `ON DELETE CASCADE`. The link table is renamed `item_links` and carries a `relation_type` column (`relates_to` or `depends_on`). The entity descriptions below document the per-kind API contract (`/api/tasks`, `/api/sub-tasks`); the storage shape is unified.
+> **2026-05 — Postgres migration in progress.** The DB engine is now Postgres 16 (docker compose service `atlas-open-postgres`, host port 5600 → container port 5432). Schema is a single Knex migration: `packages/api/src/db/migrations/001_baseline.ts`. Items live in a **single `items` table with a `type` discriminator** and a `parent_id`/`parent_type` pair. Since migration 037 (ADR 0015, `docs/adr/0015-one-task-one-pr.md`) there are exactly two kinds: `task` (top level) and `sub_task` (a Task's child); epics became Tasks and stories / bugs / sub-bugs became sub-tasks. The legacy polymorphic side tables (`comments`, `issue_events`, `agent_runs`, `notifications`) now use a single `item_id` FK to `items` with `ON DELETE CASCADE`. The link table is renamed `item_links` and carries a `relation_type` column (`relates_to` or `depends_on`). The entity descriptions below document the per-kind API contract (`/api/tasks`, `/api/sub-tasks`); the storage shape is unified.
 
 **`priority` lives on both item kinds** (`low | normal | high | urgent`, default `'normal'`); the detail-page right rail's `<DetailsRailCard>` renders a priority chip wired to the kind's update mutation.
 
-**2026-05-19 â€” `depends_on` UI is live.** `item_links.relation_type` partitions into "Blocked by" (depends_on) and "Relates to" (relates_to) sections on every item detail page (`<RelatedItemsCard>`). The server enforces blocker semantics in `services/dependency-guard.ts` â€” transitions into `in_progress` / `in_review` fail with "blocked by" errors until upstream items complete.
+**2026-05-19 — `depends_on` UI is live.** `item_links.relation_type` partitions into "Blocked by" (depends_on) and "Relates to" (relates_to) sections on every item detail page (`<RelatedItemsCard>`). The server enforces blocker semantics in `services/dependency-guard.ts` — transitions into `in_progress` / `in_review` fail with "blocked by" errors until upstream items complete.
 
 Authoritative types live in `packages/shared/src/types/index.ts` (`ITask`, `ITaskListItem`, `ISubTask`, `ITaskFullResponse`, `ISubTaskFullResponse`, `IIssueTreeNode` / `IIssueTreeResponse`) plus the new `packages/shared/src/items/types.ts` (`IItem`, `IItemLink`, `ItemRelation`). Constants and label maps in `packages/shared/src/constants/index.ts`. Status transitions in `packages/shared/src/status-machine/index.ts`; depends-on enforcement helper in `packages/shared/src/status-machine/blockers.ts` (`assertCanStart`). Zod validators in `packages/shared/src/schemas/index.ts`. Migrations in `packages/api/src/db/migrations/001_baseline.ts`.
 
-**Naming rule:** API responses use snake_case (matching DB columns). TypeScript interfaces use snake_case field names too â€” there's no transformation layer. `IProject`, `IAgent` (`I` prefix), TypeScript types use PascalCase.
+**Naming rule:** API responses use snake_case (matching DB columns). TypeScript interfaces use snake_case field names too — there's no transformation layer. `IProject`, `IAgent` (`I` prefix), TypeScript types use PascalCase.
 
 ## Depends-on relation (new)
 
 Items can be linked via `item_links(from_id, to_id, relation_type)`:
-- **`relates_to`** â€” semantically undirected. The service normalizes pairs so `(A,B)` and `(B,A)` collapse onto one row. Surfaces a "Relates to" section on the detail page.
-- **`depends_on`** â€” strictly directed. `from depends_on to` means "from is blocked by to". Cycle detection (recursive CTE) rejects edges that would close a `depends_on` cycle. While any blocker isn't `done`, the dependency-guard refuses transitions out of `ready`/`draft` to `in_progress`/`in_review` (escalations to `waiting_for_info` are still allowed). When the last blocker resolves, `notifyDependentsUnblocked(itemId)` emits an `unblocked` issue_event on every dependent.
+- **`relates_to`** — semantically undirected. The service normalizes pairs so `(A,B)` and `(B,A)` collapse onto one row. Surfaces a "Relates to" section on the detail page.
+- **`depends_on`** — strictly directed. `from depends_on to` means "from is blocked by to". Cycle detection (recursive CTE) rejects edges that would close a `depends_on` cycle. While any blocker isn't `done`, the dependency-guard refuses transitions out of `ready`/`draft` to `in_progress`/`in_review` (escalations to `waiting_for_info` are still allowed). When the last blocker resolves, `notifyDependentsUnblocked(itemId)` emits an `unblocked` issue_event on every dependent.
 - **B04 — depends_on is also hard-gated at run start.** `workflow-engine.startTaskRun` calls `assertDepsAllDoneForDispatch(itemId, agentId)` once, before inserting the `workflow_runs` row. If any `depends_on` target is non-`done` (including `in_review` — `done` is the only terminal status; there is no `closed`), it throws `DependenciesNotReadyError` and records a `dispatch_blocked` issue_event on the item. The dispatcher never picks such a Task (`listDispatchQueue` marks it `dependency`-blocked), and `POST /api/workflow-runs/:id/resume` surfaces it as `409 {details:{blockers}}`. A running Task is not re-gated, and engine status writes (`in_progress`, `in_review`, `done`) bypass `assertNoOpenBlockers`. Companion change in `services/prompt-builder.ts`: the `## Related items → ### Depends on` section bakes each dep's description + acceptance_criteria into the prompt up-front so the agent doesn't need to MCP-fetch the dep mid-run.
 
-**B05 â€” who creates links, and how.** Link creation has two paths and **no runner-side auto-link**:
+**B05 — who creates links, and how.** Link creation has two paths and **no runner-side auto-link**:
 
 1. **UI path (Owner-driven).** The detail-page `<RelatedItemsCard>` posts to `POST /api/issues/:type/:id/links`, which calls `services/item-links.ts::itemLinks.create(fromId, toId, relation)`. That service runs cycle detection on `depends_on`, normalises pair order on `relates_to`, is idempotent (re-creating returns the existing row), and writes an `item_link_created` activity event on **both** endpoints.
-2. **Agent path (discretionary).** Agents call the MCP `update_item` tool with `action: 'add_link'` (`packages/mcp/src/tools/items.ts`), which hits the same REST route as the UI. Link creation is **at the agent's discretion based on the tool description** â€” performer and reviewer prompts do not carry a Working Protocol bullet instructing the agent to link (contrast: `agent_memory` `op: 'update'` does carry such a bullet â€” see `.agents/api-surface.md`). An agent that notices a missing dependency may choose to call `add_link`; nothing in the prompt or runner mandates it. Per-agent tool gating was removed post-`253c43d` / B14; the constitution's `FORBIDDEN_TOOLS_SECTION` is the only runtime check.
+2. **Agent path (discretionary).** Agents call the MCP `update_item` tool with `action: 'add_link'` (`packages/mcp/src/tools/items.ts`), which hits the same REST route as the UI. Link creation is **at the agent's discretion based on the tool description** — performer and reviewer prompts do not carry a Working Protocol bullet instructing the agent to link (contrast: `agent_memory` `op: 'update'` does carry such a bullet — see `.agents/api-surface.md`). An agent that notices a missing dependency may choose to call `add_link`; nothing in the prompt or runner mandates it. Per-agent tool gating was removed post-`253c43d` / B14; the constitution's `FORBIDDEN_TOOLS_SECTION` is the only runtime check.
 
-The read-side is also worth noting: `services/prompt-builder.ts::buildLinkedItemsSection(itemId)` injects every existing link (`### Depends on`, `### Blocks`, `### Relates to`) into the calling prompt up-front, so the agent doesn't need to call `listItemLinks` mid-run to see what's already attached. There is no post-run heuristic that parses agent output to *infer* new links â€” the only writers are the UI route and the `createItemLink` MCP tool.
+The read-side is also worth noting: `services/prompt-builder.ts::buildLinkedItemsSection(itemId)` injects every existing link (`### Depends on`, `### Blocks`, `### Relates to`) into the calling prompt up-front, so the agent doesn't need to call `listItemLinks` mid-run to see what's already attached. There is no post-run heuristic that parses agent output to *infer* new links — the only writers are the UI route and the `createItemLink` MCP tool.
 
 ---
 
@@ -54,94 +54,94 @@ Fields (`IAgent`): `id, name, category, cli, model, effort, framework, prompt_md
 > ⚠️ **An empty required checklist is an automatic pass.** `agent-runner-outcome-routing.ts` returns `apply_on_pass` when `requiredChecklist.length === 0`, so an agent with no rows can never fail its gate. Rows are also **self-reported**: the router trusts `item.passed` from the agent's `atlas-outcome` block and never re-runs the guardrail script whose exit code the row describes. A catalog checklist change only reaches installed agents when `manifest.json`'s `version` is bumped — `services/marketplace.ts:224-225` gates `upgrade_available` on `installed_version < catalogVersion` — and the Owner then accepts the `checklists` field.
 
 
-### IRole (A08 â€” SDLC role catalog)
-**Why this entity exists**: A lookup table of agent roles (10 rows seeded by `001_baseline.sql`), the FK target of `agents.role_id`. Read by the Agents page Role filter chip and the AgentCard subtitle fallback; edited by the Owner via `PATCH /api/roles/:id` to update curated default prompts without touching any existing agent. The catalog *shape* is governed by the `SdlcRole` enum in `@atlas/shared` â€” runtime rows mirror that enum, they don't extend it.
+### IRole (A08 — SDLC role catalog)
+**Why this entity exists**: A lookup table of agent roles (10 rows seeded by `001_baseline.sql`), the FK target of `agents.role_id`. Read by the Agents page Role filter chip and the AgentCard subtitle fallback; edited by the Owner via `PATCH /api/roles/:id` to update curated default prompts without touching any existing agent. The catalog *shape* is governed by the `SdlcRole` enum in `@atlas/shared` — runtime rows mirror that enum, they don't extend it.
 
 Fields: `id, label, description, default_prompt_md, default_status, sort_order, created_at, updated_at`
 
 - `id` is the slug (e.g. `'engineer'`), PRIMARY KEY, FK target for `agents.role_id`.
-- `default_status` âˆˆ `'active' | 'inactive'` (DB CHECK). **Seed-time policy only** â€” the catalog never re-disables a runtime-enabled agent.
+- `default_status` ∈ `'active' | 'inactive'` (DB CHECK). **Seed-time policy only** — the catalog never re-disables a runtime-enabled agent.
 - `default_prompt_md` is the role's curated starter prompt. The runner reads from the agent row, never from the catalog, so edits to the role default don't propagate to existing agents.
 
 
 ### IAgentPromptVersion
-**Why this entity exists**: Every `prompt_md` edit on an agent gets a row here, so the Prompt tab's "Version history" can survive across machines and the Owner can revert a regression. The currently-active version is whatever `agents.prompt_version` points at; older rows are kept indefinitely. Revert never mutates a historical row â€” it appends a NEW row at the next version whose `reverted_from` links back to the source.
+**Why this entity exists**: Every `prompt_md` edit on an agent gets a row here, so the Prompt tab's "Version history" can survive across machines and the Owner can revert a regression. The currently-active version is whatever `agents.prompt_version` points at; older rows are kept indefinitely. Revert never mutates a historical row — it appends a NEW row at the next version whose `reverted_from` links back to the source.
 
 Fields: `id, agent_id, version, body_md, edited_by, reverted_from, created_at`
 
-- `agent_id` FK â†’ `agents(id)` ON DELETE CASCADE
+- `agent_id` FK → `agents(id)` ON DELETE CASCADE
 - `(agent_id, kind, version)` is UNIQUE (kind partitions the performer vs reviewer histories under the two-persona model)
-- `kind` âˆˆ `'performer' | 'reviewer'` (DB CHECK), DEFAULT `'performer'`. Added by migration 020 alongside the `agents.reviewer_prompt_version` column.
+- `kind` ∈ `'performer' | 'reviewer'` (DB CHECK), DEFAULT `'performer'`. Added by migration 020 alongside the `agents.reviewer_prompt_version` column.
 - `reverted_from` is null on first-time saves, set to the source version on revert
 
 ### IAgentMemory
-**Why this entity exists**: Procedural memory captures *self-corrections* â€” what the agent learned from past runs ("don't bounce empty AC", "prefer concrete actors over 'user'"). It lives next to the agent rather than in the prompt body so the Owner can edit it without churning the prompt version. One row per agent (`agent_id` is the PK), so reads never have to branch on "first-ever access" â€” `GET /agents/:id/memory` auto-creates an empty row.
+**Why this entity exists**: Procedural memory captures *self-corrections* — what the agent learned from past runs ("don't bounce empty AC", "prefer concrete actors over 'user'"). It lives next to the agent rather than in the prompt body so the Owner can edit it without churning the prompt version. One row per agent (`agent_id` is the PK), so reads never have to branch on "first-ever access" — `GET /agents/:id/memory` auto-creates an empty row.
 
 Fields: `agent_id, body_md, version, source, last_run_id, runs_since_regen, updated_at`
 
-- `agent_id` FK â†’ `agents(id)` ON DELETE CASCADE
-- `source` âˆˆ `ai-generated | manual-edit` â€” flips back to `ai-generated` on every regenerate, flips to `manual-edit` on every PUT.
+- `agent_id` FK → `agents(id)` ON DELETE CASCADE
+- `source` ∈ `ai-generated | manual-edit` — flips back to `ai-generated` on every regenerate, flips to `manual-edit` on every PUT.
 - `version` increments on each PUT and each regenerate
-- `last_run_id` FK â†’ `agent_runs(id)` ON DELETE SET NULL; the run that triggered the most recent regeneration (null until first regenerate, or after that run is deleted)
-- **Theme 08 â€” `runs_since_regen`**: counter incremented per completed/errored run (errors count double â€” they carry more signal). When this reaches `agents.memory_cadence`, `maybeRegenerateAfterRun()` fires a cadence regen and resets to 0.
+- `last_run_id` FK → `agent_runs(id)` ON DELETE SET NULL; the run that triggered the most recent regeneration (null until first regenerate, or after that run is deleted)
+- **Theme 08 — `runs_since_regen`**: counter incremented per completed/errored run (errors count double — they carry more signal). When this reaches `agents.memory_cadence`, `maybeRegenerateAfterRun()` fires a cadence regen and resets to 0.
 
-### Theme 08 â€” Memory boundary rule, lifecycle, and audit
+### Theme 08 — Memory boundary rule, lifecycle, and audit
 
 **Memory boundary** (`MEMORY_BOUNDARY_RULE` const in `services/agent-memory.ts`, embedded into the regenerate prompt and the `agent_memory` MCP tool description verbatim):
 
-> Memory is for *behavioral generalizations* of how the agent should approach future similar work â€” process, style, anti-patterns, escalation triggers. It is NOT for product or project facts. Test: "would this fact be just as true if a different item or different project hit this code path?" If yes â†’ memory. If tied to project X / item Y / specific user â†’ does NOT belong; project-specific facts go in item comments or spec_md.
+> Memory is for *behavioral generalizations* of how the agent should approach future similar work — process, style, anti-patterns, escalation triggers. It is NOT for product or project facts. Test: "would this fact be just as true if a different item or different project hit this code path?" If yes → memory. If tied to project X / item Y / specific user → does NOT belong; project-specific facts go in item comments or spec_md.
 
-**Memory lifecycle (Theme 08)** â€” four triggers fire memory writes:
+**Memory lifecycle (Theme 08)** — four triggers fire memory writes:
 
-1. **Manual** â€” Owner clicks "Regenerate from runs" in the Memory tab, or the POST `/api/agents/:id/memory/regenerate` route is called directly.
-2. **Cadence** â€” `agent-runner.completeRun/errorRun` calls `agentMemoryService.maybeRegenerateAfterRun(...)`. It increments `runs_since_regen` (by 2 on error, by 1 on success), and fires regen when the count reaches `agents.memory_cadence`. Counter resets on regen.
-3. **High-signal** â€” `maybeRegenerateAfterRun` also scans the most recent Owner comment on the run's item for `[lesson:]` or `[memory:]` markers. If present, regen fires immediately regardless of cadence.
-4. **A06 â€” Agent self-draft (`mcp_update`)** â€” Working Protocol bullet #5 (performer) and the symmetric "End-of-run memory draft" section (reviewer) direct agents to call `agent_memory` (`op: 'update'`, `mode: 'append'`) when they noticed a *generic behavioral lesson*. Agents only fire it when warranted; the cadence regenerator is the safety net for runs that don't. The memory tool is the MCP `agent_memory` tool (`op: 'get' | 'update'`).
+1. **Manual** — Owner clicks "Regenerate from runs" in the Memory tab, or the POST `/api/agents/:id/memory/regenerate` route is called directly.
+2. **Cadence** — `agent-runner.completeRun/errorRun` calls `agentMemoryService.maybeRegenerateAfterRun(...)`. It increments `runs_since_regen` (by 2 on error, by 1 on success), and fires regen when the count reaches `agents.memory_cadence`. Counter resets on regen.
+3. **High-signal** — `maybeRegenerateAfterRun` also scans the most recent Owner comment on the run's item for `[lesson:]` or `[memory:]` markers. If present, regen fires immediately regardless of cadence.
+4. **A06 — Agent self-draft (`mcp_update`)** — Working Protocol bullet #5 (performer) and the symmetric "End-of-run memory draft" section (reviewer) direct agents to call `agent_memory` (`op: 'update'`, `mode: 'append'`) when they noticed a *generic behavioral lesson*. Agents only fire it when warranted; the cadence regenerator is the safety net for runs that don't. The memory tool is the MCP `agent_memory` tool (`op: 'get' | 'update'`).
 
 `regenerate()` acquires a session-scoped `pg_advisory_lock` keyed on the agent id so two regens for the same agent can't race. The second concurrent call no-ops and returns the current memory row.
 
-**Memory writes from MCP** â€” the `agent_memory` MCP tool (`op: 'update'`) supports two modes:
-- `mode='replace'` (default) â€” overwrites the whole body via PUT; equivalent to the legacy behaviour.
-- `mode='append'` â€” surgical append of a single bullet under `## Course corrections`. Calls `agentMemoryService.appendLesson(...)` which bumps `version`, audits with `trigger='mcp_update'`, and does NOT reset the cadence counter.
+**Memory writes from MCP** — the `agent_memory` MCP tool (`op: 'update'`) supports two modes:
+- `mode='replace'` (default) — overwrites the whole body via PUT; equivalent to the legacy behaviour.
+- `mode='append'` — surgical append of a single bullet under `## Course corrections`. Calls `agentMemoryService.appendLesson(...)` which bumps `version`, audits with `trigger='mcp_update'`, and does NOT reset the cadence counter.
 
-**A06 â€” soft boundary-rule filter** â€” every audit row carries `boundary_flags: string[]` populated by `detectBoundaryViolations()` against the new body. Flags: `item_id` (matches `epic_â€¦|story_â€¦|sub-task_â€¦|sub-bug_â€¦|bug_â€¦|task_â€¦`), `agent_id` (`agent-*`), `project_id` (`proj_â€¦|project_â€¦`), `run_id` (UUID). Soft â€” memory still persists (Owner's choice); the Memory tab renders an amber "BOUNDARY" chip on non-empty rows so drift is visible. Heuristic only â€” no DB-side reject.
+**A06 — soft boundary-rule filter** — every audit row carries `boundary_flags: string[]` populated by `detectBoundaryViolations()` against the new body. Flags: `item_id` (matches `epic_…|story_…|sub-task_…|sub-bug_…|bug_…|task_…`), `agent_id` (`agent-*`), `project_id` (`proj_…|project_…`), `run_id` (UUID). Soft — memory still persists (Owner's choice); the Memory tab renders an amber "BOUNDARY" chip on non-empty rows so drift is visible. Heuristic only — no DB-side reject.
 
 ### IMemoryRegeneration (Theme 08 audit log)
 
-**Why this entity exists**: The Memory tab shows a sparkline of when memory shifted and by how much. The audit row captures every regen â€” trigger source, version delta, byte-diff metrics â€” so the Owner can tell at a glance whether the agent is learning healthily (regular cadence rows + occasional high-signal) or stuck (no rows in weeks despite many runs).
+**Why this entity exists**: The Memory tab shows a sparkline of when memory shifted and by how much. The audit row captures every regen — trigger source, version delta, byte-diff metrics — so the Owner can tell at a glance whether the agent is learning healthily (regular cadence rows + occasional high-signal) or stuck (no rows in weeks despite many runs).
 
 Fields: `id, agent_id, run_id, trigger, prev_version, new_version, prev_body_hash, new_body_hash, chars_added, chars_removed, boundary_flags, created_at`
 
-- `trigger` âˆˆ `manual | cadence | high_signal | mcp_update` (CHECK constraint)
-- `run_id` is nullable â€” manual regens have no run; `mcp_update` rows may carry the run id of the agent's session
+- `trigger` ∈ `manual | cadence | high_signal | mcp_update` (CHECK constraint)
+- `run_id` is nullable — manual regens have no run; `mcp_update` rows may carry the run id of the agent's session
 - `prev_body_hash` / `new_body_hash` are sha256 hex; `chars_added` / `chars_removed` approximate the diff via longest-common-prefix (metric-only for the sparkline, not a structural diff)
-- **A06 â€” `boundary_flags` JSONB** array of `'item_id' | 'agent_id' | 'project_id' | 'run_id'` slugs detected in the new body. Empty when clean. Migration `023_memory_boundary_flags.ts`.
+- **A06 — `boundary_flags` JSONB** array of `'item_id' | 'agent_id' | 'project_id' | 'run_id'` slugs detected in the new body. Empty when clean. Migration `023_memory_boundary_flags.ts`.
 
 ### ICommitVerification (Theme 11)
 
-**Why this entity exists**: One commit per chore is a discipline rule the agent must self-enforce, but a rule with no audit is a suggestion. After every issue-attached agent run, the verifier in `services/commit-verifier.ts` shells out to `git log --since <run.started_at>` in the project's cwd, parses every commit subject against the Conventional-Commit pattern, and persists the classification (`compliant` | `partial` | `silent` | `clean`). The Agent Detail Overview tab renders the last 10 as colored dots â€” the Owner sees at a glance whether the agent is following discipline.
+**Why this entity exists**: One commit per chore is a discipline rule the agent must self-enforce, but a rule with no audit is a suggestion. After every issue-attached agent run, the verifier in `services/commit-verifier.ts` shells out to `git log --since <run.started_at>` in the project's cwd, parses every commit subject against the Conventional-Commit pattern, and persists the classification (`compliant` | `partial` | `silent` | `clean`). The Agent Detail Overview tab renders the last 10 as colored dots — the Owner sees at a glance whether the agent is following discipline.
 
 Fields: `id, run_id, item_id, agent_id, result, commit_count, problems, checked_at`
 
-- `result` âˆˆ `compliant | partial | silent | clean` (CHECK constraint). Verifier classification:
-    - **`clean`** â€” no commits made AND no dirty modifications (legitimate read-only run, or non-git cwd).
-    - **`silent`** â€” files modified during the run but never committed (the worst result; flagged with a system comment on the item).
-    - **`partial`** â€” at least one commit but some commit had problems (missing `Refs:` line, non-Conventional subject, unknown type, summary > 60 chars).
-    - **`compliant`** â€” every commit in the window parsed cleanly with a valid `Refs:` line.
-- `commit_count` â€” total commits found in the window.
-- `problems` JSONB â€” array of `{ commit_sha?: string; reason: string }`. Reasons: `subject-not-conventional`, `unknown-type:<x>`, `summary-too-long`, `refs-missing`.
+- `result` ∈ `compliant | partial | silent | clean` (CHECK constraint). Verifier classification:
+    - **`clean`** — no commits made AND no dirty modifications (legitimate read-only run, or non-git cwd).
+    - **`silent`** — files modified during the run but never committed (the worst result; flagged with a system comment on the item).
+    - **`partial`** — at least one commit but some commit had problems (missing `Refs:` line, non-Conventional subject, unknown type, summary > 60 chars).
+    - **`compliant`** — every commit in the window parsed cleanly with a valid `Refs:` line.
+- `commit_count` — total commits found in the window.
+- `problems` JSONB — array of `{ commit_sha?: string; reason: string }`. Reasons: `subject-not-conventional`, `unknown-type:<x>`, `summary-too-long`, `refs-missing`.
 - `run_id` / `item_id` carry the audit forward without an FK so historical rows survive run/item purging.
 
 Verifier emits SSE `commit_verification { agentId, runId, commitVerificationResult }` after every audit. Non-clean results also append a system comment to the item so the activity feed surfaces the audit.
 
 Migration 013. Index: `idx_commit_verifications_agent_checked` on `(agent_id, checked_at DESC)` so the Overview tile fetches the agent's last 10 quickly.
 
-### Theme 09 â€” autonomous-agent fleet columns
+### Theme 09 — autonomous-agent fleet columns
 
 Two columns on `agents` for the autonomous fleet (and any future custom agents):
 
-- **`kind_slug` TEXT NOT NULL DEFAULT 'custom'** â€” archetype tag. Fixed slugs for the 4 seeded agents (`ai-news` | `market-research` | `regulations` | `jira-to-epic`); `custom` for everything else. No CHECK constraint â€” Owner-created kinds can carry their own slugs.
-- **`settings_json` JSONB NOT NULL DEFAULT '{}'** â€” per-archetype config. Schema depends on `kind_slug`; validated at the route boundary via the Zod schemas in `@atlas/shared/agents/settings-schemas.ts`. `custom` agents pass through (`.passthrough()`).
+- **`kind_slug` TEXT NOT NULL DEFAULT 'custom'** — archetype tag. Fixed slugs for the 4 seeded agents (`ai-news` | `market-research` | `regulations` | `jira-to-epic`); `custom` for everything else. No CHECK constraint — Owner-created kinds can carry their own slugs.
+- **`settings_json` JSONB NOT NULL DEFAULT '{}'** — per-archetype config. Schema depends on `kind_slug`; validated at the route boundary via the Zod schemas in `@atlas/shared/agents/settings-schemas.ts`. `custom` agents pass through (`.passthrough()`).
 
 Migration 011. Index: `idx_agents_kind_slug` on `agents(kind_slug)`.
 
@@ -150,7 +150,7 @@ The autonomous catalog entries (`agent-ai-news`, `agent-market-research`, `agent
 **Installable agents** come from `packages/api/src/marketplace/catalog/*/{manifest.json,prompt.md,checklists.json}` (synced into `marketplace_agents` by `runSeed`): 7 entries: `agent-solo` ("Solo Engineer", the general-purpose agent a Task is assigned to) plus the 6 autonomous agents above.
 
 ### IProject
-**Why this entity exists**: Projects are the top-level work container â€” every issue tunnels through `project_id`. **ADR 0018:** a project is a *container*, not a repo — it holds 0..N repos, all equal, and the git fields it used to carry moved onto them (migration 045).
+**Why this entity exists**: Projects are the top-level work container — every issue tunnels through `project_id`. **ADR 0018:** a project is a *container*, not a repo — it holds 0..N repos, all equal, and the git fields it used to carry moved onto them (migration 045).
 
 Fields: `id, name, issue_key_prefix, description, status, guardrails_md, team_managed, jira_status_map, created_at, updated_at, last_activity_at`
 
@@ -160,7 +160,7 @@ Fields: `id, name, issue_key_prefix, description, status, guardrails_md, team_ma
   - `ready` is required. No name may appear in two groups (`JiraStatusMapSchema`).
   - NULL = Jira status ignored (pre-v2 behaviour).
 
-- `guardrails_md` is free-form markdown (project guardrails are a separate table â€” see below)
+- `guardrails_md` is free-form markdown (project guardrails are a separate table — see below)
 - Env secrets, guardrails and the constitution stay project-level and are staged into every repo.
 - A project with **no** repos is a normal state (its last repo was removed, or it was created before one was added): it can hold Tasks but cannot queue them.
 
@@ -169,7 +169,7 @@ A git repo of a project. Fields: `id, project_id, name, git_url, git_path, crede
 - Every repo is an ordinary `project_repos` row; **there is no primary**. A repo that predates ADR 0018 carries its project's id, which is what kept its worktrees, git-lock key and Jira sources valid through migration 045.
 - `name` is a slug unique within the project and is the repo's folder name in a multi-repo workspace. Each repo has its own credential, default branch, clone status, setup scripts and auto-fetch schedule.
 - **Order matters**: `position, created_at`. The *first* repo of a Task holds Task-wide files, hosts the multi-repo workspace folder, and lends its bot identity to the agent (no token — ADR 0015: Atlas pushes).
-- `clone_status` âˆˆ `pending | cloning | ready | error`
+- `clone_status` ∈ `pending | cloning | ready | error`
 - There is no per-repo verification command (migration 006 dropped `project_repos.verify_command`); the agent runs the project's own checks inside its run.
 
 ### ITask (ADR 0015)
@@ -207,7 +207,7 @@ Fields (`ISubTask`): `id, task_id, title, description, status, assignee_agent_id
 > **Removed by migration 037:** item kinds `epic`, `story`, `bug`, `sub_bug` (converted, see `api-surface.md` migrations), the bug-only columns (`steps_to_reproduce`, `expected`, `actual` — folded into the description as `### …` sections first — and `frequency`, `failure_scope`, `detected_at`, `occurrence_count`, `occurrence_total`), `items.created_by_workflow_run_id`, and the `item_type` enum (`type` / `parent_type` are text + CHECK). The `points` column still exists in the DB but is on neither interface.
 
 ### IComment
-**Why this entity exists**: Discussion threads on issues are polymorphic by design â€” the same conversation table works for every issue type so the unified `IssueDetailShell` can render a comment thread without per-type branches. Distinct from IIssueEvent because comments are free-form human/agent prose, whereas events are structured state transitions. Both feed the merged activity stream so the Owner reads one timeline.
+**Why this entity exists**: Discussion threads on issues are polymorphic by design — the same conversation table works for every issue type so the unified `IssueDetailShell` can render a comment thread without per-type branches. Distinct from IIssueEvent because comments are free-form human/agent prose, whereas events are structured state transitions. Both feed the merged activity stream so the Owner reads one timeline.
 
 Threaded comments on any issue.
 
@@ -276,16 +276,16 @@ source already owns.
 - A failed download writes no row, so the next sync retries it. A file removed in Jira drops its row. Settings → Reset deletes the rows and the folder.
 
 ### IIssueEvent (audit log)
-**Why this entity exists**: Status and assignment changes need an audit trail the UI can render alongside comments â€” otherwise the Owner sees "this is in_dev" but can't tell who moved it there or when. Structured fields (event_type, field, from_value, to_value) make events queryable and machine-renderable in a way that free-text comments can't be. Kept distinct from IComment so the activity feed can render status pills differently from quoted text.
+**Why this entity exists**: Status and assignment changes need an audit trail the UI can render alongside comments — otherwise the Owner sees "this is in_dev" but can't tell who moved it there or when. Structured fields (event_type, field, from_value, to_value) make events queryable and machine-renderable in a way that free-text comments can't be. Kept distinct from IComment so the activity feed can render status pills differently from quoted text.
 
 Persistent audit record for any non-comment activity on an issue. Backed by the `issue_events` table (defined in the consolidated baseline `001_initial.sql`). Comments stay in `comments`; the activity feed merges both streams ordered by `created_at`.
 
 Fields: `id, issue_type, issue_id, event_type, actor_agent_id, field, from_value, to_value, detail, created_at`
 
-- `event_type` âˆˆ `'created' | 'status_changed' | 'assigned' | 'field_updated' | 'comment_added' | 'link_created' | 'link_deleted' | 'deleted' | 'unblocked'`
+- `event_type` ∈ `'created' | 'status_changed' | 'assigned' | 'field_updated' | 'comment_added' | 'link_created' | 'link_deleted' | 'deleted' | 'unblocked'`
 - `field` ∈ `'status' | 'assignee' | 'title' | 'description' | 'reporter' | 'spec_md' | 'pr_url' | 'acceptance_criteria' | 'priority' | 'link' | 'external_link' | 'git_push' | 'repo_exec'` or `NULL` for `created` / `deleted`. `IssueEventField` still lists the retired `points` and bug-field names (`steps_to_reproduce`, `expected`, `actual`, `frequency`, `failure_scope`) for old rows; nothing writes them since ADR 0015 (`events-log.ts` `DATA_KEY_TO_FIELD`)
 - `actor_agent_id` is `NULL` when the Owner (or the API) was the actor
-- `link_created` / `link_deleted` events are emitted on BOTH endpoints of the link (so each item's activity tab shows the change). `to_value` holds the other item's id; `detail` encodes direction + relation_type like `depends_on â†’ ATL-3` (outgoing) or `depends_on â† ATL-2` (incoming).
+- `link_created` / `link_deleted` events are emitted on BOTH endpoints of the link (so each item's activity tab shows the change). `to_value` holds the other item's id; `detail` encodes direction + relation_type like `depends_on → ATL-3` (outgoing) or `depends_on ← ATL-2` (incoming).
 - `deleted` is emitted by each entity service's `delete()` immediately before the underlying item row is removed. The event row survives the cascade because `issue_events.item_id` has no FK; the deleted item's history stays queryable.
 
 Status events are also the source of Analytics' Tasks shipped and median cycle time (`services/analytics.ts`, response type `IAnalytics`): an item's first Done and first In progress.
@@ -293,14 +293,14 @@ Status events are also the source of Analytics' Tasks shipped and median cycle t
 Read via `GET /api/issues/:type/:id/activity`, which returns a merged `IActivityItem[]` (each item is either `{ kind: 'comment', data: IComment }` or `{ kind: 'event', data: IIssueEvent }`).
 
 ### IGuardrailRule (global)
-**Why this entity exists**: Agents need a binding constitution that travels with every prompt â€” "do not delete the main branch", "ask before touching secrets". Modeling rules as structured rows (category + severity) lets the prompt-builder render them deterministically and lets the UI group them by risk surface. Distinct from IProjectGuardrail because workspace rules apply to every agent on every project; project rules layer narrower constraints on top.
+**Why this entity exists**: Agents need a binding constitution that travels with every prompt — "do not delete the main branch", "ask before touching secrets". Modeling rules as structured rows (category + severity) lets the prompt-builder render them deterministically and lets the UI group them by risk surface. Distinct from IProjectGuardrail because workspace rules apply to every agent on every project; project rules layer narrower constraints on top.
 
 A workspace-wide safety rule.
 
 Fields: `id, category, body, detail, severity, enabled, sort_order, created_at, updated_at`
 
-- `category` âˆˆ `file_system | secrets_credentials | git_branches | side_effects_network | escalation_scope`
-- `severity` âˆˆ `block | ask_owner | warn`
+- `category` ∈ `file_system | secrets_credentials | git_branches | side_effects_network | escalation_scope`
+- `severity` ∈ `block | ask_owner | warn`
 
 ### IProjectGuardrail (per-project)
 **Why this entity exists**: Some constraints only apply to one repo (e.g., "don't run migrations against the staging DB in this project"); modeling them at the project level keeps the global guardrail set from bloating with repo-specific quirks. Lighter shape than IGuardrailRule (no severity enum, no category) because per-project rules are usually plain "do/don't" statements without the full risk taxonomy.
@@ -316,14 +316,14 @@ Delivery queue for external notification + in-app notifications.
 
 Fields: `id, kind, issue_type, issue_id, project_id, message, event_type, agent_id, external_status, failure_reason, push_status, push_failure_reason, read_at, link_url, external_deferred_at, reminder_id, in_app, created_at`
 
-- `kind` âˆˆ `needs_you | update | system`
-- `external_status` âˆˆ `none | pending | sent | failed`. `pending` + non-null `external_deferred_at` = held by quiet hours until the window ends (migration 010).
+- `kind` ∈ `needs_you | update | system`
+- `external_status` ∈ `none | pending | sent | failed`. `pending` + non-null `external_deferred_at` = held by quiet hours until the window ends (migration 010).
 - `link_url` — where a click opens; stamped at create time (`notificationLinkUrl` in @atlas/shared).
 - `in_app` (migration 013, default true) — false for a log-only row: an external-only reminder fire or an MCP `send-external` (`event_type='mcp_external'`). It shows in the Notification Log and the reminder fire log, never in the In-App Feed, the unread count or Mark All Read, and gets no web push.
 - `external_status='none'` with a `failure_reason` = **skipped**: held through quiet hours, but its event toggle was off when the window ended ("Skipped: event turned off while held").
 - DB-only columns (not on `INotification`, migration 013): `external_event_key` (the key a hold was raised under, re-checked at the flush), `external_claimed_at` / `external_reclaimed` (in-flight claim; a claim older than 10 minutes is retried once, then the row is failed).
 - `reminder_id` — the reminder whose fire produced the row (FK `ON DELETE SET NULL`, migration 011); null for every other producer and for fires before the log. It is the reminder fire log and lets the feed snooze from the card.
-- `event_type` âˆˆ external notification event keys (see below)
+- `event_type` ∈ external notification event keys (see below)
 
 ### IAgentRun
 **Why this entity exists**: Every agent invocation produces an auditable run row — without it, the Owner can't tell why an item transitioned (which agent, what version of the prompt, when it succeeded/failed). The dashboard "in motion" panel, and per-agent Runs tab all consume the same row shape. Cancellation as an explicit terminal state (vs. delete) preserves history for runs that were intentionally aborted.
@@ -384,7 +384,7 @@ Encrypted git credential.
 
 Fields: `id, label, host, kind, token_fingerprint, scope, expires_at, last_used_at, created_at, updated_at`
 
-- `kind` âˆˆ `pat | ssh | app_password` â€” only `pat` is implemented today
+- `kind` ∈ `pat | ssh | app_password` — only `pat` is implemented today
 - Token stored encrypted (AES-256-GCM). `token_fingerprint` is the SHA-256 hash of the plaintext, exposed in the UI for identification.
 - `human_name` / `human_email` (migration 026) are valid on **both** kinds and mean different things by kind. On `github_app` the human is a **co-author**: the bot is the primary author (`[user]` = `<app_slug>[bot]`) and the human is credited via a `Co-Authored-By` trailer written by the `prepare-commit-msg` hook. On `pat` the human is the **author** — a PAT has no identity of its own, so `buildGitAuth` writes these straight into the session's `[user]` block. Both must be set for that block to appear; with neither (or only one) commits fall back to the host machine's `~/.gitconfig`, which is the pre-existing behaviour.
 - `human_gh_login` stays `github_app`-only — it feeds `gh pr create --assignee` and the `Requested-By: @<login>` PR-body prefix, neither of which any PAT flow reaches. The service rejects it on a PAT patch.
@@ -520,14 +520,14 @@ Fields: `id, label, body, schedule_kind, schedule_value, channel, next_fire_at, 
 One logged fire: `notification_id, fired_at, push_status, external_status, failure_reason`, read from `notifications` by `reminder_id` (`GET /api/reminders/:id/fires`).
 
 ### IProjectSchedule
-**Why this entity exists**: Different repos have different staleness tolerances (a documentation repo can fetch daily; a hot product repo wants every 15 minutes). Modeling schedules per-project rather than globally lets each repo carry its own cadence. The dirty / idle / agents guards live here because skipping a fetch is more situational than skipping a project â€” the policy needs to read the repo's live state at fire time.
+**Why this entity exists**: Different repos have different staleness tolerances (a documentation repo can fetch daily; a hot product repo wants every 15 minutes). Modeling schedules per-project rather than globally lets each repo carry its own cadence. The dirty / idle / agents guards live here because skipping a fetch is more situational than skipping a project — the policy needs to read the repo's live state at fire time.
 
 Auto-fetch cron schedule per project.
 
 Fields: `id, project_id, enabled, cron_expr, conflict_policy, dirty_guard, idle_guard, agents_guard, last_run_at, next_run_at, created_at, updated_at`
 
 ### IEnvVar (settings row helper, not a table)
-**Why this shape exists**: Env vars need richer per-row metadata than a flat key/value map can carry â€” `secret` controls UI masking, `restart_required` triggers the restart-confirm dialog, `description` is the on-screen help. Modeling them as structured rows lets the Environment tab render them as a typed list rather than a textarea, which is what would happen with a raw `.env` file.
+**Why this shape exists**: Env vars need richer per-row metadata than a flat key/value map can carry — `secret` controls UI masking, `restart_required` triggers the restart-confirm dialog, `description` is the on-screen help. Modeling them as structured rows lets the Environment tab render them as a typed list rather than a textarea, which is what would happen with a raw `.env` file.
 
 Each row has: `key, value, secret, restart_required, description`. The full set is mirrored to a `.env` file on save (services/env-file.ts).
 

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { goto } from '../helpers/nav.js';
 import { API, SEEDED_AGENT, apiGet, closeTask, taskRuns } from '../helpers/api.js';
+import { sql } from '../helpers/db.js';
 
 // One Task, one agent, end to end: a Task created with an agent from
 // /tasks/new is queued, dispatch starts its run at once, the run shows on the
@@ -38,7 +39,16 @@ test('a Task created with an agent runs, shows its run on the rail, and opens on
     expect(task.status).not.toBe('draft');
 
     // Dispatch starts the run; the simulated step passes and delivery parks it.
-    await expect.poll(async () => (await taskRuns(request, taskId))[0]?.status, { timeout: 60_000, intervals: [1_000] }).toBe('waiting_for_owner');
+    // A Task that never starts is a blocked one: say what held it.
+    await expect
+        .poll(async () => (await taskRuns(request, taskId))[0]?.status, { timeout: 60_000, intervals: [1_000] })
+        .toBe('waiting_for_owner')
+        .catch(async (err: Error) => {
+            const queue = JSON.stringify(await apiGet(request, '/api/queue'));
+            const live = JSON.stringify(sql(`SELECT id, item_id, status, park_reason FROM workflow_runs WHERE status IN ('running', 'waiting_for_owner')`));
+            const itemless = JSON.stringify(sql(`SELECT id, agent_id, status FROM agent_runs WHERE status IN ('queued', 'in_progress') AND workflow_run_id IS NULL`));
+            throw new Error(`${err.message}\nqueue: ${queue}\nlive runs: ${live}\nlive itemless runs: ${itemless}`);
+        });
     const [run] = await taskRuns(request, taskId);
     expect(run!.park_reason).toMatch(/credential/);
     await expect.poll(async () => (await apiGet<{ status: string }>(request, `/api/tasks/${taskId}`)).status).toBe('waiting_for_info');

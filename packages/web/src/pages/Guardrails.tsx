@@ -3,6 +3,7 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from '../components/ButtonSpinner.js';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import { GUARDRAIL_CATEGORIES, type GuardrailCategory, type IGuardrailRule } from '@atlas/shared';
@@ -247,7 +248,7 @@ export function Guardrails() {
                                 disabled={saveAll.isPending}
                                 startIcon={
                                     saveAll.isPending ? (
-                                        <CircularProgress aria-hidden size={14} color="inherit" />
+                                        <ButtonSpinner />
                                     ) : undefined
                                 }
                                 sx={{ textTransform: 'none', fontWeight: 600 }}

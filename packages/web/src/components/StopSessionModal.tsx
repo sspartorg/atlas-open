@@ -14,6 +14,7 @@ import Skeleton from '@mui/material/Skeleton';
 import TextField from '@mui/material/TextField';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from './ButtonSpinner.js';
 import StopRounded from '@mui/icons-material/StopRounded';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
@@ -325,7 +326,7 @@ export function StopSessionModal({ open, sessionId, onClose, onClosed }: Props) 
                                     commitMessage.trim().length === 0)
                             }
                             startIcon={
-                                stop.isPending ? <CircularProgress aria-hidden size={16} /> : <StopRounded />
+                                stop.isPending ? <ButtonSpinner size={16} color="primary" /> : <StopRounded />
                             }
                         >
                             {stop.isPending

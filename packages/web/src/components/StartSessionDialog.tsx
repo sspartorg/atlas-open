@@ -8,7 +8,7 @@ import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from './ButtonSpinner.js';
 import Autocomplete from '@mui/material/Autocomplete';
 import AddRounded from '@mui/icons-material/AddRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
@@ -406,7 +406,7 @@ export function StartSessionDialog({
                     onClick={handleStart}
                     disabled={!projectId || isPending}
                     startIcon={
-                        isPending ? <CircularProgress aria-hidden size={16} color="inherit" /> : <AddRounded />
+                        isPending ? <ButtonSpinner size={16} /> : <AddRounded />
                     }
                     sx={{
                         textTransform: 'none',

@@ -1,6 +1,6 @@
 # Notifications
 
-**Route:** `/notifications` â€¢ **Component:** `packages/web/src/pages/Notifications.tsx` â€¢ **Slug:** `guardrails` (mockups also live there)
+**Route:** `/notifications` • **Component:** `packages/web/src/pages/Notifications.tsx` • **Slug:** `guardrails` (mockups also live there)
 
 ## Purpose
 Two-tab notifications hub. The **Notification Log** tab is the delivery queue (sent / failed / pending) with retry/cancel/resend controls. The **In-App Feed** tab lists `needs_you` / `update` / `system` items with row-click navigation.
@@ -39,7 +39,7 @@ Two-tab notifications hub. The **Notification Log** tab is the delivery queue (s
 
 ### In-App Feed tab (`InAppFeedTab`)
 - Shows only `in_app` rows: an external-only reminder fire and an MCP `send-external` (`mcp_external`) are log-only and appear on the Notification Log tab alone. Counts and the unread badge leave them out too.
-- Top alert when `needs_you > 0` ("{N} items need you. Click any rowâ€¦")
+- Top alert when `needs_you > 0` ("{N} items need you. Click any row…")
 - Filter pills: All / Needs You / Updates / System — same sideways-scrolling `PillRow` ("Filter notifications")
 - Each row is a `NotificationCard` (all widths): event icon (`EventTypeIcon`) · event label, message (2 lines), **Needs you** chip on its own status line, mono meta `item id · type · agent · age` · chevron. Unread rows have a blue edge bar. The card is a focusable `role="button"` (Enter/Space open it).
 - Clicking marks it read and opens `notificationLinkUrl(row)` (@atlas/shared) — the same chain the web-push click uses: stored `link_url` → `/tasks/:id` · `/sub-tasks/:id` → `/reminders` → `/settings?tab=jira` → `/projects/:id` → `/notifications`. Producers stamp `link_url` at create time (Task runs `/tasks/:id`, standalone agent runs `/agents/:id/runs/:runId`, terminal `/terminal/:id`; migration 010 backfilled older rows).
@@ -47,11 +47,11 @@ Two-tab notifications hub. The **Notification Log** tab is the delivery queue (s
 - `EventTypeIcon` has an entry per produced `event_type`: `workflow_run`, `agent_completed(_no_item)`, `agent_error(_no_item)`, `ci_failed`, `reminder`, `jira_sync`, `mcp_external` (send glyph, "Sent by Claude"), `terminal.waiting_for_input`, `autofetch_*` (success/skipped/failed/conflict/disabled). Fills are theme soft tokens, so they flip with dark mode.
 
 ## Why these affordances exist
-- **Two tabs (Notification Log / In-App Feed)** â€” Notification Log is the diagnostic surface; In-App is the unread inbox. Splitting them prevents diagnostics from drowning actionable items.
-- **Per-row Resend / Retry / Cancel** â€” Notifications fail for transient reasons (network, rate-limits); row-level retry beats re-triggering the producing event.
-- **Send a Test Message (empty state)** â€” External notification silence is ambiguous (working but quiet vs. misconfigured); the test resolves it.
-- **Top alert for `needs_you > 0`** â€” Surfaces urgency without forcing a row scan; matches the dashboard's "awaiting you" signal.
-- **Mark All Read** â€” In-app feeds accumulate update/system rows the Owner already saw elsewhere; bulk-clear avoids per-row dismissal.
+- **Two tabs (Notification Log / In-App Feed)** — Notification Log is the diagnostic surface; In-App is the unread inbox. Splitting them prevents diagnostics from drowning actionable items.
+- **Per-row Resend / Retry / Cancel** — Notifications fail for transient reasons (network, rate-limits); row-level retry beats re-triggering the producing event.
+- **Send a Test Message (empty state)** — External notification silence is ambiguous (working but quiet vs. misconfigured); the test resolves it.
+- **Top alert for `needs_you > 0`** — Surfaces urgency without forcing a row scan; matches the dashboard's "awaiting you" signal.
+- **Mark All Read** — In-app feeds accumulate update/system rows the Owner already saw elsewhere; bulk-clear avoids per-row dismissal.
 
 ## Topbar Notifications pill (every desktop page)
 - The pill's dot is green when the active provider is connected (`isExternalChannelConnected`), red when not. Click / Enter / Space opens `NotificationStatusPopover` (`role=dialog`, "Notifications status"): **Sending via Telegram | Microsoft Teams** (or **No external channel**), "Connected to <endpoint>." / "Set up, not tested yet.", the unread count from `/api/counts` ("N unread notifications" / "No unread notifications" — the same number as the sidenav badge, so Mark All Read empties both), and two links: **Open notifications** (`/notifications?tab=in-app`) and **Settings** (`/settings?tab=notifications`). Escape closes it. Before 2026-10-16 it said "Teams is the only supported channel" whatever the provider.
@@ -105,11 +105,11 @@ None.
 
   In-app only (no outward send): Jira imports / moves, sub-task done, auto-fetch success / skipped.
 - **Telegram is sent as plain text** (no `parse_mode`), capped at 4096 characters. With `parse_mode: 'Markdown'` Telegram rejected every message carrying an unbalanced `_` / `*` / `[` (paths, check names, error text) with 400 "can't parse entities" — most run parks never arrived (fixed 2026-10-17). Both transports time out after 15 s, so a hung send cannot stall the minute tick.
-- **Test Message** (`POST /api/settings/external-notification/test`) deliberately bypasses both checks â€” the Owner pressed Send Test, so a silent success would be indistinguishable from misconfiguration.
+- **Test Message** (`POST /api/settings/external-notification/test`) deliberately bypasses both checks — the Owner pressed Send Test, so a silent success would be indistinguishable from misconfiguration.
 
 ## Edge cases / quirks
-- The header "last delivery" age uses `useNow` to tick every minute â€” UI updates without refetch.
-- Marking all read does **not** mark externally delivered notifications as cancelled â€” it's a separate read-state field.
+- The header "last delivery" age uses `useNow` to tick every minute — UI updates without refetch.
+- Marking all read does **not** mark externally delivered notifications as cancelled — it's a separate read-state field.
 - Quiet hours hold outward sends and web push; in-app rows still arrive in the feed.
 - An unconfigured channel leaves the row at `external_status='none'` (not listed); an off toggle leaves `none` + a Skipped reason (listed). A row never shows **Sent** unless a transport actually delivered. A quiet-hours send shows **Held** until the flush (2026-10-16; before, it was dropped to `none`).
 - **Resend / Retry** send immediately, even inside quiet hours.
@@ -118,8 +118,8 @@ None.
 - A `needs_you` completion row (`event_type='agent_completed'` or `workflow_run`) drops out of the In-App Feed and the unread count once its item leaves `waiting_for_info` / `in_review` (or a newer one on the same item supersedes it). An open page drops it live: `counts_changed` (broadcast on every item status write) now refetches `['notifications']` as well as the badge. `agent_error`, terminal-idle, and item-less `needs_you` rows are unaffected.
 
 ## Connectivity
-- **Pages**: [Settings â†’ external notification](19-settings.md) â€” header CTA target for configuring the bridge; [Task Detail](07-task-detail.md) and [Sub-task Detail](10-sub-task-detail.md) â€” row "Open" navigation when the notification references an item.
-- **Routes**: `POST /api/notifications/:id/resend` â€” separate from the create path because resend preserves the original event metadata; re-creating would lose the audit trail.
+- **Pages**: [Settings → external notification](19-settings.md) — header CTA target for configuring the bridge; [Task Detail](07-task-detail.md) and [Sub-task Detail](10-sub-task-detail.md) — row "Open" navigation when the notification references an item.
+- **Routes**: `POST /api/notifications/:id/resend` — separate from the create path because resend preserves the original event metadata; re-creating would lose the audit trail.
 - **Entities**: `notification`, `agent` (sender), `task` / `sub_task` (subject).
 
 ## Coming soon on this page

@@ -7,7 +7,7 @@ import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Alert from '@mui/material/Alert';
-import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from './ButtonSpinner.js';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import ContentCopyRounded from '@mui/icons-material/ContentCopyRounded';
@@ -152,7 +152,7 @@ export function ConfirmDeleteModal({ open, entityKind, entityTitle, onConfirm, o
                         color="error"
                         startIcon={
                             busy ? (
-                                <CircularProgress aria-hidden size={14} color="inherit" />
+                                <ButtonSpinner />
                             ) : (
                                 <DeleteOutlineRounded />
                             )

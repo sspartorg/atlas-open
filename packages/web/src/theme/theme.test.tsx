@@ -4,6 +4,7 @@ import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import { ThemeProvider } from '@mui/material/styles';
+import { ButtonSpinner } from '../components/ButtonSpinner.js';
 import { createAtlasTheme } from './theme.js';
 
 describe('createAtlasTheme', () => {
@@ -22,7 +23,7 @@ describe('createAtlasTheme', () => {
     it("keeps a hidden button spinner out of the button's name", () => {
         render(
             <ThemeProvider theme={createAtlasTheme('light')}>
-                <Button startIcon={<CircularProgress aria-hidden size={14} />}>Delete</Button>
+                <Button startIcon={<ButtonSpinner />}>Delete</Button>
             </ThemeProvider>,
         );
         expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy();

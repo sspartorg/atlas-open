@@ -18,15 +18,15 @@ When a stub is shipped (or removed), delete its row here AND update the page doc
 
 ## Notes on simulated mode
 
-`packages/api/src/services/agent-runner.ts:197` â€” when `ATLAS_AI_ENABLED !== 'true'`, agent-runner emits canned output instead of spawning the real CLI. The simulated `output_text` is prefixed with the literal marker `[SIMULATED â€” set ATLAS_AI_ENABLED=true to use real CLI]`. The UI surfaces this state in three places so it can never be mistaken for real output:
+`packages/api/src/services/agent-runner.ts:197` — when `ATLAS_AI_ENABLED !== 'true'`, agent-runner emits canned output instead of spawning the real CLI. The simulated `output_text` is prefixed with the literal marker `[SIMULATED — set ATLAS_AI_ENABLED=true to use real CLI]`. The UI surfaces this state in three places so it can never be mistaken for real output:
 
 - A "Simulated" pill in the topbar when `ai_enabled === false` (visible across the whole app).
 - A "Simulated" chip on the run-detail hero next to the status pill.
 - A small "Simulated" chip next to each simulated row in the agent's Runs tab.
 
-Detection lives at `packages/web/src/utils/isSimulatedRun.ts`: sniffs `output_text.startsWith('[SIMULATED')` for completed runs, falls back to the global `ai_enabled === false` flag for queued / in-progress runs without output yet. The flag is exposed at `GET /api/settings` (`ai_enabled: boolean`, sourced from `process.env.ATLAS_AI_ENABLED` at every read â€” never persisted).
+Detection lives at `packages/web/src/utils/isSimulatedRun.ts`: sniffs `output_text.startsWith('[SIMULATED')` for completed runs, falls back to the global `ai_enabled === false` flag for queued / in-progress runs without output yet. The flag is exposed at `GET /api/settings` (`ai_enabled: boolean`, sourced from `process.env.ATLAS_AI_ENABLED` at every read — never persisted).
 
-This is intentional, not a stub; it's used so devs can play with the app without burning CLI credits. To use the real CLI: set `ATLAS_AI_ENABLED=true` in `packages/api/.env` and restart the API. New runs will spawn the real `claude` / `gh copilot` binary; old simulated runs keep their `[SIMULATED â€¦]` chip because the marker persists in their `output_text`.
+This is intentional, not a stub; it's used so devs can play with the app without burning CLI credits. To use the real CLI: set `ATLAS_AI_ENABLED=true` in `packages/api/.env` and restart the API. New runs will spawn the real `claude` / `gh copilot` binary; old simulated runs keep their `[SIMULATED …]` chip because the marker persists in their `output_text`.
 
 ---
 
@@ -41,7 +41,7 @@ Workflows (graph builder, chains of specialised agents, pass/fail loops), script
 ## How to add a new entry here
 
 1. Find or write the stub trigger in the UI.
-2. Add a row to the table above with: feature name Â· file:line Â· page doc link Â· trigger description Â· intended behavior Â· what's blocking it.
+2. Add a row to the table above with: feature name · file:line · page doc link · trigger description · intended behavior · what's blocking it.
 3. Add a one-liner under the affected page doc's "Coming soon on this page" section that links back here.
 
 ---

@@ -8,7 +8,7 @@ import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import IconButton from '@mui/material/IconButton';
 import Alert from '@mui/material/Alert';
-import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from '../../components/ButtonSpinner.js';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
 import { useProjects } from '../../hooks/useProjects.js';
@@ -230,7 +230,7 @@ export function ResetWorkspaceModal({ open, onClose }: Props) {
                         onClick={() => void handleReset()}
                         disabled={!canSubmit}
                         startIcon={
-                            resetting ? <CircularProgress aria-hidden size={14} color="inherit" /> : undefined
+                            resetting ? <ButtonSpinner /> : undefined
                         }
                         sx={{ textTransform: 'none', fontWeight: 600 }}
                     >
