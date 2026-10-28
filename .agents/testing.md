@@ -17,52 +17,52 @@ Thresholds live in each package's `vitest.config.ts` under `test.coverage.thresh
 
 `pnpm -w run gate` runs the full pre-merge chain (2026-09-25: `pnpm -r lint` joined it — CI's Gate job has always run eslint and the local script did not, so four unused-import errors reached `main` with nothing local going red):
 
-1. `pnpm -r typecheck` â€” type-strict everywhere
-2. `pnpm -r lint` â€” eslint, which CI's Gate job also runs
-3. `pnpm -w run lint:knip` â€” no unused exports / files
-4. `pnpm -r test:coverage` â€” every package's threshold enforced
-5. `pnpm -r build` â€” clean prod artifacts
+1. `pnpm -r typecheck` — type-strict everywhere
+2. `pnpm -r lint` — eslint, which CI's Gate job also runs
+3. `pnpm -w run lint:knip` — no unused exports / files
+4. `pnpm -r test:coverage` — every package's threshold enforced
+5. `pnpm -r build` — clean prod artifacts
 
 Two helper scripts:
 
-- `pnpm -w run coverage:diff` â€” per-package markdown table of current numbers (paste into PR descriptions).
-- `pnpm -w run coverage:assertion-density` â€” flags test files with fewer than 0.8 `expect()` calls per `it()` block. Informational by default; set `STRICT=1` for fail-on-miss posture.
+- `pnpm -w run coverage:diff` — per-package markdown table of current numbers (paste into PR descriptions).
+- `pnpm -w run coverage:assertion-density` — flags test files with fewer than 0.8 `expect()` calls per `it()` block. Informational by default; set `STRICT=1` for fail-on-miss posture.
 
-A `.husky/pre-push.optional` template lives in the repo for owners who want the gate to fire on every push (symlink it to `.husky/pre-push`). It's intentionally not the default â€” the gate takes ~5â€“10 minutes and the project's direct-to-main commit cadence prefers lighter pre-commit checks. The secretlint pre-commit hook stays mandatory regardless.
+A `.husky/pre-push.optional` template lives in the repo for owners who want the gate to fire on every push (symlink it to `.husky/pre-push`). It's intentionally not the default — the gate takes ~5–10 minutes and the project's direct-to-main commit cadence prefers lighter pre-commit checks. The secretlint pre-commit hook stays mandatory regardless.
 
 ## Floor exceptions (api)
 
-The api package lands at lines/statements/functions â‰ˆ 96% and branches â‰ˆ 86.85% across the non-excluded surface. The gap below pre-migration 98/93 is concentrated in:
+The api package lands at lines/statements/functions ≈ 96% and branches ≈ 86.85% across the non-excluded surface. The gap below pre-migration 98/93 is concentrated in:
 
-- `crypto.ts` (71.42% branches) â€” `keyPath()` chooses between `%APPDATA%` (Windows) and `$HOME/.config` (macOS/Linux), and the new HKDF derivation path branches on `MachineGuid` (Windows reg query), `/etc/machine-id`, `/var/lib/dbus/machine-id`, and the randomBytes fallback. On any single CI runner most platform branches are unreachable.
-- `env-file.ts` (85.45% branches) â€” `envFileService.write` mutates the api package's own `.env` at the project root. Testing it would clobber the developer's working file. Read path is fully covered.
-- `issue-full.ts` (75.6% branches) and `issue-tree.ts` (84.84% branches) â€” defensive `if (!task || !project)` guards and `task ? ... : null` ternaries for FK-protected lookups (the parent-Task lookup since ADR 0015; percentages predate it). The orphan path was SQLite-only; PG's `items_check_parent` trigger makes the false side unreachable. The most direct ones in `issue-tree.ts` carry `/* v8 ignore next */` annotations.
-- `prompt-builder.ts` (78.57% branches) â€” null-coalesce on optional issue fields (`description`, `spec_md`, etc.) where seed fixtures don't cover every null/non-null combination.
-- `counts.ts` (60.86% branches) â€” per-kind branches (five issue types when measured; two — `task` / `sub_task` — since ADR 0015); seed fixtures use a subset of priority/severity values.
-- `external notification.ts`, `events-log.ts`, etc. â€” small `catch` branches around network/parse errors that are caught but not deeply asserted.
+- `crypto.ts` (71.42% branches) — `keyPath()` chooses between `%APPDATA%` (Windows) and `$HOME/.config` (macOS/Linux), and the new HKDF derivation path branches on `MachineGuid` (Windows reg query), `/etc/machine-id`, `/var/lib/dbus/machine-id`, and the randomBytes fallback. On any single CI runner most platform branches are unreachable.
+- `env-file.ts` (85.45% branches) — `envFileService.write` mutates the api package's own `.env` at the project root. Testing it would clobber the developer's working file. Read path is fully covered.
+- `issue-full.ts` (75.6% branches) and `issue-tree.ts` (84.84% branches) — defensive `if (!task || !project)` guards and `task ? ... : null` ternaries for FK-protected lookups (the parent-Task lookup since ADR 0015; percentages predate it). The orphan path was SQLite-only; PG's `items_check_parent` trigger makes the false side unreachable. The most direct ones in `issue-tree.ts` carry `/* v8 ignore next */` annotations.
+- `prompt-builder.ts` (78.57% branches) — null-coalesce on optional issue fields (`description`, `spec_md`, etc.) where seed fixtures don't cover every null/non-null combination.
+- `counts.ts` (60.86% branches) — per-kind branches (five issue types when measured; two — `task` / `sub_task` — since ADR 0015); seed fixtures use a subset of priority/severity values.
+- `external notification.ts`, `events-log.ts`, etc. — small `catch` branches around network/parse errors that are caught but not deeply asserted.
 
 ### Active-development exclusions (post-2026-05-16 audit)
 
 The agent-scheduler rewrite landed after the audit (`bd903c7`, `af0e6d6`, `8426f11`, `e07f344`, `4bd76e9`, etc.) and the supporting services were not unit-tested in lock-step. They are **excluded from coverage** today and slated for backfill once the scheduler design stabilizes:
 
-- `agent-defaults-sync.ts`, `agent-defaults.ts` â€” startup catalog sync + static defaults.
-- `agent-memory.ts`, `agent-schedule-registry.ts` â€” scheduler hot-path (has thin tests; not at floor).
-- `agents.ts` â€” agents CRUD (no dedicated test file; covered loosely by E2E).
-- `compile-prompt.ts`, `dependency-guard.ts` â€” new agent-runtime features.
-- `mcp-config-writer.ts`, `tool-catalog-sync.ts` â€” generated-config + tool catalog sync.
-- `items.ts`, `item-links.ts` â€” unified-items library helpers; covered indirectly by every entity-service test.
-- `src/db/knex-config.ts`, `src/db/types.ts`, `src/db/run-migrations.ts` â€” DB infra (startup-only or CLI entry).
-- `src/plugins/mcp-auth.ts` â€” covered indirectly by route-level write-gate tests.
+- `agent-defaults-sync.ts`, `agent-defaults.ts` — startup catalog sync + static defaults.
+- `agent-memory.ts`, `agent-schedule-registry.ts` — scheduler hot-path (has thin tests; not at floor).
+- `agents.ts` — agents CRUD (no dedicated test file; covered loosely by E2E).
+- `compile-prompt.ts`, `dependency-guard.ts` — new agent-runtime features.
+- `mcp-config-writer.ts`, `tool-catalog-sync.ts` — generated-config + tool catalog sync.
+- `items.ts`, `item-links.ts` — unified-items library helpers; covered indirectly by every entity-service test.
+- `src/db/knex-config.ts`, `src/db/types.ts`, `src/db/run-migrations.ts` — DB infra (startup-only or CLI entry).
+- `src/plugins/mcp-auth.ts` — covered indirectly by route-level write-gate tests.
 
-A future session can close these to lift branches back to â‰¥93 and lines back to â‰¥98.
+A future session can close these to lift branches back to ≥93 and lines back to ≥98.
 
 ## Floor exceptions (web)
 
 The web package lands at lines/statements 78.06%, branches 69.48%, functions 63.81%. The gap below 80% is concentrated in:
 
-- **Branches at 69** â€” pickers and modals carry lots of `open === true | false` guards plus conditional menu-item rendering. Smoke tests exercise the happy paths but skip many of the `disabled`, `loading`, `danger`, and `pre-confirm` variants.
-- **Functions at 63** â€” large page components (e.g. `TaskDetail`, `SubTaskDetail`) declare many small inline render helpers and per-row callbacks. Page-level smoke tests cover the canonical render but don't trigger every interactive callback.
-- **Excluded surfaces**: heavy multi-state modals (`NewProjectModal`, `ProjectEnvSecretsModal`, `CredentialModal`, etc. â€” heavy files at 700-1800 LOC each) are excluded from `coverage.include` and slated for Playwright integration coverage instead. `App.tsx`, `Onboarding.tsx`, and the active-development surfaces (`Agents.tsx`, `AgentDetail.tsx`, `pages/agents/**`) are also excluded.
+- **Branches at 69** — pickers and modals carry lots of `open === true | false` guards plus conditional menu-item rendering. Smoke tests exercise the happy paths but skip many of the `disabled`, `loading`, `danger`, and `pre-confirm` variants.
+- **Functions at 63** — large page components (e.g. `TaskDetail`, `SubTaskDetail`) declare many small inline render helpers and per-row callbacks. Page-level smoke tests cover the canonical render but don't trigger every interactive callback.
+- **Excluded surfaces**: heavy multi-state modals (`NewProjectModal`, `ProjectEnvSecretsModal`, `CredentialModal`, etc. — heavy files at 700-1800 LOC each) are excluded from `coverage.include` and slated for Playwright integration coverage instead. `App.tsx`, `Onboarding.tsx`, and the active-development surfaces (`Agents.tsx`, `AgentDetail.tsx`, `pages/agents/**`) are also excluded.
 
 A future session can close these to lift branches and functions toward 80%; the floor is set at the achieved % today to give CI an honest, holding gate.
 
@@ -80,7 +80,7 @@ Coverage reports land at `packages/<pkg>/coverage/`. Open `coverage/index.html` 
 
 ## File layout
 
-- **Co-locate tests next to source**: `src/services/foo.ts` â†” `src/services/foo.test.ts`. Vitest picks them up via a glob — `include: ['src/**/*.test.{ts,tsx}']` in `web`, `['src/**/*.test.ts', 'tests/**/*.test.ts']` in `api`, equivalents in `mcp` and `shared`.
+- **Co-locate tests next to source**: `src/services/foo.ts` ↔ `src/services/foo.test.ts`. Vitest picks them up via a glob — `include: ['src/**/*.test.{ts,tsx}']` in `web`, `['src/**/*.test.ts', 'tests/**/*.test.ts']` in `api`, equivalents in `mcp` and `shared`.
   **This line used to be true of three packages out of four.** Until 2026-09-21 `api` gated on an explicit 155-entry allowlist instead — a leftover from the migration to the Postgres fixture — and a new test file that was not added to it simply never ran: no error, no warning, and this document said otherwise. `history-prune.test.ts` sat committed and unexecuted long enough for one of its assertions to rot (G-009). If you ever find yourself adding a filename to a config to make a test run, that is the bug.
 - **`tests/` top-level folder is for shared test helpers + E2E.** In api: `tests/_pg-db.ts` (template-DB PG fixture), `tests/_items.ts` (unified-items hand-rolled factories), `tests/e2e-lifecycle.test.ts`, `tests/_global-setup.ts` (Knex migration runner that runs once before any test). The `_*.ts` files are excluded from coverage; they're test infrastructure, not source.
 - **One concern per test file.** Don't bundle service unit tests and route integration tests in the same file.
@@ -104,8 +104,8 @@ Two rules:
 Some api files are intentionally excluded from `coverage.include`:
 
 - **Subprocess wrappers**: `agent-runner`, `auto-fetch-runner`, `clone-runner`, `delete-runner`, `reclone-runner`, `git-status`, `git-verify`. Each `spawn()`s an OS-specific external process (PowerShell, git, CLI tools). Correctness is verified by manual smoke; unit-testing the orchestration via `vi.mock('node:child_process')` proves only that the args were assembled correctly, not that the subprocess does the right thing.
-- **Routes** (`src/routes/**`): Fastify glue layers (schema parse â†’ service call â†’ response shape). The E2E lifecycle test exercises them end-to-end via `app.inject`; per-route integration tests would duplicate that surface. A dedicated route-test session could lift them into the gate.
-- `server.ts`, `main.ts`, `scripts/**`, `db/migrations/**`, `db/seed.ts` â€” entrypoints and data, not business logic.
+- **Routes** (`src/routes/**`): Fastify glue layers (schema parse → service call → response shape). The E2E lifecycle test exercises them end-to-end via `app.inject`; per-route integration tests would duplicate that surface. A dedicated route-test session could lift them into the gate.
+- `server.ts`, `main.ts`, `scripts/**`, `db/migrations/**`, `db/seed.ts` — entrypoints and data, not business logic.
 
 ## CI
 
@@ -132,12 +132,12 @@ The web bundle budget (`pnpm -F @atlas/web bundle:check`) is local-only too; `pn
 
 Remaining test-surface work for future sessions:
 
-- **Branches + functions gap on web** â€” lift from 69 / 63 toward 80 by covering modal `open === false`, `disabled`, `loading`, `danger` branches in the picker components, and exercising more of the inline render helpers inside the larger detail pages.
-- **Excluded modals on web** â€” the heavy multi-state modals (`NewProjectModal`, `CredentialModal`, etc.; `NewIssueModal` was deleted with ADR 0015) are slated for Playwright integration coverage rather than unit tests.
-- **Branches gap on api** â€” lift from 93.97% to 95% by covering the `envFileService.write` path (via a tmpdir-rooted test fixture) + a few defensive issue-tree guards.
-- **Subprocess wrapper coverage** â€” if a future session wants to lift the runners into the gate, it'll mock `node:child_process` and assert spawn args + SSE event emissions.
+- **Branches + functions gap on web** — lift from 69 / 63 toward 80 by covering modal `open === false`, `disabled`, `loading`, `danger` branches in the picker components, and exercising more of the inline render helpers inside the larger detail pages.
+- **Excluded modals on web** — the heavy multi-state modals (`NewProjectModal`, `CredentialModal`, etc.; `NewIssueModal` was deleted with ADR 0015) are slated for Playwright integration coverage rather than unit tests.
+- **Branches gap on api** — lift from 93.97% to 95% by covering the `envFileService.write` path (via a tmpdir-rooted test fixture) + a few defensive issue-tree guards.
+- **Subprocess wrapper coverage** — if a future session wants to lift the runners into the gate, it'll mock `node:child_process` and assert spawn args + SSE event emissions.
 
-## E2E (Theme 13 â€” Playwright)
+## E2E (Theme 13 — Playwright)
 
 **Two things that cost real time on 2026-09-12, both worth knowing before
 debugging a red spec:**
@@ -162,11 +162,11 @@ debugging a red spec:**
 
 The forensic audits (`pnpm e2e:forensic`, `e2e:functional`, `e2e:state-transitions`, config `playwright.forensic.config.ts`) run against a **live** dev stack, not the e2e one: start `pnpm dev` first. They target `http://localhost:4300`; set `FORENSIC_BASE_URL` (e.g. `http://127.0.0.1:4300`) for a stack on other ports, and `OUT_DIR` to keep their ndjson and screenshots out of the repo.
 
-- `pnpm e2e` â€” full headless suite (~7 minutes wall-clock)
-- `pnpm e2e:headed` â€” opens a browser window per spec; slower, useful for debugging
-- `pnpm e2e:live` â€” `e2e/live/` (tagged `@live`, skipped by `pnpm e2e` unless `E2E_LIVE=1`): quiet hours against the real clock and the real minute tick. Opens a window ending a minute or two out, holds a reminder / a failed run / MCP sends, and asserts a local HTTP receiver gets exactly one Teams Adaptive Card POST (then one Telegram Bot API `sendMessage`) per message once it ends, plus a **Skipped** row for a toggle turned off while held. ~6 minutes; same e2e stack and teardown. **Known stale (Atlas Open):** `quiet-hours-live.spec.ts` and `chrome-push-live.spec.ts` still create a workflow (`createWorkflow`, `PUT /api/items/:id/workflow`), which this edition no longer serves; they fail until rewritten to park a Task run
-- `pnpm e2e:update-snapshots` â€” re-baseline visual snapshots (currently off; turn on when spec set grows)
-- `pnpm e2e:report` â€” opens the HTML report after a run
-- `pnpm gate:full` â€” `pnpm gate` + `pnpm e2e` together (long, for pre-release)
+- `pnpm e2e` — full headless suite (~7 minutes wall-clock)
+- `pnpm e2e:headed` — opens a browser window per spec; slower, useful for debugging
+- `pnpm e2e:live` — `e2e/live/` (tagged `@live`, skipped by `pnpm e2e` unless `E2E_LIVE=1`): quiet hours against the real clock and the real minute tick. Opens a window ending a minute or two out, holds a reminder / a failed run / MCP sends, and asserts a local HTTP receiver gets exactly one Teams Adaptive Card POST (then one Telegram Bot API `sendMessage`) per message once it ends, plus a **Skipped** row for a toggle turned off while held. ~6 minutes; same e2e stack and teardown. **Known stale (Atlas Open):** `quiet-hours-live.spec.ts` and `chrome-push-live.spec.ts` still create a workflow (`createWorkflow`, `PUT /api/items/:id/workflow`), which this edition no longer serves; they fail until rewritten to park a Task run
+- `pnpm e2e:update-snapshots` — re-baseline visual snapshots (currently off; turn on when spec set grows)
+- `pnpm e2e:report` — opens the HTML report after a run
+- `pnpm gate:full` — `pnpm gate` + `pnpm e2e` together (long, for pre-release)
 
-**First release ships 8 page specs + 1 sidenav-walk flow** (9 total). The remaining ~19 specs from the original Theme 13 design are catalogued in `docs/regression-2026-05.md` as backfill, each implementable against the established pattern in â‰¤30 lines.
+**First release ships 8 page specs + 1 sidenav-walk flow** (9 total). The remaining ~19 specs from the original Theme 13 design are catalogued in `docs/regression-2026-05.md` as backfill, each implementable against the established pattern in ≤30 lines.

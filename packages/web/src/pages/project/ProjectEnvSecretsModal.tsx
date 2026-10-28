@@ -9,6 +9,7 @@ import TextField from '@mui/material/TextField';
 import InputAdornment from '@mui/material/InputAdornment';
 import Tooltip from '@mui/material/Tooltip';
 import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from '../../components/ButtonSpinner.js';
 import Alert from '@mui/material/Alert';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import SearchRounded from '@mui/icons-material/SearchRounded';
@@ -1053,7 +1054,7 @@ export function ProjectEnvSecretsModal({ open, project, displayId, onClose }: Pr
                             }
                             startIcon={
                                 save.isPending ? (
-                                    <CircularProgress aria-hidden size={14} color="inherit" />
+                                    <ButtonSpinner />
                                 ) : null
                             }
                             sx={{

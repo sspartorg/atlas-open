@@ -3,6 +3,7 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from '../../components/ButtonSpinner.js';
 import IconButton from '@mui/material/IconButton';
 import InputBase from '@mui/material/InputBase';
 import TextField from '@mui/material/TextField';
@@ -310,7 +311,7 @@ export function SharedSecretsTab() {
                         variant="contained"
                         startIcon={
                             save.isPending ? (
-                                <CircularProgress aria-hidden size={14} sx={{ color: ATLAS_PALETTE.white }} />
+                                <ButtonSpinner sx={{ color: ATLAS_PALETTE.white }} />
                             ) : (
                                 <SaveRounded sx={{ fontSize: 16 }} />
                             )

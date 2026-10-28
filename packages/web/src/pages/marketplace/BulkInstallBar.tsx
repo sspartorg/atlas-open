@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
-import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from '../../components/ButtonSpinner.js';
 import { ATLAS_PALETTE } from '../../theme/tokens.js';
 
 interface Props {
@@ -64,7 +64,7 @@ export function BulkInstallBar({ count, busy, onClear, onSelectAll, onAdd }: Pro
                 variant="contained"
                 onClick={onAdd}
                 disabled={busy}
-                startIcon={busy ? <CircularProgress aria-hidden size={14} color="inherit" /> : undefined}
+                startIcon={busy ? <ButtonSpinner /> : undefined}
                 sx={{
                     textTransform: 'none',
                     fontWeight: 600,

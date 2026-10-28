@@ -7,7 +7,7 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
-import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from '../components/ButtonSpinner.js';
 import ArrowForward from '@mui/icons-material/ArrowForward';
 import ArrowBack from '@mui/icons-material/ArrowBack';
 import Check from '@mui/icons-material/Check';
@@ -562,7 +562,7 @@ export function Onboarding() {
                                     disabled={submitState === 'submitting'}
                                     endIcon={
                                         submitState === 'submitting' ? (
-                                            <CircularProgress aria-hidden size={14} color="inherit" />
+                                            <ButtonSpinner />
                                         ) : (
                                             <Check />
                                         )

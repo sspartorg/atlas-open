@@ -7,6 +7,7 @@ import TextField from '@mui/material/TextField';
 import IconButton from '@mui/material/IconButton';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from '../../components/ButtonSpinner.js';
 import LinearProgress from '@mui/material/LinearProgress';
 import Radio from '@mui/material/Radio';
 import CloseRounded from '@mui/icons-material/CloseRounded';
@@ -723,7 +724,7 @@ export function DeleteProjectModal({ open, project, displayId, onClose }: Props)
                                 variant="contained"
                                 color="error"
                                 disabled
-                                startIcon={<CircularProgress aria-hidden size={14} color="inherit" />}
+                                startIcon={<ButtonSpinner />}
                                 sx={{ textTransform: 'none', fontWeight: 600 }}
                             >
                                 Deleting…

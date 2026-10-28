@@ -7,21 +7,21 @@ Atlas is a single-owner desktop-style web app for managing AI agents that operat
 ## Package layout (pnpm monorepo)
 
 ```
-         â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-         â”‚                       @atlas/shared                       â”‚
-         â”‚   types Â· constants Â· status-machine Â· Zod schemas         â”‚
-         â”‚   (depends only on `zod`; imported by api AND web)         â”‚
-         â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                      â–²                                â–²
-                      â”‚ imports                        â”‚ imports
-                      â”‚                                â”‚
-   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”     â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-   â”‚           @atlas/api            â”‚     â”‚         @atlas/web         â”‚
-   â”‚  Fastify Â· Kysely + pg Â·         â”‚ â”€â”€â–¶ â”‚  React Â· MUI Â· React Router â”‚
-   â”‚  Knex (migrations) Â·             â”‚HTTP â”‚  TanStack Query Â· Vite      â”‚
-   â”‚  Croner Â· child_process Â· zod    â”‚ SSE â”‚  (no DB, no fs access)      â”‚
-   â”‚  + SSE                           â”‚     â”‚                             â”‚
-   â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜     â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+         ┌────────────────────────────────────────────────────────────┐
+         │                       @atlas/shared                       │
+         │   types · constants · status-machine · Zod schemas         │
+         │   (depends only on `zod`; imported by api AND web)         │
+         └────────────────────────────────────────────────────────────┘
+                      ▲                                ▲
+                      │ imports                        │ imports
+                      │                                │
+   ┌──────────────────┴───────────────┐     ┌──────────┴──────────────────┐
+   │           @atlas/api            │     │         @atlas/web         │
+   │  Fastify · Kysely + pg ·         │ ──▶ │  React · MUI · React Router │
+   │  Knex (migrations) ·             │HTTP │  TanStack Query · Vite      │
+   │  Croner · child_process · zod    │ SSE │  (no DB, no fs access)      │
+   │  + SSE                           │     │                             │
+   └──────────────────────────────────┘     └─────────────────────────────┘
 ```
 
 **Hard rule:** `@atlas/web` never imports from `@atlas/api`. They communicate only through `packages/web/src/api/api.ts` over HTTP + SSE.
@@ -52,42 +52,42 @@ the ports / container swapped.
 ## Process model
 
 ```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚                      Owner's machine (single process tree)             â”‚
-â”‚                                                                        â”‚
-â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”         â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
-â”‚  â”‚   Vite dev server    â”‚         â”‚     Fastify API server         â”‚   â”‚
-â”‚  â”‚   (Port 4300 dev /   â”‚         â”‚     (Port 4301 dev /           â”‚   â”‚
-â”‚  â”‚    5300 prod)        â”‚         â”‚      5301 prod)                â”‚   â”‚
-â”‚  â”‚   serves @atlas/web â”‚ â—€â”€HTTPâ”€â–¶â”‚                                â”‚   â”‚
-â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜         â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”‚   â”‚
-â”‚                                   â”‚  â”‚ Kysely â†’ pg.Pool         â”‚  â”‚   â”‚
-â”‚                                   â”‚  â”‚ Postgres 16 (docker;     â”‚  â”‚   â”‚
-â”‚                                   â”‚  â”‚  service `atlas-open-postgresâ”‚  â”‚   â”‚
-â”‚                                   â”‚  â”‚  on :5600, or            â”‚  â”‚   â”‚
-â”‚                                   â”‚  â”‚  atlas-open-postgres-prod on â”‚  â”‚   â”‚
-â”‚                                   â”‚  â”‚  :5610 in prod)          â”‚  â”‚   â”‚
-â”‚                                   â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â”‚   â”‚
-â”‚                                   â”‚                                â”‚   â”‚
-â”‚                                   â”‚  spawn child_process per task: â”‚   â”‚
-â”‚                                   â”‚   â€¢ agent-runner   (claude/   â”‚   â”‚
-â”‚                                   â”‚     copilot CLI)               â”‚   â”‚
-â”‚                                   â”‚   â€¢ clone-runner    (git)      â”‚   â”‚
-â”‚                                   â”‚   â€¢ reclone-runner  (git)      â”‚   â”‚
-â”‚                                   â”‚   â€¢ delete-runner   (rm -rf)   â”‚   â”‚
-â”‚                                   â”‚   â€¢ auto-fetch-runner (git)    â”‚   â”‚
-â”‚                                   â”‚                                â”‚   â”‚
-â”‚                                   â”‚  Croner schedules (in-memory   â”‚   â”‚
-â”‚                                   â”‚   registry) for project auto-  â”‚   â”‚
-â”‚                                   â”‚   fetch + a 1-min setInterval  â”‚   â”‚
-â”‚                                   â”‚   poller for Task run reconcileâ”‚   â”‚
-â”‚                                   â”‚   + dispatch; both catch up    â”‚   â”‚
-â”‚                                   â”‚   missed fires on boot         â”‚   â”‚
-â”‚                                   â”‚                                â”‚   â”‚
-â”‚                                   â”‚  external notification delivery (HTTPS to   â”‚   â”‚
-â”‚                                   â”‚   api.external notification.org)            â”‚   â”‚
-â”‚                                   â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+┌────────────────────────────────────────────────────────────────────────┐
+│                      Owner's machine (single process tree)             │
+│                                                                        │
+│  ┌──────────────────────┐         ┌────────────────────────────────┐   │
+│  │   Vite dev server    │         │     Fastify API server         │   │
+│  │   (Port 4300 dev /   │         │     (Port 4301 dev /           │   │
+│  │    5300 prod)        │         │      5301 prod)                │   │
+│  │   serves @atlas/web │ ◀─HTTP─▶│                                │   │
+│  └──────────────────────┘         │  ┌──────────────────────────┐  │   │
+│                                   │  │ Kysely → pg.Pool         │  │   │
+│                                   │  │ Postgres 16 (docker;     │  │   │
+│                                   │  │  service `atlas-open-postgres│  │   │
+│                                   │  │  on :5600, or            │  │   │
+│                                   │  │  atlas-open-postgres-prod on │  │   │
+│                                   │  │  :5610 in prod)          │  │   │
+│                                   │  └──────────────────────────┘  │   │
+│                                   │                                │   │
+│                                   │  spawn child_process per task: │   │
+│                                   │   • agent-runner   (claude/   │   │
+│                                   │     copilot CLI)               │   │
+│                                   │   • clone-runner    (git)      │   │
+│                                   │   • reclone-runner  (git)      │   │
+│                                   │   • delete-runner   (rm -rf)   │   │
+│                                   │   • auto-fetch-runner (git)    │   │
+│                                   │                                │   │
+│                                   │  Croner schedules (in-memory   │   │
+│                                   │   registry) for project auto-  │   │
+│                                   │   fetch + a 1-min setInterval  │   │
+│                                   │   poller for Task run reconcile│   │
+│                                   │   + dispatch; both catch up    │   │
+│                                   │   missed fires on boot         │   │
+│                                   │                                │   │
+│                                   │  external notification delivery (HTTPS to   │   │
+│                                   │   api.external notification.org)            │   │
+│                                   └────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -96,23 +96,23 @@ the ports / container swapped.
 
 Every spawn point in the process model is a cross-platform binary:
 
-- `docker` / `docker compose` â€” invoked by `src/scripts/db-up.ts` and `db-down.ts` (pure Node, no PowerShell).
-- `git` â€” invoked directly by `clone-runner.ts`, `reclone-runner.ts`, `auto-fetch-runner.ts`, `git-status.ts`, `git-verify.ts`. `clone-runner` and `reclone-runner` set `GIT_TERMINAL_PROMPT=0` + the GCM-suppressing env vars so credential helpers never pop UI. Every service gets that env from `git-env.ts` `gitInvokeEnv`, which points `GIT_CONFIG_SYSTEM` at a wrapper that includes `/etc/gitconfig` and then resets `credential.helper`: GCM never runs, the Owner's global helper still does, and Git for Windows' `core.autocrlf` still applies at system scope, so a clean CRLF checkout does not read as dirty.
+- `docker` / `docker compose` — invoked by `src/scripts/db-up.ts` and `db-down.ts` (pure Node, no PowerShell).
+- `git` — invoked directly by `clone-runner.ts`, `reclone-runner.ts`, `auto-fetch-runner.ts`, `git-status.ts`, `git-verify.ts`. `clone-runner` and `reclone-runner` set `GIT_TERMINAL_PROMPT=0` + the GCM-suppressing env vars so credential helpers never pop UI. Every service gets that env from `git-env.ts` `gitInvokeEnv`, which points `GIT_CONFIG_SYSTEM` at a wrapper that includes `/etc/gitconfig` and then resets `credential.helper`: GCM never runs, the Owner's global helper still does, and Git for Windows' `core.autocrlf` still applies at system scope, so a clean CRLF checkout does not read as dirty. The wrapper is written once at boot into the data dir (`system-<hash>.gitconfig`, mode 0600) and rewritten if deleted; with git older than 2.32 (no `GIT_CONFIG_SYSTEM`) or no system config, it sets `GIT_CONFIG_NOSYSTEM=1` instead.
 - `rm -rf` is implemented via `fs.rm({ recursive, force })` in `delete-runner.ts`.
-- `explorer.exe` / `open` / `xdg-open` â€” branched per `process.platform` in the `POST /api/projects/:id/repos/:repoId/reveal` handler (ADR 0018: a project has no folder; its repos do).
-- `claude` / `gh` (the agent CLIs) â€” Atlas assumes the user has the right one on `PATH`; the `cli` column on each agent picks which.
+- `explorer.exe` / `open` / `xdg-open` — branched per `process.platform` in the `POST /api/projects/:id/repos/:repoId/reveal` handler (ADR 0018: a project has no folder; its repos do).
+- `claude` / `gh` (the agent CLIs) — Atlas assumes the user has the right one on `PATH`; the `cli` column on each agent picks which.
 - `cli = 'ollama'` is **not** a third binary. Ollama serves an Anthropic-compatible API, so Atlas spawns the same `claude` binary and repoints it with `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` from `services/ollama-env.ts` (base URL configurable via `ATLAS_OLLAMA_BASE_URL`, default `http://localhost:11434`). Consequences worth knowing: Ollama runs share Claude's argv, stream-json parsing, `--session-id`/`--resume`, and `~/.claude/projects` transcripts; they record `total_cost_usd = 0`; and the env overlay must always be spread **after** `gitInvokeEnv` so a host `ANTHROPIC_API_KEY` can't divert a free local run to Anthropic. Branch on `CLI_DIALECT` from `@atlas/shared`, never on the raw `cli` value.
 - Agent runs on an item (`issueId != null`; `agent-runner.spawnCli`, claude + ollama dialects) are isolated from the Owner's personal Claude Code config. They add `--setting-sources project,local --strict-mcp-config --mcp-config <Atlas MCP only>` (`claudeIsolationArgs`), so no `~/.claude` hooks, plugins, user CLAUDE.md or `~/.claude.json` MCP servers load, while worktree `.claude/commands/atlas-*` still resolve. The prompt stays on stdin because `--mcp-config` is variadic and would swallow a positional prompt. Runs with no item (ad-hoc runs) are exempt because scouts depend on Owner-scoped MCP servers (Playwright plugin, claude.ai Atlassian). Copilot runs are not isolated. Every agent run's child env also carries `ATLAS_API_URL=http://127.0.0.1:<API_PORT>` for `.atlas/scripts` validators. Terminal sessions (`cli-session-host.ts`) and dry runs are unchanged.
 
-Auto-fetch runs in Node on every OS â€” `auto-fetch-runner.ts` calls the typed `performAutoFetch()` in `services/auto-fetch.ts`, which shells out to `git` via `execFile`. The previous PowerShell holdout (`auto-fetch.ps1`) was retired in C01.
+Auto-fetch runs in Node on every OS — `auto-fetch-runner.ts` calls the typed `performAutoFetch()` in `services/auto-fetch.ts`, which shells out to `git` via `execFile`. The previous PowerShell holdout (`auto-fetch.ps1`) was retired in C01.
 
 The CORS allowlist + `requireMcpToken` trusted-browser-origin set are computed from `utils/lan-origins.ts`. When `ATLAS_LAN_ACCESS=true`, the helper walks `os.networkInterfaces()` for non-loopback non-link-local IPv4 addresses and adds `http://<ip>:${WEB_PORT}` (dev 4300 / prod 5300) to both sets, plus the machine's mDNS name `http://<hostname>.local:${WEB_PORT}` (lowercased, one `.local` suffix) so LAN browsers can use the friendly name instead of an IP. Vite mirrors this with `server.allowedHosts: ['.local']`. The boot log lists what got added.
 
-### Security â€” write gate & origin allowlist
+### Security — write gate & origin allowlist
 
-> **G-023 (2026-09-21) â€” the write gate is defence-in-depth, not a security
+> **G-023 (2026-09-21) — the write gate is defence-in-depth, not a security
 > boundary.** A request carrying `Sec-Fetch-Site: same-origin` passes it
-> without a token, and *any* local client can set that header â€” proven with
+> without a token, and *any* local client can set that header — proven with
 > curl against a running API: `DELETE /api/credentials/<id>` returns 401
 > without it and reaches the handler with it. No header-based check can fix
 > this, because nothing in an HTTP request distinguishes a browser from a
@@ -120,63 +120,63 @@ The CORS allowlist + `requireMcpToken` trusted-browser-origin set are computed f
 > pages. A hostile process running as the Owner can read `ATLAS_MCP_TOKEN`
 > from `.env` regardless, so the token is no stronger against that threat.
 > Closing it needs a same-origin bootstrap setting an HttpOnly
-> `SameSite=Strict` cookie â€” an Owner decision, not an improvisation.
+> `SameSite=Strict` cookie — an Owner decision, not an improvisation.
 
-The API has exactly one auth gate: a global Fastify `onRequest` hook (`server.ts:76â€“80`) that delegates to `requireMcpToken` (`plugins/mcp-auth.ts`) for every `POST/PUT/PATCH/DELETE`. The same `getAllowedOrigins()` set feeds `@fastify/cors`, so CORS preflight and the gate agree.
+The API has exactly one auth gate: a global Fastify `onRequest` hook (`server.ts:76–80`) that delegates to `requireMcpToken` (`plugins/mcp-auth.ts`) for every `POST/PUT/PATCH/DELETE`. The same `getAllowedOrigins()` set feeds `@fastify/cors`, so CORS preflight and the gate agree.
 
 **What is checked**
 
 | Method | Gate runs? | Origin check | Token check |
 |---|---|---|---|
 | `GET` (reads, SSE) | no | n/a | n/a |
-| `POST`/`PUT`/`PATCH`/`DELETE` | yes | `Origin âˆˆ getTrustedBrowserOrigins()` | `X-Atlas-Token === ATLAS_MCP_TOKEN` |
+| `POST`/`PUT`/`PATCH`/`DELETE` | yes | `Origin ∈ getTrustedBrowserOrigins()` | `X-Atlas-Token === ATLAS_MCP_TOKEN` |
 
 **What is allowed**
 
-1. **Empty token (`ATLAS_MCP_TOKEN=""`)** â€” gate is bypassed entirely. **Reaching this state now takes `ATLAS_MCP_TOKEN_OPEN=1`**: `main.ts` generates a 48-byte token at boot when the var is empty and persists it to the root env file, so a fresh install is closed by default (F-021). Only the e2e suite opts out, because it writes over plain HTTP with no browser headers.
-2. **Trusted browser origin** â€” `Origin` header matches the static set (`http://localhost:${WEB_PORT}`, `http://127.0.0.1:${WEB_PORT}` â€” dev 4300 / prod 5300) plus, when `ATLAS_LAN_ACCESS=true`, the host's non-loopback IPv4s.
-3. **Matching token header** â€” `X-Atlas-Token` equals `ATLAS_MCP_TOKEN`. This is the path the MCP server uses for write-side calls.
+1. **Empty token (`ATLAS_MCP_TOKEN=""`)** — gate is bypassed entirely. **Reaching this state now takes `ATLAS_MCP_TOKEN_OPEN=1`**: `main.ts` generates a 48-byte token at boot when the var is empty and persists it to the root env file, so a fresh install is closed by default (F-021). Only the e2e suite opts out, because it writes over plain HTTP with no browser headers.
+2. **Trusted browser origin** — `Origin` header matches the static set (`http://localhost:${WEB_PORT}`, `http://127.0.0.1:${WEB_PORT}` — dev 4300 / prod 5300) plus, when `ATLAS_LAN_ACCESS=true`, the host's non-loopback IPv4s.
+3. **Matching token header** — `X-Atlas-Token` equals `ATLAS_MCP_TOKEN`. This is the path the MCP server uses for write-side calls.
 
 **What is rejected**
 
-Anything else â†’ `401 unauthorized`. The most common case: a second device on the same LAN whose `Origin` is not in the trusted set because `ATLAS_LAN_ACCESS` was left at the default (`false`).
+Anything else → `401 unauthorized`. The most common case: a second device on the same LAN whose `Origin` is not in the trusted set because `ATLAS_LAN_ACCESS` was left at the default (`false`).
 
 **Trade-off when `ATLAS_LAN_ACCESS=true`**
 
-Any device on the host's LAN can write â€” fine for home Wi-Fi, **do not enable on public networks**. The boot log (`[security] ATLAS_LAN_ACCESS=true â€” trusting LAN origins ...`) lists every IP the helper added so the Owner can audit. VPN / virtual adapter IPs are intentionally included; flip the flag back to `false` if any of them is reachable from somewhere the Owner doesn't control.
+Any device on the host's LAN can write — fine for home Wi-Fi, **do not enable on public networks**. The boot log (`[security] ATLAS_LAN_ACCESS=true — trusting LAN origins ...`) lists every IP the helper added so the Owner can audit. VPN / virtual adapter IPs are intentionally included; flip the flag back to `false` if any of them is reachable from somewhere the Owner doesn't control.
 
 ## Request flow (typical mutation)
 
 ```
 User clicks button in web
-        â”‚
-        â–¼
+        │
+        ▼
 useMutation in hook (e.g. useTransitionTask)
-        â”‚
-        â–¼
-api.tasks.transition(id, status)         â† packages/web/src/api/api.ts
-        â”‚
-        â–¼  fetch(PATCH /api/tasks/:id/status)
-        â”‚
-        â–¼
-Fastify route handler                       â† packages/api/src/routes/tasks.ts
-        â”‚
-        â–¼
+        │
+        ▼
+api.tasks.transition(id, status)         ← packages/web/src/api/api.ts
+        │
+        ▼  fetch(PATCH /api/tasks/:id/status)
+        │
+        ▼
+Fastify route handler                       ← packages/api/src/routes/tasks.ts
+        │
+        ▼
 Zod schema parse (from @atlas/shared)
-        â”‚
-        â–¼
-Service layer                               â† packages/api/src/services/tasks.ts
-        â”‚       isValidTransition(...)      â† @atlas/shared/status-machine
-        â–¼
+        │
+        ▼
+Service layer                               ← packages/api/src/services/tasks.ts
+        │       isValidTransition(...)      ← @atlas/shared/status-machine
+        ▼
 Kysely query (pg)
-        â”‚
-        â–¼
+        │
+        ▼
 Response (snake_case JSON, matches @atlas/shared types)
-        â”‚
-        â–¼
+        │
+        ▼
 React Query invalidates relevant keys (['tasks'], ['issues'], ...)
-        â”‚
-        â–¼
+        │
+        ▼
 UI refetches and re-renders
 ```
 
@@ -244,30 +244,30 @@ Off-switches: unassign the agent (a `ready` Task with no assignee is never dispa
 
 ```
 Web client                              API server (single process)
-    â”‚                                       â”‚
-    â”‚ GET /api/events  (long-lived)         â”‚
-    â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¶â”‚
-    â”‚                                       â”‚   client added to in-memory
-    â”‚                                       â”‚   Set<(SSEEvent) => void>
-    â”‚                                       â”‚   (routes/events.ts)
-    â”‚                                       â”‚
-    â”‚                                       â”‚   30s heartbeat â”€â”€â”€â”€â”
-    â”‚ data: { "type":"heartbeat" }          â”‚                     â”‚
-    â”‚â—€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚ â—€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-    â”‚                                       â”‚
-    â”‚                                       â”‚   spawn agent-runner
-    â”‚                                       â”‚     â”œâ”€â”€ stdout/stderr â†’ SSE
-    â”‚                                       â”‚     â”‚   "agent_output"
-    â”‚                                       â”‚     â””â”€â”€ on exit â†’ SSE
-    â”‚                                       â”‚         "run_completed"
-    â”‚ data: { "type":"agent_output", ... } â”‚
-    â”‚â—€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
-    â”‚                                       â”‚
-    â”‚                                       â”‚   auto-fetch-runner fires
-    â”‚                                       â”‚     via Croner â†’ SSE
-    â”‚                                       â”‚     "autofetch_status"
-    â”‚ data: { "type":"autofetch_status",...}â”‚
-    â”‚â—€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
+    │                                       │
+    │ GET /api/events  (long-lived)         │
+    │──────────────────────────────────────▶│
+    │                                       │   client added to in-memory
+    │                                       │   Set<(SSEEvent) => void>
+    │                                       │   (routes/events.ts)
+    │                                       │
+    │                                       │   30s heartbeat ────┐
+    │ data: { "type":"heartbeat" }          │                     │
+    │◀──────────────────────────────────────│ ◀───────────────────┘
+    │                                       │
+    │                                       │   spawn agent-runner
+    │                                       │     ├── stdout/stderr → SSE
+    │                                       │     │   "agent_output"
+    │                                       │     └── on exit → SSE
+    │                                       │         "run_completed"
+    │ data: { "type":"agent_output", ... } │
+    │◀──────────────────────────────────────│
+    │                                       │
+    │                                       │   auto-fetch-runner fires
+    │                                       │     via Croner → SSE
+    │                                       │     "autofetch_status"
+    │ data: { "type":"autofetch_status",...}│
+    │◀──────────────────────────────────────│
 ```
 
 **Events emitted today** (full catalogue lives in `api-surface.md`):
@@ -279,7 +279,7 @@ Web client                              API server (single process)
 - Reclone: `reclone_status`, `reclone_output`, `reclone_completed`, `reclone_error`
 - Delete: `delete_status`, `delete_output`, `delete_error`
 - Auto-fetch: `autofetch_status`, `autofetch_output`, `autofetch_completed`
-- **Theme 08 â€” Memory regeneration**: `memory_regenerated`
+- **Theme 08 — Memory regeneration**: `memory_regenerated`
 - Commit discipline: `commit_verification`
 
 SSE state is **in-memory only**. Restarting the API drops all subscribers; web clients auto-reconnect.
@@ -319,8 +319,8 @@ The agent does NOT run typecheck/test/build — the PR review IS the validation.
 
 There is **no periodic polling** in the web today. Liveness comes from three channels:
 
-1. **SSE invalidation** while the tab is foreground â€” service-layer mutations call `broadcastSSE()` after every DB write, the web's `useSSE` handler maps each event to a TanStack Query `invalidateQueries(...)` call, the affected hook refetches.
-2. **`refetchOnWindowFocus`** + **`refetchOnReconnect`** â€” TanStack Query defaults catch any drift after a tab has been backgrounded long enough that SSE may have raced an auto-reconnect.
+1. **SSE invalidation** while the tab is foreground — service-layer mutations call `broadcastSSE()` after every DB write, the web's `useSSE` handler maps each event to a TanStack Query `invalidateQueries(...)` call, the affected hook refetches.
+2. **`refetchOnWindowFocus`** + **`refetchOnReconnect`** — TanStack Query defaults catch any drift after a tab has been backgrounded long enough that SSE may have raced an auto-reconnect.
 3. **Bounded staleness via `staleTime: 30 s` + `gcTime: 5 min`** (`packages/web/src/App.tsx` QueryClient defaults). A navigation within 30 s paints from cache and skips the network entirely; SSE still drops cached entries the moment data actually changes server-side, so the 30 s window only ever holds data that was correct the last time the server said so. This replaced the previous "every read is treated as stale" model, which was re-firing the same query on every page mount and pushing cold reload past 1.5 s.
 
 A few hooks override the global defaults with `staleTime: Infinity` + `refetchOnMount: false` because their data only changes through local mutations (which write through `setQueryData` / `invalidateQueries` immediately) or SSE: `useSettings`, `useSidenavCounts`, `useAgents`, `useProjects`. `useAiEnabled` is a passthrough that calls `useSettings` so it never double-fetches the same `['settings']` key.
@@ -339,8 +339,8 @@ All long-running work runs in spawned subprocesses, never inline in the request 
 
 | Runner | Spawns | Inputs | Outputs |
 |---|---|---|---|
-| `agent-runner.ts` | `claude` or `copilot` CLI (`cli = ollama` spawns `claude` with the Ollama env overlay) | prompt built from agent `prompt_md` + issue context; `.atlas/*` staged in the Task run's worktree or a temp dir | stdout â†’ `agent_output` SSE; on exit, cost + outcome persisted and the step reported to `workflow-engine.onStepFinished` |
-| `clone-runner.ts` | `git clone` | repo URL, credential (decrypted in-memory), target path | output â†’ `clone_output` SSE; on success, project `clone_status` â†’ cloned |
+| `agent-runner.ts` | `claude` or `copilot` CLI (`cli = ollama` spawns `claude` with the Ollama env overlay) | prompt built from agent `prompt_md` + issue context; `.atlas/*` staged in the Task run's worktree or a temp dir | stdout → `agent_output` SSE; on exit, cost + outcome persisted and the step reported to `workflow-engine.onStepFinished` |
+| `clone-runner.ts` | `git clone` | repo URL, credential (decrypted in-memory), target path | output → `clone_output` SSE; on success, project `clone_status` → cloned |
 | `reclone-runner.ts` | `git stash` + `fetch --prune` + `pull --ff-only` | repo_id | sequence of SSE events |
 | `delete-runner.ts` | `rm -rf` (workspace folder) | project_id | SSE events |
 | `auto-fetch-runner.ts` | `git fetch` | scheduled via Croner from `project_schedules` | SSE events + external notification on auth failure |
@@ -357,8 +357,8 @@ Terminal sessions are the one subprocess surface that does NOT stream over SSE. 
 
 `packages/web/src/App.tsx:61-88` defines a route guard:
 
-- `!settings.onboarding_complete` â†’ forces `/onboarding`, blocks all other routes
-- `settings.onboarding_complete && pathname === '/onboarding'` â†’ forces `/`
+- `!settings.onboarding_complete` → forces `/onboarding`, blocks all other routes
+- `settings.onboarding_complete && pathname === '/onboarding'` → forces `/`
 
 Everything inside `AppShell` (Sidenav + Topbar + Outlet) is post-onboarding only. The gate exists because every other surface assumes a workspace path and an Owner name; rendering them without those values produces broken empty states rather than a useful first-run experience.
 
@@ -368,33 +368,33 @@ Everything inside `AppShell` (Sidenav + Topbar + Outlet) is post-onboarding only
 
 Inside the AppShell, the scrollable content `Box` (`packages/web/src/App.tsx`) renders two siblings working together:
 
-1. `<Suspense key={location.pathname} fallback={<BrandedFallback />}><Outlet /></Suspense>` â€” the React Router outlet, with the Suspense boundary **keyed by `pathname`**. Keying forces a fresh Suspense boundary on every path change, so React shows the fallback for the full duration of the lazy-chunk load instead of keeping the previous page visible (React 18's default "stay on the old state on update suspension" behavior).
-2. `<NavigationCurtain />` (`packages/web/src/components/shell/NavigationCurtain.tsx`) â€” a URL-driven overlay that paints `<BrandedFallback />` for 350 ms on every **`pathname`** change. Query-param changes (`?tab=`, `?status=`, etc.) deliberately do not trigger it.
+1. `<Suspense key={location.pathname} fallback={<BrandedFallback />}><Outlet /></Suspense>` — the React Router outlet, with the Suspense boundary **keyed by `pathname`**. Keying forces a fresh Suspense boundary on every path change, so React shows the fallback for the full duration of the lazy-chunk load instead of keeping the previous page visible (React 18's default "stay on the old state on update suspension" behavior).
+2. `<NavigationCurtain />` (`packages/web/src/components/shell/NavigationCurtain.tsx`) — a URL-driven overlay that paints `<BrandedFallback />` for 350 ms on every **`pathname`** change. Query-param changes (`?tab=`, `?status=`, etc.) deliberately do not trigger it.
 
 Both are keyed by `pathname` only, with deliberate division of labour:
 
-- **Path change** (sidenav â†’ Agents, row click â†’ detail page, programmatic `navigate()`): keyed Suspense remounts the boundary and paints `BrandedFallback` for the full chunk-load duration; the curtain overlays a 350 ms flash on top for snappy click feedback. Both fire.
+- **Path change** (sidenav → Agents, row click → detail page, programmatic `navigate()`): keyed Suspense remounts the boundary and paints `BrandedFallback` for the full chunk-load duration; the curtain overlays a 350 ms flash on top for snappy click feedback. Both fire.
 - **Same-path tab / filter change** (`?tab=`, `?status=`, search filters): neither mechanism fires. The page stays mounted, scroll position and form state are preserved, and tab content swaps via local `useState` (see in-page tab strategy below) rather than going through React Router on the click path.
 
 Together they guarantee a visible loader the moment the user navigates to a new page, while keeping tab switches and filter changes feeling instant and stateful.
 
-The curtain is an overlay (`position: absolute`, not a route remount). The keyed Suspense, by contrast, *does* unmount the previous page on path change â€” that's correct, because the previous page is no longer relevant.
+The curtain is an overlay (`position: absolute`, not a route remount). The keyed Suspense, by contrast, *does* unmount the previous page on path change — that's correct, because the previous page is no longer relevant.
 
-Modal-gated `<Suspense fallback={null}>` boundaries inside pages (e.g. `ProjectDetail` delete / env-secrets modals, `Issues` new-issue modal, `Credentials` edit modal) are intentionally untouched â€” they open via component-local `useState`, not navigation, and a full-screen logo behind a dialog backdrop would be wrong.
+Modal-gated `<Suspense fallback={null}>` boundaries inside pages (e.g. `ProjectDetail` delete / env-secrets modals, `Issues` new-issue modal, `Credentials` edit modal) are intentionally untouched — they open via component-local `useState`, not navigation, and a full-screen logo behind a dialog backdrop would be wrong.
 
 ---
 
 ## In-page tab strategy: lifted data + Container + Content split
 
-Pages with tab strips (`ProjectDetail`, `AgentDetail`, `Notifications`) split every tab into a lightweight **Container** and a heavy **Content** component, gated by `useDeferredMount`. **The parent page owns all data fetching for every tab** â€” Containers and Content components never call `useQuery` themselves; they receive data as props.
+Pages with tab strips (`ProjectDetail`, `AgentDetail`, `Notifications`) split every tab into a lightweight **Container** and a heavy **Content** component, gated by `useDeferredMount`. **The parent page owns all data fetching for every tab** — Containers and Content components never call `useQuery` themselves; they receive data as props.
 
 ### How a tab click flows
 
-1. Tab state is driven by `useTabParam` (`packages/web/src/hooks/useTabParam.ts`), a thin `useState` wrapper. The initial value is read once from `window.location.search` (deep links to `?tab=â€¦` still work). Clicking a tab is a single `useState` update â€” no `useSearchParams`, no `useLocation`, no router subscription anywhere on the click path. (`AppShell`, `Sidenav`, `Topbar` all consume router state; routing the click through the URL was re-rendering the whole shell.)
-2. The parent unmounts the previous tab's Container and mounts the next tab's Container. **No new `fetch` request fires** â€” the data is already in the parent's TanStack Query observers.
+1. Tab state is driven by `useTabParam` (`packages/web/src/hooks/useTabParam.ts`), a thin `useState` wrapper. The initial value is read once from `window.location.search` (deep links to `?tab=…` still work). Clicking a tab is a single `useState` update — no `useSearchParams`, no `useLocation`, no router subscription anywhere on the click path. (`AppShell`, `Sidenav`, `Topbar` all consume router state; routing the click through the URL was re-rendering the whole shell.)
+2. The parent unmounts the previous tab's Container and mounts the next tab's Container. **No new `fetch` request fires** — the data is already in the parent's TanStack Query observers.
 3. The Container synchronously returns a per-tab `<TabNameSkeleton />`. React commits, the browser paints the skeleton.
 4. After `useDeferredMount` fires (`setTimeout(0)` from a `useEffect`), the Container re-renders. For tabs the parent had to fetch (`OverviewTab`, `TasksTab`, `MemoryTab`, both Notifications tabs), the Container also waits for `data !== undefined` from props. The first time the page is mounted the wait is for the parent's initial fetches; subsequent tab swaps see data immediately.
-5. The Container renders `<TabNameContent data={â€¦} {...rest} />` â€” pure render, no fetch, no chunk download.
+5. The Container renders `<TabNameContent data={…} {...rest} />` — pure render, no fetch, no chunk download.
 
 ### Data fetched in each parent
 
@@ -408,11 +408,11 @@ Pages with tab strips (`ProjectDetail`, `AgentDetail`, `Notifications`) split ev
 
 ### Why this layout
 
-- React 18 does not yield between a synchronous state update and the commit. Without `useDeferredMount`, the heavy Content render happens on the click frame and blocks paint. With it, the skeleton paints first; the heavy mount happens on a later macrotask, off the clickâ†’paint loop.
+- React 18 does not yield between a synchronous state update and the commit. Without `useDeferredMount`, the heavy Content render happens on the click frame and blocks paint. With it, the skeleton paints first; the heavy mount happens on a later macrotask, off the click→paint loop.
 - Lifting fetches removes per-tab fetch latency and per-tab chunk-download latency (the prior `lazyNamed` split has been dropped on `GuardrailsTabContent`, `MemoryTabContent`, `PromptTabContent`; they are now eager-imported). After the first paint, tab swap is purely a render exercise.
 - The parent chrome (`ProjectHeader`, `ProjectRightRail`, `AgentHero`, `AgentSidebar`) is wrapped in `React.memo` and receives `useCallback`-stabilised handler props from the parent. A tab click no longer re-walks 800+ LOC of header/sidebar JSX.
 - Conditional rendering of the active tab body (`{currentTab === 'tasks' && <TasksTab … />}`) is intentional: a previous "mount-all + CSS hide" attempt made hidden tabs re-render on every parent update, which turned heavy panels into perceptible lag.
-- `AgentDetail.setTab` is **not** wrapped in `useTransition` â€” wrapping would tell React to keep the old tab body visible until the new one is ready, which produces a different "click does nothing for a second" feel.
+- `AgentDetail.setTab` is **not** wrapped in `useTransition` — wrapping would tell React to keep the old tab body visible until the new one is ready, which produces a different "click does nothing for a second" feel.
 
 ### Trade-offs accepted
 
@@ -420,7 +420,7 @@ Pages with tab strips (`ProjectDetail`, `AgentDetail`, `Notifications`) split ev
 - Browser back does not restore tab state.
 - Initial page load is heavier: every lifted query fires in parallel on parent mount instead of one-per-tab on click.
 - Initial bundle for `AgentDetail` and `ProjectDetail` is larger now that the four previously-lazy Content components ship eagerly.
-- In-page links that previously navigated to `?tab=â€¦` (e.g. the "Guard-rails active" badge in `ProjectHeader`) now call the same `setTab` callback the tab strip uses; they are buttons, not `RouterLink`s.
+- In-page links that previously navigated to `?tab=…` (e.g. the "Guard-rails active" badge in `ProjectHeader`) now call the same `setTab` callback the tab strip uses; they are buttons, not `RouterLink`s.
 
 ### File layout
 
@@ -452,31 +452,31 @@ Captured 2026-05-27 at commit `dd90e93` (B02 verification pass) against the
 | `Agents` | 17.62 | 6.10 |
 | `Projects` | 17.37 | 6.05 |
 
-Initial cached core (mui + index + router + query) â‰ˆ **254 KiB gzip** (was 243
-KiB at 2026-05-23 `8dfcd40` â€” `+4.5%` from MUI minor uptake + app-shell growth
+Initial cached core (mui + index + router + query) ≈ **254 KiB gzip** (was 243
+KiB at 2026-05-23 `8dfcd40` — `+4.5%` from MUI minor uptake + app-shell growth
 across A04 / A05 / Theme 09b shipments). All chunks remain well under any
 single-chunk budget (largest is `mui` at 122.89 KiB gzip). Refresh this table
 when `manualChunks` strategy changes. Treat a >10% growth on any cached-core
-chunk as a regression worth tracing â€” those bytes hit every cold load. Lazy
+chunk as a regression worth tracing — those bytes hit every cold load. Lazy
 pages may move more freely; the only notable lazy-page mover this pass was
-`AgentDetail` (17.19 â†’ 21.18 KiB gzip, `+23%`) which absorbed the A04
+`AgentDetail` (17.19 → 21.18 KiB gzip, `+23%`) which absorbed the A04
 reset-rounds banner and A05 run pill on the Runs tab.
 
 ---
 
 ## Storage layout
 
-- **Database**: SQLite file (`atlas.db`) inside the workspace folder selected during onboarding. Schema in `packages/api/src/db/migrations/*.sql` (11 migrations as of writing â€” see `api-surface.md`).
+- **Database**: SQLite file (`atlas.db`) inside the workspace folder selected during onboarding. Schema in `packages/api/src/db/migrations/*.sql` (11 migrations as of writing — see `api-surface.md`).
 - **Repos**: cloned under the workspace folder, one subfolder per project.
 - **`.env`**: the API mirrors the `settings.env` table into a `.env` file in the server folder on every save (powered by `packages/api/src/services/env-file.ts`).
 - **External notification secrets**: token stored encrypted at rest (AES-256-GCM); decrypted only in-memory by `services/external notification.ts`.
-- **Git credentials**: same encryption approach â€” `credentials` table + `services/credentials.ts`.
+- **Git credentials**: same encryption approach — `credentials` table + `services/credentials.ts`.
 
 ---
 
 ## Key non-obvious invariants
 
 - The status machine is the **only** authority on valid transitions. UI hides invalid actions; API rejects invalid PATCHes. Both call `isValidTransition()` / `getValidNextStatuses()` from `@atlas/shared`.
-- Task runs escalate **only** to the Owner (park â†’ `waiting_for_info`); agents never route items. The engine is the only writer of an item's status + assignee while its Task run is `running` (`workflow-lock.ts` 409s the PATCH routes, UI and MCP alike).
-- `ATLAS_AI_ENABLED=false` puts `agent-runner.ts` into a simulated mode that emits canned output ending in an `atlas-outcome: done` block, so Task runs still advance â€” used for development without burning CLI credits.
+- Task runs escalate **only** to the Owner (park → `waiting_for_info`); agents never route items. The engine is the only writer of an item's status + assignee while its Task run is `running` (`workflow-lock.ts` 409s the PATCH routes, UI and MCP alike).
+- `ATLAS_AI_ENABLED=false` puts `agent-runner.ts` into a simulated mode that emits canned output ending in an `atlas-outcome: done` block, so Task runs still advance — used for development without burning CLI credits.
 - Clones run with credentials injected via `http.extraheader` (Basic auth), NOT via URL-embedded credentials, because Windows Git Credential Manager will leak URL-embedded tokens.

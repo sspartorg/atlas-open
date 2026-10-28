@@ -8,6 +8,7 @@ import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
 import InputAdornment from '@mui/material/InputAdornment';
 import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from '../../components/ButtonSpinner.js';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import CheckCircleOutline from '@mui/icons-material/CheckCircleOutline';
 import ScheduleRounded from '@mui/icons-material/ScheduleRounded';
@@ -484,7 +485,7 @@ export function AutoFetchScheduleModal({ open, project, repo, onClose }: Props) 
                                 disabled={save.isPending}
                                 startIcon={
                                     save.isPending ? (
-                                        <CircularProgress aria-hidden size={14} color="inherit" />
+                                        <ButtonSpinner />
                                     ) : (
                                         <CheckCircleOutline sx={{ fontSize: 18 }} />
                                     )

@@ -1,19 +1,19 @@
 # API Surface
 
-> **2026-05 â€” Postgres migration in progress.** DB engine is Postgres 16 (docker compose service `atlas-open-postgres`). Migration history collapsed to a single Knex baseline: `packages/api/src/db/migrations/001_baseline.ts`. Query layer: **Kysely** for queries (type-safe, async) and **Knex** for schema migrations. Side tables (`comments`, `issue_events`, `agent_runs`, `notifications`) now reference `items(id)` directly via a single `item_id` FK with `ON DELETE CASCADE`. Issue links now live in `item_links(from_id, to_id, relation_type)` where `relation_type âˆˆ {relates_to, depends_on}`. Since migration 037 (ADR 0015) `items.type` is `task` or `sub_task` (text + CHECK); the per-kind routes (`/api/tasks/...`, `/api/sub-tasks/...`) project rows through `services/items.ts` (`rowToTask` / `rowToSubTask`).
+> **2026-05 — Postgres migration in progress.** DB engine is Postgres 16 (docker compose service `atlas-open-postgres`). Migration history collapsed to a single Knex baseline: `packages/api/src/db/migrations/001_baseline.ts`. Query layer: **Kysely** for queries (type-safe, async) and **Knex** for schema migrations. Side tables (`comments`, `issue_events`, `agent_runs`, `notifications`) now reference `items(id)` directly via a single `item_id` FK with `ON DELETE CASCADE`. Issue links now live in `item_links(from_id, to_id, relation_type)` where `relation_type ∈ {relates_to, depends_on}`. Since migration 037 (ADR 0015) `items.type` is `task` or `sub_task` (text + CHECK); the per-kind routes (`/api/tasks/...`, `/api/sub-tasks/...`) project rows through `services/items.ts` (`rowToTask` / `rowToSubTask`).
 
 Fastify server in `packages/api/src/server.ts`. All routes registered as plugins from `packages/api/src/routes/`. All requests validated against Zod schemas in `@atlas/shared/schemas`. Responses use snake_case fields matching `@atlas/shared/types`.
 
-Base URL in dev: `http://localhost:4301`. In prod (`pnpm prod`, `ATLAS_ENV=prod`): `http://localhost:5301`. Web calls go through `packages/web/src/api/api.ts` and are proxied via vite's `/api` â†’ `API_PROXY_TARGET` rule, so the bundle itself never sees an absolute URL.
+Base URL in dev: `http://localhost:4301`. In prod (`pnpm prod`, `ATLAS_ENV=prod`): `http://localhost:5301`. Web calls go through `packages/web/src/api/api.ts` and are proxied via vite's `/api` → `API_PROXY_TARGET` rule, so the bundle itself never sees an absolute URL.
 
-Live Swagger UI at `/api/docs`; OpenAPI 3 JSON at `/api/docs/json`. This markdown file is the human index; the JSON is what's actually served. Routes without `schema:` blocks appear in the spec with method + path only (no body/response details) â€” fill in `schema:` on a route to get richer docs.
+Live Swagger UI at `/api/docs`; OpenAPI 3 JSON at `/api/docs/json`. This markdown file is the human index; the JSON is what's actually served. Routes without `schema:` blocks appear in the spec with method + path only (no body/response details) — fill in `schema:` on a route to get richer docs.
 
 ---
 
 ## Routes
 
-### `routes/agents.ts` â€” Agents
-**Why this group exists**: Agents are the configurable AI workers that act on behalf of the Owner. CRUD is exposed here because only the Owner configures, pauses, and routes them; the MCP layer intentionally does not touch this surface (external AI clients should never create or rename agents â€” that's an Owner-only concern). Checklists and memory live under the agent rather than separate top-level resources so authorization is always anchored to one agent. Git delivery is not an agent concern: the Task runner commits, pushes and opens the PR — see `routes/workflows.ts`.
+### `routes/agents.ts` — Agents
+**Why this group exists**: Agents are the configurable AI workers that act on behalf of the Owner. CRUD is exposed here because only the Owner configures, pauses, and routes them; the MCP layer intentionally does not touch this surface (external AI clients should never create or rename agents — that's an Owner-only concern). Checklists and memory live under the agent rather than separate top-level resources so authorization is always anchored to one agent. Git delivery is not an agent concern: the Task runner commits, pushes and opens the PR — see `routes/workflows.ts`.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -23,13 +23,13 @@ Live Swagger UI at `/api/docs`; OpenAPI 3 JSON at `/api/docs/json`. This markdow
 | PATCH | `/api/agents/:id` | Update agent (rename, pause/resume, CLI/model/effort, prompt, checklists, and the ADR 0033 run config: `requires_item`, `git_commit` / `git_push` / `git_open_pr`, `schedule_enabled` / `schedule_preset` / `schedule_time_of_day` / `schedule_weekday` / `schedule_cron_expression`). The run config is validated merged over the stored row (`runConfigColumns`): a broken git chain or a bad cron → 400; the cron is materialised from the preset and `schedule_next_run_at` recomputed. |
 | DELETE | `/api/agents/:id` | Delete agent → 204; 404 unknown |
 | GET | `/api/agents/:id/memory` | Read the agent's procedural-memory markdown (auto-creates an empty row on first read) |
-| PUT | `/api/agents/:id/memory` | Replace or append the memory body. Body: `{ body_md, mode?: 'replace' \| 'append' }`. `'replace'` (default) bumps version + flips source to `manual-edit`. **Theme 08** â€” `'append'` calls `appendLesson()`: inserts a `- <body_md>` bullet under `## Course corrections`, bumps version, audits with `trigger='mcp_update'`, does NOT reset the cadence counter. |
-| POST | `/api/agents/:id/memory/regenerate` | Regenerate from recent runs; bumps version, flips source to `ai-generated`, links `last_run_id`. **Theme 08** â€” audits a row in `memory_regenerations` with `trigger='manual'` + resets `runs_since_regen`. |
-| GET | `/api/agents/:id/memory/history` | **Theme 08** â€” last N `memory_regenerations` rows (newest first; `limit` query param 1..50, default 10). Powers the Memory tab's regen-history list. |
-| GET | `/api/agents/:id/commit-verifications` | **Theme 11** â€” last N `commit_verifications` rows (newest first; `limit` 1..50, default 10). Powers the Overview tab's commit-discipline dots tile. |
+| PUT | `/api/agents/:id/memory` | Replace or append the memory body. Body: `{ body_md, mode?: 'replace' \| 'append' }`. `'replace'` (default) bumps version + flips source to `manual-edit`. **Theme 08** — `'append'` calls `appendLesson()`: inserts a `- <body_md>` bullet under `## Course corrections`, bumps version, audits with `trigger='mcp_update'`, does NOT reset the cadence counter. |
+| POST | `/api/agents/:id/memory/regenerate` | Regenerate from recent runs; bumps version, flips source to `ai-generated`, links `last_run_id`. **Theme 08** — audits a row in `memory_regenerations` with `trigger='manual'` + resets `runs_since_regen`. |
+| GET | `/api/agents/:id/memory/history` | **Theme 08** — last N `memory_regenerations` rows (newest first; `limit` query param 1..50, default 10). Powers the Memory tab's regen-history list. |
+| GET | `/api/agents/:id/commit-verifications` | **Theme 11** — last N `commit_verifications` rows (newest first; `limit` 1..50, default 10). Powers the Overview tab's commit-discipline dots tile. |
 | GET | `/api/agents/:id/prompt-versions` | List all prompt versions (newest first) for the Prompt tab's history table |
 | POST | `/api/agents/:id/prompt-versions/:version/revert` | Set this historical version as the new active prompt; appends a new version row whose `reverted_from` points back to the source |
-| POST | `/api/agents/:id/compile-prompt` | Pure read â€” compile the **exact prompt** that `Run now` would pipe to the CLI, without spawning anything. Reuses `services/prompt-builder.ts:buildPrompt()` (same function the runner calls). Body: `{ issue_type?, issue_id? }` — both or neither; omitted = the project-level prompt (`# Project-level Run` section). Returns `{ prompt, filename, length, agent: {id, name, cli, model}, issue: {type, id, title}, guardrails_count, sections }`. No DB write, no CLI spawn, no SSE. Used by the Run Now dialog's **Preview prompt** button to download the prompt as `.md` for offline inspection. |
+| POST | `/api/agents/:id/compile-prompt` | Pure read — compile the **exact prompt** that `Run now` would pipe to the CLI, without spawning anything. Reuses `services/prompt-builder.ts:buildPrompt()` (same function the runner calls). Body: `{ issue_type?, issue_id? }` — both or neither; omitted = the project-level prompt (`# Project-level Run` section). Returns `{ prompt, filename, length, agent: {id, name, cli, model}, issue: {type, id, title}, guardrails_count, sections }`. No DB write, no CLI spawn, no SSE. Used by the Run Now dialog's **Preview prompt** button to download the prompt as `.md` for offline inspection. |
 <!-- eslint-skip -->
 
 > **Why `/performance` returns three numbers and not one.** ADR 0023: a rejection or a park can be the most valuable thing a run does, so a page that ranked agents on one summed number would recommend culling exactly the agents that push back. The route returns `first_pass: { applied, rejected, parked }` unsummarised and the page renders no percentage. Nothing is classified — a rejection is simply never drawn in the failure colour.
@@ -52,19 +52,19 @@ Live Swagger UI at `/api/docs`; OpenAPI 3 JSON at `/api/docs/json`. This markdow
 | POST | `/api/agents/:id/accept-upgrade` | Accept a marketplace upgrade for an installed agent, optionally per-field (`AcceptUpgradeBodySchema.fields`) → the updated agent. 404 when the agent or its catalog entry is gone. Write-gated. |
 | POST | `/api/agents/:id/dismiss-upgrade` | Dismiss the pending upgrade so the banner stops showing → the updated agent. 404 as above. Write-gated. |
 
-A08 â€” `POST /api/agents` and `PATCH /api/agents/:id` accept an optional `role_id` (a seeded `roles` slug, or `null` to detach). The MCP `createAgent` / `updateAgent` tools also expose `role_id` via the shared `SdlcRoleSchema`. The runner reads `agent.prompt_md` exclusively â€” never `roles.default_prompt_md` â€” so re-pointing an agent at a different role does not change the prompt the next dispatch sees.
+A08 — `POST /api/agents` and `PATCH /api/agents/:id` accept an optional `role_id` (a seeded `roles` slug, or `null` to detach). The MCP `createAgent` / `updateAgent` tools also expose `role_id` via the shared `SdlcRoleSchema`. The runner reads `agent.prompt_md` exclusively — never `roles.default_prompt_md` — so re-pointing an agent at a different role does not change the prompt the next dispatch sees.
 
-### `routes/roles.ts` â€” Roles (A08)
+### `routes/roles.ts` — Roles (A08)
 **Why this group exists**: `roles` is the lookup table behind `agents.role_id`. Its slugs are fixed by `SdlcRole` in `@atlas/shared` (the runtime never invents roles), so the only runtime edit is the Owner changing a role's label, description or default prompt. The runner never reads `roles.default_prompt_md` at dispatch. Agents installed from this edition's catalog have `role_id = null`.
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/roles` | List the `roles` rows (10, seeded by `001_baseline.sql`), ordered by `sort_order`. Powers the Agents page Role filter. |
 | GET | `/api/roles/:id` | Single role row. `id` must be one of the `SdlcRole` slugs; otherwise 400. |
-| PATCH | `/api/roles/:id` | Owner-only (`requireMcpToken`). Body (strict `UpdateRoleSchema`): `{ label?, description?, default_prompt_md? }`. Edits affect the catalog only â€” existing agents that previously copied a default into their own `prompt_md` are not retroactively updated. |
+| PATCH | `/api/roles/:id` | Owner-only (`requireMcpToken`). Body (strict `UpdateRoleSchema`): `{ label?, description?, default_prompt_md? }`. Edits affect the catalog only — existing agents that previously copied a default into their own `prompt_md` are not retroactively updated. |
 
-### `routes/projects.ts` â€” Projects
-**Why this group exists**: Projects are the only top-level work container â€” every issue, schedule, and per-project guardrail tunnels through a project_id. Clone, reclone, and delete are exposed as POST/DELETE that spawn subprocesses (`clone-runner`, `reclone-runner`, `delete-runner`) and stream SSE because they're long-running and can fail mid-way; doing them inline would block the request handler and lose user feedback. The per-project `/env` endpoints are intentionally separate from the workspace-wide `/settings/env` so secrets stay scoped to one repo.
+### `routes/projects.ts` — Projects
+**Why this group exists**: Projects are the only top-level work container — every issue, schedule, and per-project guardrail tunnels through a project_id. Clone, reclone, and delete are exposed as POST/DELETE that spawn subprocesses (`clone-runner`, `reclone-runner`, `delete-runner`) and stream SSE because they're long-running and can fail mid-way; doing them inline would block the request handler and lose user feedback. The per-project `/env` endpoints are intentionally separate from the workspace-wide `/settings/env` so secrets stay scoped to one repo.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -77,9 +77,9 @@ A08 â€” `POST /api/agents` and `PATCH /api/agents/:id` accept an optional `
 | POST | `/api/projects/:id/repos/:repoId/reveal` | **ADR 0018.** Reveal that repo's folder in the OS file manager → `{ ok, path, opened_in: 'Finder' \| 'File Explorer' \| 'file manager' }`. 409 when the folder is missing on disk; 500 when the opener can't be launched (waits for the child's `spawn`/`error`); 400 unsupported platform |
 | GET | `/api/projects/:id/repos/:repoId/status` | **ADR 0018.** Git status snapshot of that repo |
 | GET | `/api/projects/:id/repos/:repoId/head` | **ADR 0018.** That repo's current HEAD ref |
-| GET | `/api/projects/:id/env` | Read per-project secrets (DB-backed, AES-256-GCM). 2026-06-10: disk fallback to `<git_path>/.env` removed â€” DB is the only source of truth. |
+| GET | `/api/projects/:id/env` | Read per-project secrets (DB-backed, AES-256-GCM). 2026-06-10: disk fallback to `<git_path>/.env` removed — DB is the only source of truth. |
 | PUT | `/api/projects/:id/env` | Replace per-project secrets (DB-only; no longer writes `<git_path>/.env`). MCP-token gated. |
-| GET | `/api/environment-secrets` | Read global tier of shared secrets (DB-backed, AES-256-GCM). Merged with per-project secrets by the setup runner â€” project wins on collision. |
+| GET | `/api/environment-secrets` | Read global tier of shared secrets (DB-backed, AES-256-GCM). Merged with per-project secrets by the setup runner — project wins on collision. |
 | PUT | `/api/environment-secrets` | Replace global shared secrets. MCP-token gated. |
 | GET | `/api/projects/:id/repos` | **ADR 0018.** `IProjectRepo[]` — every repo of the project, ordered by `position` then `created_at`; there is no primary. `[]` when it has none. 404 unknown project. The first repo is the one a Task defaults to and the one whose credential the agents get. |
 | POST | `/api/projects/:id/repos` | **ADR 0017/0018.** The ONLY way a repo enters a project — the project-level `POST /api/projects/clone` and `/api/projects/connect` that used to duplicate this for a project's first repo are **gone**, and `POST /api/projects` is now a plain create. Add a repo (`CreateProjectRepoSchema`, token-gated). `mode:'clone'` (`name`, `repo_url` https://github.com, `credential_id`, `default_branch`): clones into `<workspace>/<project-slug>-<name>` through `startClone` with an on-cloned hook → 202 `{clone_id, destination}`, then SSE `clone_output` / `clone_completed` (carrying `repo`) / `clone_error`; 400 without a workspace path. `mode:'connect'` (`name`, `folder_path`, `repo_url`, `credential_id`): the local-clone checks (`checkLocalClone`: folder, `.git`, not already a project's or repo's path, origin matches, credential reaches the remote) → 201 `IProjectRepo`, or 400 `{ok:false, checks, error_kind}`. 409 when the name (a `^[a-z0-9][a-z0-9-]{0,39}$` slug, also the folder name in a multi-repo workspace) is already used in the project. |
@@ -123,7 +123,7 @@ A08 â€” `POST /api/agents` and `PATCH /api/agents/:id` accept an optional `
 | PATCH | `/api/sub-tasks/:id/assign` | Reassign |
 | DELETE | `/api/sub-tasks/:id` | 204 |
 
-### `routes/issues.ts` â€” Composite
+### `routes/issues.ts` — Composite
 **Why this group exists**: Project Detail needs every Task and sub-task of a project plus the projects dictionary in one round-trip. `/api/issues/tree` is a performance composite; it duplicates data that's individually fetchable from the typed routes above.
 
 | Method | Path | Purpose |
@@ -138,7 +138,7 @@ A08 â€” `POST /api/agents` and `PATCH /api/agents/:id` accept an optional `
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/comments?issue_type=â€¦&issue_id=â€¦` | Thread for one issue |
+| GET | `/api/comments?issue_type=…&issue_id=…` | Thread for one issue |
 | POST | `/api/comments` | Add comment. **An Owner reply resumes a parked run:** an Owner-authored comment on a Task with a `waiting_for_owner` run claims it inside the comment's transaction (`claimParkedWorkflowRun`, `FOR UPDATE`): run → `running`, item → `in_progress` (`status_changed` event, `detail='resumed_by_owner_reply'`). After commit it broadcasts `counts_changed {issueType, issueId}` and calls `workflow-engine.continueResumedRun` in the background: parked at End → retry delivery; otherwise the agent re-runs and reads the reply in the thread. Agent comments never resume. |
 | DELETE | `/api/comments/:id` | Delete comment |
 | POST | `/api/issues/:type/:id/links` | Create an item link. Body `{ to_type, to_id, relation_type? = 'relates_to' }` (`:type` ∈ `task`/`sub_task`; `depends_on` cycle-checked, `relates_to` normalised, `tested_by` directed QA sub-task → dev sub-task). Idempotent. Writes `link_created` on both endpoints; the optional `x-atlas-agent-id` header is the actor on both (unknown ids ignored). 400 with `reason` (`self` / `missing_from` / `not_found` / `cycle`) |
@@ -147,9 +147,9 @@ A08 â€” `POST /api/agents` and `PATCH /api/agents/:id` accept an optional `
 | POST | `/api/issues/:type/:id/external-links` | Attach an off-platform link (`CreateItemExternalLinkSchema`; `pull_request` URLs must be GitHub PRs). Idempotent on (item, url). Writes `link_created` with the optional `x-atlas-agent-id` header as actor. Not on the MCP surface — agents never record PRs; the Task run does. 201 |
 | POST | `/api/issues/:type/:id/external-links/refresh` | **2026-09-14.** Synchronously re-checks every `pull_request` link on the item against GitHub (`GET /repos/{o}/{r}/pulls/{n}` with the project credential's token: `merged_at` → `merged`, `state='closed'` → `closed`, else `open`) and returns the updated `IItemExternalLink[]` (200). No body. 400 unknown `:type`, 404 unknown item. A project without a credential, or a failed lookup, leaves `pr_state` as it was (null if never checked); `pr_state_checked_at` is stamped on every attempt. Used by the web "Done" guard |
 | GET | `/api/issues/:type/:id/activity` | Merged activity feed (comments + status / assignment / field events). Returns `IActivityItem[]` from `services/events-log.ts`. |
-| GET | `/api/issues/:type/:id/reply-context` | A12 â€” returns the `IReplyContext` envelope (item + project + head+tail-elided thread + linked items with description + AC + recent comments inlined for depends_on + recent activity events). Pure read; no side effects. Pairs with the `replyToItem` MCP tool's load-context mode. |
-| POST | `/api/issues/:type/:id/reply` | A12 â€” context-aware reply. Body: `{ body, author?='owner', agent_id?=null }` (Zod `ReplyToItemSchema` from `@atlas/shared`; `agent_id` required when `author='agent'`). Loads the same envelope as the GET, posts the comment via `commentsService.create()` (existing `comment_added` event + `comment-created` SSE fire unchanged), returns `{ comment, context }` as `IReplyResponse`. |
-| POST | `/api/issues/:type/:id/history/prune` | **2026-07-01 (MCP feature) + 2026-07-03 audit hardening** â€” bulk history cleanup for a single item. Body: `{ before_time }` (`PruneItemHistorySchema` from `@atlas/shared`, ISO-8601 datetime). Hard-deletes every AGENT-authored `comments` row and every `issue_events` row on the item whose `created_at` is strictly less than the cutoff, in one transaction. **Owner-authored comments are always preserved.** Writes a `history_pruned` audit event inside the same transaction (attributed to `x-atlas-agent-id` header if present). Rejects `before_time` less than 1 hour in the past. 404 if the item doesn't exist; 400 if the URL `:type` doesn't match the stored item type. Returns `{ comments_deleted, events_deleted, owner_comments_preserved }`. Called from the MCP `update_item` action `remove_history`. |
+| GET | `/api/issues/:type/:id/reply-context` | A12 — returns the `IReplyContext` envelope (item + project + head+tail-elided thread + linked items with description + AC + recent comments inlined for depends_on + recent activity events). Pure read; no side effects. Pairs with the `replyToItem` MCP tool's load-context mode. |
+| POST | `/api/issues/:type/:id/reply` | A12 — context-aware reply. Body: `{ body, author?='owner', agent_id?=null }` (Zod `ReplyToItemSchema` from `@atlas/shared`; `agent_id` required when `author='agent'`). Loads the same envelope as the GET, posts the comment via `commentsService.create()` (existing `comment_added` event + `comment-created` SSE fire unchanged), returns `{ comment, context }` as `IReplyResponse`. |
+| POST | `/api/issues/:type/:id/history/prune` | **2026-07-01 (MCP feature) + 2026-07-03 audit hardening** — bulk history cleanup for a single item. Body: `{ before_time }` (`PruneItemHistorySchema` from `@atlas/shared`, ISO-8601 datetime). Hard-deletes every AGENT-authored `comments` row and every `issue_events` row on the item whose `created_at` is strictly less than the cutoff, in one transaction. **Owner-authored comments are always preserved.** Writes a `history_pruned` audit event inside the same transaction (attributed to `x-atlas-agent-id` header if present). Rejects `before_time` less than 1 hour in the past. 404 if the item doesn't exist; 400 if the URL `:type` doesn't match the stored item type. Returns `{ comments_deleted, events_deleted, owner_comments_preserved }`. Called from the MCP `update_item` action `remove_history`. |
 
 ### `routes/search.ts`
 **Why this group exists**: Full-text search over Task and sub-task titles, descriptions and `spec_md` (Postgres `items.search_tsv` GIN index, `services/items.ts::searchItems`). It is the `/search` page's only data source and backs MCP `search_item`.
@@ -158,8 +158,8 @@ A08 â€” `POST /api/agents` and `PATCH /api/agents/:id` accept an optional `
 |---|---|---|
 | GET | `/api/search?q=…&type=…&project_id=…&agent_id=…&status=…&updated=…&labels=…&limit=…` | Ranked by `ts_rank` when `q` is set, else `updated_at desc`. `type` ∈ `task`, `sub_task` (other values are ignored). A filter-only request (no `q`) is valid |
 
-### `routes/events.ts` â€” SSE
-**Why this group exists**: Atlas has no periodic polling â€” freshness is push-driven so the UI updates within milliseconds of a mutation instead of waiting on a poll cycle. SSE was chosen over WebSockets because the traffic is serverâ†’client only (heartbeat aside) and SSE survives HTTP proxies without special configuration. The in-memory client registry is intentional: a restart drops subscribers and the web reconnects, with `refetchOnWindowFocus` covering any drift during reconnection.
+### `routes/events.ts` — SSE
+**Why this group exists**: Atlas has no periodic polling — freshness is push-driven so the UI updates within milliseconds of a mutation instead of waiting on a poll cycle. SSE was chosen over WebSockets because the traffic is server→client only (heartbeat aside) and SSE survives HTTP proxies without special configuration. The in-memory client registry is intentional: a restart drops subscribers and the web reconnects, with `refetchOnWindowFocus` covering any drift during reconnection.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -167,14 +167,14 @@ A08 â€” `POST /api/agents` and `PATCH /api/agents/:id` accept an optional `
 
 In-memory client registry (`Set<(SSEEvent) => void>` in `routes/events.ts:5`). Dropped on server restart.
 
-### `routes/run.ts` â€” Agent runs
-**Why this group exists**: Runs are the audit trail of every agent spawn â€” used by the Agent Detail Runs tab to show one agent's history, and the dashboard "in motion" panel. The single composite list endpoint with optional filters means all three consumers share the same data shape, and the `POST` spawns an ad-hoc run (agent-runner takes over from there and broadcasts SSE). Work on an item always goes through a Task run (`routes/workflows.ts`).
+### `routes/run.ts` — Agent runs
+**Why this group exists**: Runs are the audit trail of every agent spawn — used by the Agent Detail Runs tab to show one agent's history, and the dashboard "in motion" panel. The single composite list endpoint with optional filters means all three consumers share the same data shape, and the `POST` spawns an ad-hoc run (agent-runner takes over from there and broadcasts SSE). Work on an item always goes through a Task run (`routes/workflows.ts`).
 
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/run` | **Ad-hoc, no-item run only.** Body `{ agent_id, project_id? }`. Any `issue_type` / `issue_id` → `400`. 404 unknown agent, 400 inactive agent. ADR 0033: inserts a waiting `queued` row (`queueAgentRun`, `started_at` null), kicks dispatch and returns `202 { runId }`; the run starts when the one slot is free (`startQueuedAgentRun` claims it by setting `started_at`, then spawns with `existingRunId`; a spawn failure marks the row `error`). Runs in a throwaway temp dir (no worktree, no push, no PR). Cancel a waiting run with `POST /api/run/:id/stop`. |
-| GET | `/api/run/:id` | Single run. While the run is in-flight, `output_text` reflects the in-memory accumulator (fresher than the DB row, which only flushes every 10s). Optional `?since=<bytes>` returns only the tail past that byte offset â€” used by the web run-detail page after an SSE reconnect to fill the output gap. Bogus/non-integer values fall through to the full string. Rows (here and in the list) carry `workflow_run_id` + `node_id` (null outside a Task run). |
-| GET | `/api/run?issue_type=â€¦&issue_id=â€¦&project_id=â€¦&limit=â€¦` | List runs. `project_id` joins through `items.project_id` so the Project Detail History tab can pull every run that touched any Task or sub-task in the project in one query. **List-mode projection (2026-05-30):** `prompt_snapshot` is returned as `NULL` and `output_text` is truncated to head 100 + tail 300 chars (with an `â€¦[elided]â€¦` separator when shortened). The detail endpoint `GET /api/run/:id` still returns the full payload. Cut the Agents `?limit=500` body from ~1.8 MB to ~6 KB; `GET /api/agents/:id/runs` uses the same projection. Max `limit` is now 500 (was 200). |
+| GET | `/api/run/:id` | Single run. While the run is in-flight, `output_text` reflects the in-memory accumulator (fresher than the DB row, which only flushes every 10s). Optional `?since=<bytes>` returns only the tail past that byte offset — used by the web run-detail page after an SSE reconnect to fill the output gap. Bogus/non-integer values fall through to the full string. Rows (here and in the list) carry `workflow_run_id` + `node_id` (null outside a Task run). |
+| GET | `/api/run?issue_type=…&issue_id=…&project_id=…&limit=…` | List runs. `project_id` joins through `items.project_id` so the Project Detail History tab can pull every run that touched any Task or sub-task in the project in one query. **List-mode projection (2026-05-30):** `prompt_snapshot` is returned as `NULL` and `output_text` is truncated to head 100 + tail 300 chars (with an `…[elided]…` separator when shortened). The detail endpoint `GET /api/run/:id` still returns the full payload. Cut the Agents `?limit=500` body from ~1.8 MB to ~6 KB; `GET /api/agents/:id/runs` uses the same projection. Max `limit` is now 500 (was 200). |
 | GET | `/api/run?issue_type=…&issue_id=…&project_id=…&agent_id=…&limit=…` | **2026-09-12 — `agent_id` and `issue_type` now actually filter.** Both were in the accepted query shape and applied to nothing: `?agent_id=x` returned every run in the workspace, including for an agent with zero runs. Nothing user-facing broke (the Agent Detail Runs tab uses the dedicated `GET /api/agents/:id/runs`), but the params read as supported — `api.ts::run.list` sends `issue_type` and `routes-map.md` documented `?agent_id=`. For a single agent's history prefer `GET /api/agents/:id/runs`. |
 | GET | `/api/run?status=queued,in_progress` | **2026-10-14 (ADR 0030)** — `status` filters by comma-separated `RunStatus` values; unknown values are dropped (none valid → no filter). `useActiveRuns` (header mascot, dashboard) asks for live runs only instead of paging `?limit=500`. |
 | DELETE | `/api/run/:id` | Token-gated. A Task-run step (`workflow_run_id` set): `cancelWorkflowRun` first (kills the step, keeps committed work, item → `waiting_for_info`), then deletes the row. Other runs: deletes the row plus sibling live runs on its item and resets that item to `ready` (`draft` stays) with no assignee. 204 |
@@ -188,14 +188,14 @@ In-memory client registry (`Set<(SSEEvent) => void>` in `routes/events.ts:5`). D
 | GET | `/api/workflow-runs/:id` | `IWorkflowRunDetail`: the run summary (`id`, `workflow_id` (= `solo`), `item_id`, `item_title`, `project_id`, `status`, `current_node_id`, `parked_node_id`, `park_reason`, `branch`, `worktree_path`, `setup_done`, `pr_url`, `pr_urls`, `started_at`, `updated_at`, `finished_at`) + `steps` (`IWorkflowRunStep` per `agent_runs` row of this run, oldest first: node, agent, status, cli, model, effort, outcome, cost, times) + `total_cost_usd`. 404 `Run not found`. Powers `/runs/:runId` and the Task rail's `TaskRunPanel` |
 | GET | `/api/workflow-runs/:id/diff` | `WorkflowRunDiffResponse` `{run_id, branch, repos[]}` — per repo of the run (`runRepos`): `{repo_id, repo_name, source, reason, summary}`. `source`: `worktree` (the run's checkout exists — both scopes), `branch` (checkout removed by delivery; reads the repo clone's `refs/heads/<branch>`, else `refs/remotes/origin/<branch>` — committed scope only, `uncommitted` empty), `unavailable` (`summary: null`, `reason` says why: clone missing, or branch merged + deleted). `repos: []` when the run has no branch / project. 404 unknown run; 409 if a checkout vanishes mid-read. Read-only. Service: `workflow-run-diff.ts` |
 | GET | `/api/workflow-runs/:id/diff/file?repo_id=&scope=uncommitted\|committed&path=&context=0..25` | `CliSessionFilePatchResponse` for one file of one repo. 400 bad query or hostile path (`details.code: 'invalid_path'`); 404 unknown run, a repo not in the run, an `unavailable` repo, or a path not changed in `scope` (always for `uncommitted` in `branch` mode) |
-| POST | `/api/workflow-runs/:id/stop` | Token-gated. `cancelWorkflowRun`: a `running` / `waiting_for_owner` run → `cancelled`, its live step cancelled + its CLI killed, committed work pushed to the branch (no PR), worktree cleaned on a good push, Task → `waiting_for_info`, then a dispatch kick. Returns the run detail. 404 unknown run |
+| POST | `/api/workflow-runs/:id/stop` | Token-gated. `cancelWorkflowRun`: a `running` / `waiting_for_owner` run → `cancelled`, its live step cancelled + its CLI killed, committed work pushed to the branch (no PR), worktree cleaned on a good push, Task → `waiting_for_info`, then a dispatch kick. A stop always wins over work already in flight: one that lands while the worktree is being prepared starts no agent (`spawnNode` only advances a `running` run), and one that lands while `finishRun` is delivering opens no PR, and neither its park nor its `completed` write (both guarded on `status = 'running'`) touches the run or the Task. Returns the run detail. 404 unknown run |
 | POST | `/api/workflow-runs/:id/resume` | Token-gated. Only a `waiting_for_owner` run (else 409; an already-`running` run is a no-op, ADR 0029). Run → `running` (`park_reason` cleared, `resumed` event), Task → `in_progress`, then `continueResumedRun`: parked at End (failed delivery) → retry delivery against the kept worktree; otherwise refresh the worktree onto the latest default branch and re-run the agent, which reads the Owner's reply from the comment thread |
 | GET | `/api/items/:id/workflow-runs` | The item's last 20 runs, newest first (`IWorkflowRunSummary[]` with `item_title`) |
 
 **Item lock.** `PATCH /api/{tasks,sub-tasks}/:id/{status,assign}` returns `409 {error, kind:'conflict', workflow_run_id}` while a `running` run holds that item — UI and MCP alike (global `preHandler` in `services/workflow-lock.ts`). A parked (`waiting_for_owner`) run does not lock. Stop the run to change the item by hand.
 
 ### `routes/settings.ts`
-**Why this group exists**: Workspace-level config (owner profile, env, External Notification Channel, notification routing) all live in a single `settings` row, so the routes are organized by editing surface rather than entity. `POST /settings/reset` is the nuclear option â€” it drops all data and forces onboarding again â€” and is segregated from PATCH because it's destructive and irreversible. The env / external notification split exists because env changes typically need a server restart while external notification changes apply immediately.
+**Why this group exists**: Workspace-level config (owner profile, env, External Notification Channel, notification routing) all live in a single `settings` row, so the routes are organized by editing surface rather than entity. `POST /settings/reset` is the nuclear option — it drops all data and forces onboarding again — and is segregated from PATCH because it's destructive and irreversible. The env / external notification split exists because env changes typically need a server restart while external notification changes apply immediately.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -251,8 +251,8 @@ In-memory client registry (`Set<(SSEEvent) => void>` in `routes/events.ts:5`). D
 | DELETE | `/api/credentials/:id` | Delete |
 | POST | `/api/credentials/:id/refresh` | Mint a fresh installation token for a **`github_app`** credential and return the row with ciphertext stripped, so the UI gets the new `expires_at` without a second GET. 400 for any other `kind` (a PAT has nothing to refresh), 404 unknown id. Write-gated. |
 
-### `routes/schedules.ts` â€” Project auto-fetch
-**Why this group exists**: Auto-fetch keeps the worktree's view of remote refs fresh so the Owner doesn't need to `git fetch` before every session; **ADR 0018** — it is per repo: each one has its own remote, credential and staleness tolerance. `pause_while_agents_active` still looks at the whole project. The `/fire` endpoint exists for manual testing â€” without it, validating a new cron expression required waiting for the next scheduled fire. Croner jobs live in an in-memory registry that rebuilds on startup and catches missed fires (server may have been off when a schedule was due).
+### `routes/schedules.ts` — Project auto-fetch
+**Why this group exists**: Auto-fetch keeps the worktree's view of remote refs fresh so the Owner doesn't need to `git fetch` before every session; **ADR 0018** — it is per repo: each one has its own remote, credential and staleness tolerance. `pause_while_agents_active` still looks at the whole project. The `/fire` endpoint exists for manual testing — without it, validating a new cron expression required waiting for the next scheduled fire. Croner jobs live in an in-memory registry that rebuilds on startup and catches missed fires (server may have been off when a schedule was due).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -294,8 +294,8 @@ Registered Croner jobs live in `services/schedule-registry.ts` (boot on startup,
 
 **2026-09-14 — stale `needs_you`.** The list endpoint and the unread count (`notificationsService.list` / `countUnread`) hide `kind='needs_you'` + `event_type='agent_completed'` rows whose linked item is no longer `waiting_for_info` / `in_review`. Rows with no item, and other `needs_you` sources (`agent_error`, terminal idle, auto-fetch), are never hidden — they aren't derived from item status.
 
-### `routes/scratchPad.ts` â€” Scratch Pad (P12)
-**Why this group exists**: A free-form markdown surface the Owner uses to capture half-formed thoughts that aren't yet Tasks. Sits outside the item/project/agent graph by design â€” no FK, no SSE, no validation beyond "title and body are strings". The web page autosaves every 5 s while open, so PATCH is the hot path.
+### `routes/scratchPad.ts` — Scratch Pad (P12)
+**Why this group exists**: A free-form markdown surface the Owner uses to capture half-formed thoughts that aren't yet Tasks. Sits outside the item/project/agent graph by design — no FK, no SSE, no validation beyond "title and body are strings". The web page autosaves every 5 s while open, so PATCH is the hot path.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -305,7 +305,7 @@ Registered Croner jobs live in `services/schedule-registry.ts` (boot on startup,
 | PATCH | `/api/scratch-pad/:id` | Patch title and/or body_md. Rejects empty bodies with 400. |
 | DELETE | `/api/scratch-pad/:id` | Delete (hard, no soft-delete trail). |
 
-### `routes/counts.ts` â€” sidenav + dashboard aggregates
+### `routes/counts.ts` — sidenav + dashboard aggregates
 **Why this group exists**: The sidenav badges and dashboard KPIs are visible on nearly every page, and computing them client-side from the loaded entity lists is slow plus inaccurate (the page only loads what it needs). A pre-aggregated server endpoint shrinks the badge refresh to one query and means SSE `counts_changed` can refresh both surfaces uniformly.
 
 | Method | Path | Purpose |
@@ -316,7 +316,7 @@ Registered Croner jobs live in `services/schedule-registry.ts` (boot on startup,
 | GET | `/api/counts/queue-by-agent` | `{ [agentId]: n }` — ready + in-progress Tasks and sub-tasks per assignee (`items_live`). Backs the agent pages' **Queue: N items**, which used to download every Task and sub-task to count them. |
 | GET | `/api/counts/project/:id` | Project Detail Overview tab KPIs: `open_tasks` (not `done`), `tasks_ready`, `tasks_in_flight` (`in_progress` + `in_review`), `tasks_waiting_info`, `costSummary`, `terminalCostSummary` |
 
-### `routes/reminders.ts` â€” Reminders (A10)
+### `routes/reminders.ts` — Reminders (A10)
 **Why this group exists**: Owner-set reminders fired by the scheduler tick; stored separately from notifications because they're future-pointing intents rather than past-event records.
 
 | Method | Path | Purpose |
@@ -330,7 +330,7 @@ Registered Croner jobs live in `services/schedule-registry.ts` (boot on startup,
 | DELETE | `/api/reminders/:id` | Cancel (status → `cancelled`, row kept as history) |
 | DELETE | `/api/reminders/:id?hard=1` | Delete a cancelled / completed reminder for good (204); its notifications stay with `reminder_id` set null. 409 while it is active / paused, 404 when missing |
 
-### `routes/analytics.ts` â€” Analytics
+### `routes/analytics.ts` — Analytics
 **Why this group exists**: Cost rollup + token usage + run-frequency reports aggregated server-side because computing them client-side requires the full `agent_runs` table.
 
 | Method | Path | Purpose |
@@ -338,30 +338,30 @@ Registered Croner jobs live in `services/schedule-registry.ts` (boot on startup,
 
 | GET | `/api/analytics?tz&window=7d\|30d\|90d\|month` | `IAnalytics` (`@atlas/shared`), from `services/analytics.ts`: `period` (`{window, tz, bucket, start, end}`, `services/analytics-window.ts`), `tasks_shipped` (Tasks whose first move into Done (`issue_events`, `field = 'status'`) is in the window), `prs_merged` (`runPrs(scoreAgents(window))` — the fleet page's maths), `cycle_p50_s` (first In progress → first Done, `percentile_cont` median over shipped Tasks; null when none), `spend_usd` (completed agent runs + closed terminal sessions) and `series[]` (`{bucket, tasks_shipped, spend_usd}`, zero-filled; day buckets, Monday weeks for 90d, in the viewer's tz). `items.is_test` is left out of every number. `month` (default) is the month start in the viewer's tz, so the Dashboard's month spend reconciles. `AnalyticsQuerySchema` (strict): bad `tz`, `window` or an unknown key → 400. `Cache-Control: private, max-age=30`. Open (read). The `/delivery`, `/project/:id[/tasks]` and `/task/:id[/children]` routes were removed 2026-10-23 with the page's tabs and drill-downs |
 
-### `routes/labels.ts` â€” Labels (Task 2)
+### `routes/labels.ts` — Labels (Task 2)
 **Why this group exists**: Item labels stored as a jsonb array on `items.labels`. The labels endpoint surfaces the union of labels currently used in a project (or across the workspace) so the labels picker can suggest existing strings before the user types a brand new one.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/labels?project_id=â€¦` | Distinct labels in use across items in a project |
+| GET | `/api/labels?project_id=…` | Distinct labels in use across items in a project |
 | GET | `/api/labels?workspace=true` | Workspace-wide label union (Search filter chip) |
 
-### `routes/marketplace.ts` â€” Agent marketplace
+### `routes/marketplace.ts` — Agent marketplace
 **Why this group exists**: The marketplace is the only install path for new agents (see ADR 0007). Browse the catalog, inspect a single bundle, install it into the workspace.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/marketplace/agents?limit=â€¦` | List catalog entries (sort_order) |
+| GET | `/api/marketplace/agents?limit=…` | List catalog entries (sort_order) |
 | GET | `/api/marketplace/agents/:id` | Single catalog entry (composite) |
 | POST | `/api/marketplace/agents/:id/install` | Install a marketplace agent into the workspace. `409 {details:{code:'SLUG_TAKEN', suggested_id}}` when the local slug is taken. **2026-09-12:** `400 {code:'MODEL_NOT_IN_REGISTRY'}` when the catalog entry names a `(cli, model)` pair absent from `cli_models` — `install` now calls `assertModelInRegistry` (exported from `services/agents.ts`) before the transaction. `agents` carries a composite FK on `(cli, model)` that `marketplace_agents` does not, so a pruned registry row previously surfaced as an opaque FK `500` and the bulk-install bar could only report "N couldn't be added". `marketplaceService.importBundle` (behind `POST /api/agents/import`) got the same guard — identical hole. |
 | POST | `/api/agents/import` | Upload a zipped agent bundle (multipart). Token-gated. |
 
 | GET | `/api/agents/:id/export` | Download the active agent as a zip |
-| POST | `/api/agents/:id/detach` | Detach from marketplace source (`marketplace_source_id` â†’ NULL) |
+| POST | `/api/agents/:id/detach` | Detach from marketplace source (`marketplace_source_id` → NULL) |
 | GET | `/api/marketplace/agents/:catalog_id/diff/:agent_id` | Field-by-field diff between a catalog entry and the installed agent, backing the upgrade modal. 404 when either side is missing. |
 | GET | `/api/marketplace/agents/:id/export` | The catalog agent as a zip (`Content-Type: application/zip`, `Content-Disposition: attachment; filename="<id>.zip"`). 404 unknown catalog id. |
 
-### `routes/guardrail-scripts.ts` and `routes/project-guardrail-scripts.ts` â€” Guardrail scripts
+### `routes/guardrail-scripts.ts` and `routes/project-guardrail-scripts.ts` — Guardrail scripts
 **Why this group exists**: Scripted guardrails (sh/ps1) live in `guardrail_scripts` + `project_guardrail_scripts`. Agents fetch + execute these; a project script with the same slug as a workspace script overrides it for that project's worktrees. The engine never executes any of them. The seed ships one script, `prereqs` (`.atlas/` and `.atlas/constitution.md` exist; no clean-tree check, since agents never commit and a dirty tree is the normal end of a run). `commit-discipline` was dropped by migration 002; the pipeline-role gates `po-writer-output`, `architect-spec-md`, `qa-writer-csv`, `check-automation-tests` by migration 003. Behavioural tests in `db/seed.test.ts` (bash) and `db/seed-powershell.test.ts` (ps1, skipped without PowerShell).
 
 | Method | Path | Purpose |
@@ -375,16 +375,16 @@ Registered Croner jobs live in `services/schedule-registry.ts` (boot on startup,
 | PATCH | `/api/projects/:projectId/guardrail-scripts/:id` | Update |
 | DELETE | `/api/projects/:projectId/guardrail-scripts/:id` | Delete |
 
-### `routes/projects.ts` â€” added 2026-06-09 audit
+### `routes/projects.ts` — added 2026-06-09 audit
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/projects/paged?page=N&limit=M` | Paginated projects list (Projects page footer pagination) |
 
-### `services/tool-catalog-sync.ts` â€” read-only MCP tool directory
+### `services/tool-catalog-sync.ts` — read-only MCP tool directory
 
 The `tool_catalog` table is a read-only directory of MCP tools the spawned CLI may call. **A06**: `syncToolCatalog()` imports `ALL_TOOL_REGISTRATIONS` from `@atlas/mcp/registrations` and projects every non-excluded registration (`name`, `title`, `description`, `group_name`, `sort_order`). One source of truth for the MCP server registrations *and* the directory; adding a new MCP tool is a one-line append to `tools/<group>.ts`'s typed `<GROUP>_TOOLS` array and both consumers pick it up on the next boot.
 
-`excludeFromCatalog: true` on a registration hides it from the directory (e.g. `submit_review` â€” the runner injects it on every reviewer run, so a toggle would have no effect). 31 tools surface today (32 registered âˆ’ 1 excluded: `submit_review`); per-group counts in `.agents/mcp.md`. The per-agent allow-gate that used to consume this table was removed by `253c43d` + B14 (`d3cc9bf`); the spawned CLI inherits Owner's user-level MCP config wholesale and the constitution carries `FORBIDDEN_TOOLS_SECTION` as the only safety net. Guardrails (general + project) and project auto-fetch schedules were stripped from the MCP surface 2026-05-28 â€” Owner-only via REST and web UI; agents receive guardrails through the prompt's constitution section, never via MCP.
+`excludeFromCatalog: true` on a registration hides it from the directory (e.g. `submit_review` — the runner injects it on every reviewer run, so a toggle would have no effect). 31 tools surface today (32 registered − 1 excluded: `submit_review`); per-group counts in `.agents/mcp.md`. The per-agent allow-gate that used to consume this table was removed by `253c43d` + B14 (`d3cc9bf`); the spawned CLI inherits Owner's user-level MCP config wholesale and the constitution carries `FORBIDDEN_TOOLS_SECTION` as the only safety net. Guardrails (general + project) and project auto-fetch schedules were stripped from the MCP surface 2026-05-28 — Owner-only via REST and web UI; agents receive guardrails through the prompt's constitution section, never via MCP.
 
 ### `services/agent-schedule-registry.ts` — one-minute poller
 
@@ -402,13 +402,13 @@ A single `setInterval` ticks every 60s, first tick aligned to the next wall-cloc
 
 Queuing a Task, `finishRun` and `cancelWorkflowRun` also kick one dispatch pass immediately (`kickWorkflowDispatch`), so a queued Task never waits for the 60s tick.
 
-### `routes/fs.ts` â€” filesystem helpers for the folder picker UI
-**Why this group exists**: Browsers can't enumerate the filesystem directly; the FolderPicker component used in Onboarding and Settings depends on these endpoints to walk the Owner's local drives. They're intentionally narrow (list / stat / join / home) â€” no write operations â€” because the browser-side picker only needs read access to pick a target path.
+### `routes/fs.ts` — filesystem helpers for the folder picker UI
+**Why this group exists**: Browsers can't enumerate the filesystem directly; the FolderPicker component used in Onboarding and Settings depends on these endpoints to walk the Owner's local drives. They're intentionally narrow (list / stat / join / home) — no write operations — because the browser-side picker only needs read access to pick a target path.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/fs/list?path=â€¦` | List children of a path (handles Windows drive letters) |
-| GET | `/api/fs/stat?path=â€¦` | Stat a path |
+| GET | `/api/fs/list?path=…` | List children of a path (handles Windows drive letters) |
+| GET | `/api/fs/stat?path=…` | Stat a path |
 | GET | `/api/fs/join` | Path join helper |
 | GET | `/api/fs/home` | Home directory |
 
@@ -427,13 +427,13 @@ Queuing a Task, `finishRun` and `cancelWorkflowRun` also kick one dispatch pass 
 | DELETE | `/api/cli-models/:id` | Remove. **2026-09-12:** refuses with `409 {details:{code:'MODEL_IN_USE', agents, marketplace_agents}}` while any `agents` OR `marketplace_agents` row still names the `(cli, model)` pair. `agents` has a composite FK with ON DELETE RESTRICT so Postgres already blocked the installed-agent case; `marketplace_agents` has no FK, so removing a model only catalog entries referenced used to succeed silently and then make those entries permanently uninstallable. |
 
 ### `routes/tool-catalog.ts`
-**Why this group exists**: Read-only directory of every Atlas MCP tool the server exposes. Owner-facing for discoverability; no enforcement attached (per-agent allowlists were dropped 2026-05-27 â€” spawned CLIs inherit Owner's user-level MCP config wholesale).
+**Why this group exists**: Read-only directory of every Atlas MCP tool the server exposes. Owner-facing for discoverability; no enforcement attached (per-agent allowlists were dropped 2026-05-27 — spawned CLIs inherit Owner's user-level MCP config wholesale).
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/tool-catalog` | Seed-ordered groups + tools |
 
-### `routes/guardrails.ts` â€” global workspace guardrails
+### `routes/guardrails.ts` — global workspace guardrails
 **Why this group exists**: Workspace guardrails are the constitution every agent is bound by; CRUD is per-rule because the Owner reviews and tightens rules over time. The bulk `/save` endpoint exists because rules are typically reviewed in batch ("I'm hardening security this session") and a single commit makes audit history cleaner than fifteen separate PATCH calls.
 
 | Method | Path | Purpose |
@@ -444,8 +444,8 @@ Queuing a Task, `finishRun` and `cancelWorkflowRun` also kick one dispatch pass 
 | DELETE | `/api/guardrails/:id` | Delete rule |
 | POST | `/api/guardrails/save` | Bulk commit "session dirty" rules (Save Guard-rails button in the page) |
 
-### `routes/project-guardrails.ts` â€” per-project guardrails
-**Why this group exists**: Per-project rules layer on top of workspace rules so a project can carry repo-specific constraints ("don't touch /migrations in this repo") without polluting the global set. The dedicated `/toggle` endpoint exists because enable/disable is the high-frequency operation (temporarily turning a rule off during a planned migration) and the payload is just `{ enabled }` â€” folding it into the generic PATCH would force every toggle to roundtrip the full rule body.
+### `routes/project-guardrails.ts` — per-project guardrails
+**Why this group exists**: Per-project rules layer on top of workspace rules so a project can carry repo-specific constraints ("don't touch /migrations in this repo") without polluting the global set. The dedicated `/toggle` endpoint exists because enable/disable is the high-frequency operation (temporarily turning a rule off during a planned migration) and the payload is just `{ enabled }` — folding it into the generic PATCH would force every toggle to roundtrip the full rule body.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -497,14 +497,14 @@ Browser push subscriptions for Owner notifications. Backed by the `push_subscrip
 |---|---|---|
 | GET | `/api/_perf/routes` | In-memory per-route request stats (`readStats()`). Debug surface for the perf gate; underscore-prefixed to mark it as non-product. For per-request detail, scrape the `atlas:perf:request` structured log stream instead. |
 
-### `routes/server.ts` â€” process control
-**Why this group exists**: Several env vars are read once at process boot (DB path, port); applying their new values requires a restart. Rather than instruct the Owner to find the shell and kill the process, the app exposes one button that exits cleanly and expects a supervisor (nodemon in dev, PM2 in deploy) to relaunch â€” the only mechanism by which a non-CLI Owner can apply restart-required env changes.
+### `routes/server.ts` — process control
+**Why this group exists**: Several env vars are read once at process boot (DB path, port); applying their new values requires a restart. Rather than instruct the Owner to find the shell and kill the process, the app exposes one button that exits cleanly and expects a supervisor (nodemon in dev, PM2 in deploy) to relaunch — the only mechanism by which a non-CLI Owner can apply restart-required env changes.
 
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/server/restart` | `process.exit()` and expect a supervisor (e.g. nodemon, PM2) to relaunch |
 
-### Documentation â€” `@fastify/swagger` + `@fastify/swagger-ui`
+### Documentation — `@fastify/swagger` + `@fastify/swagger-ui`
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/docs` | Swagger UI |
@@ -514,7 +514,7 @@ Browser push subscriptions for Owner notifications. Backed by the `push_subscrip
 
 ## SSE event catalogue
 
-All events flow through `/api/events`. The web subscribes via `useSSE()`. SSE is the **primary** freshness mechanism â€” most UI surfaces have NO polling and rely entirely on these events plus `refetchOnWindowFocus`.
+All events flow through `/api/events`. The web subscribes via `useSSE()`. SSE is the **primary** freshness mechanism — most UI surfaces have NO polling and rely entirely on these events plus `refetchOnWindowFocus`.
 
 | Event | Emitted by | When |
 |---|---|---|
@@ -570,7 +570,7 @@ thin wrapper over an `api-client.ts` method which in turn hits a REST
 route. The token gate on the API rejects writes from non-trusted origins
 unless `X-Atlas-Token` matches `ATLAS_MCP_TOKEN`.
 
-**A06** â€” every tool's registration metadata (`name`, `title`, `description`,
+**A06** — every tool's registration metadata (`name`, `title`, `description`,
 `group_name`, `sort_order`, `excludeFromCatalog?`, `inputSchema`, `handler`)
 lives in a typed `<GROUP>_TOOLS` array in `packages/mcp/src/tools/<group>.ts`.
 `registrations.ts` re-exports `ALL_TOOL_REGISTRATIONS`; the API's
@@ -580,9 +580,9 @@ Protocol bullet directing agents to optionally call `agent_memory` (`op: 'update
 for generic behavioral lessons; reviewer prompts carry a symmetric clause.
 Both invoke the same memory boundary rule embedded in the tool description.
 
-**B05** â€” `update_item action='add_link'` is intentionally
+**B05** — `update_item action='add_link'` is intentionally
 **agent-discretionary**: no Working Protocol bullet mentions it in any
-performer or reviewer prompt. The MCP tool description is the only trigger â€”
+performer or reviewer prompt. The MCP tool description is the only trigger —
 agents may call it when they discover a missing dependency, and the UI's
 `<RelatedItemsCard>` is the Owner-side counterpart (both hit
 `POST /api/issues/:type/:id/links`). The runner does not parse agent output
@@ -599,21 +599,21 @@ low-context CLIs (Copilot CLI, Gemini, anything without semantic tool search)
 pay a much smaller schema-load tax per prompt. Each tool routes to the same
 REST endpoints as before; only the MCP-side dispatch changed.
 
-| Domain | Tool | Discriminator | Method â†’ Route |
+| Domain | Tool | Discriminator | Method → Route |
 |---|---|---|---|
-| Agents | `crud_agent` | `op: 'search' \| 'get' \| 'create' \| 'update' \| 'delete'` | GET / GET / POST / PATCH / DELETE /api/agents[/:id] â€” `search` returns a compact projection; `get` returns the composite (agent + checklists); `create`/`update` take a strict nested `payload` (the `CreateAgentSchema` / `UpdateAgentSchema` fields incl. `effort`, `kind_slug`, `settings_json`; `memory_cadence` on update only; unknown keys rejected). `delete` cascades prompt versions, checklists, memory, tests and agent_runs. The API does not check the caller: the Owner uses the writes from Claude Desktop; agent prompts forbid them (constitution clause). |
-| Agents | `agent_memory` | `op: 'get' \| 'update'` | GET / PUT /api/agents/:id/memory â€” `update` accepts `mode: 'replace' \| 'append'` (the API sets `source` itself). Description embeds the memory-boundary rule (Theme 08). |
-| Agents | `marketplace_agent` | `op: 'search' \| 'get'` | GET /api/marketplace/agents[/:id] â€” `search` returns lightweight projections with optional filters (`query`, `category`, `kind_slug`, `limit`); `get` returns the full composite (manifest + prompt + checklists + version + published_at). |
-| Items | `search_item` | â€” | GET /api/search?q=â€¦&limit=`top_k` (Postgres tsvector FTS over title + description only; `top_k` 1-20, default 10; a query under 2 chars returns `[]`; rows carry `issue_type, issue_id, title, description, status, project_id, assignee_agent_id, updated_at, rank`). |
+| Agents | `crud_agent` | `op: 'search' \| 'get' \| 'create' \| 'update' \| 'delete'` | GET / GET / POST / PATCH / DELETE /api/agents[/:id] — `search` returns a compact projection; `get` returns the composite (agent + checklists); `create`/`update` take a strict nested `payload` (the `CreateAgentSchema` / `UpdateAgentSchema` fields incl. `effort`, `kind_slug`, `settings_json`; `memory_cadence` on update only; unknown keys rejected). `delete` cascades prompt versions, checklists, memory, tests and agent_runs. The API does not check the caller: the Owner uses the writes from Claude Desktop; agent prompts forbid them (constitution clause). |
+| Agents | `agent_memory` | `op: 'get' \| 'update'` | GET / PUT /api/agents/:id/memory — `update` accepts `mode: 'replace' \| 'append'` (the API sets `source` itself). Description embeds the memory-boundary rule (Theme 08). |
+| Agents | `marketplace_agent` | `op: 'search' \| 'get'` | GET /api/marketplace/agents[/:id] — `search` returns lightweight projections with optional filters (`query`, `category`, `kind_slug`, `limit`); `get` returns the full composite (manifest + prompt + checklists + version + published_at). |
+| Items | `search_item` | — | GET /api/search?q=…&limit=`top_k` (Postgres tsvector FTS over title + description only; `top_k` 1-20, default 10; a query under 2 chars returns `[]`; rows carry `issue_type, issue_id, title, description, status, project_id, assignee_agent_id, updated_at, rank`). |
 | Items | `create_item` | `issue_type: 'task' \| 'sub_task'` | POST /api/tasks (`payload.project_id`) or POST /api/tasks/:task_id/sub-tasks (`payload.task_id`). `payload` is a per-kind union (strict; no `assignee_agent_id` — agents never route work, so a created Task is draft and unassigned); the handler re-checks it against `issue_type`. Task payloads may carry `repo_ids` (required unless the project has exactly one repo). Optional top-level `agent_id` is forwarded as `x-atlas-agent-id` (created-event actor + default reporter). |
 | Items | `get_item` | `issue_type + id` | GET /api/tasks/:id/full or /api/sub-tasks/:id/full + GET /api/comments, then GET /api/projects/:id/repos — always returns the full envelope: the item under its kind key (`task` / `sub_task`) + parent `task` (sub-task) or `sub_tasks` (Task) + project + `repos` + comments + related_links + external_links + activity + agents. Single MCP round-trip. |
 | Items | `update_item` | `action: 'patch_fields' \| 'change_status' \| 'add_comment' \| 'add_link' \| 'remove_link' \| 'remove_history'` | PATCH /api/{tasks,sub-tasks}/:id (patch_fields: `title`, `description`, `priority`, `acceptance_criteria`, `labels`; Task-only `spec_md`, `reporter_agent_id`) or PATCH /api/{tasks,sub-tasks}/:id/status (change_status: status-machine guard, never `?override`) or POST /api/comments (add_comment, always `author: 'agent'`) or POST /api/issues/:type/:id/links (add_link) or DELETE /api/issues/links/:linkId (remove_link; `link_id` number or the numeric string `get_item` returns) or POST /api/issues/:type/:id/history/prune (remove_history, `before_time` ≥ 1 h old). `change_status` returns 409 while a `running` Task run holds the Task (item lock); agents report through the `atlas-outcome` block instead. `agent_id` is forwarded as `x-atlas-agent-id` (or `requested_by_agent_id` / the comment's `agent_id`). No `assign`, external-link, `pr_url` or `worktree_branch` op: agents never route work or record PRs. |
 | Items | `delete_item` | `issue_type + id` | DELETE /api/{tasks,sub-tasks}/:id — deleting a Task drops its sub-tasks. Returns `{deleted: true, issue_type, id}`. |
-| Projects | `listProjects` | â€” | GET /api/projects (project rows; no git fields â€” those live on repos) |
-| Projects | `getProject` | â€” | GET /api/projects/:id + GET /api/projects/:id/repos â†’ the project plus `repos` |
+| Projects | `listProjects` | — | GET /api/projects (project rows; no git fields — those live on repos) |
+| Projects | `getProject` | — | GET /api/projects/:id + GET /api/projects/:id/repos → the project plus `repos` |
 | Reminders | `crud_reminder` | `op: 'create' \| 'update' \| 'cancel' \| 'pause' \| 'resume' \| 'snooze'` | POST / PATCH / DELETE /api/reminders[/:id]; pause / resume PATCH `status`; snooze POST /api/reminders/:id/snooze (`minutes`) |
-| Reminders | `search_reminder` | optional `status` / `channel` / `since` filters | GET /api/reminders[?â€¦] |
-| Notifications | `sendExternalNotification` | â€” | POST /api/notifications/send-external (A09; one-shot Owner-bound notification via the configured external channel; held through quiet hours, logged as an `mcp_external` row in the Notification Log, never in the feed) |
+| Reminders | `search_reminder` | optional `status` / `channel` / `since` filters | GET /api/reminders[?…] |
+| Notifications | `sendExternalNotification` | — | POST /api/notifications/send-external (A09; one-shot Owner-bound notification via the configured external channel; held through quiet hours, logged as an `mcp_external` row in the Notification Log, never in the feed) |
 
 **Catalog totals:** 13 registered, all 13 in the picker. Per-group: AGENTS 3, ITEMS 5, PROJECTS 2, REMINDERS 2, NOTIFICATIONS 1.
 
@@ -629,8 +629,8 @@ instead of the now-deleted per-action tool names.
 
 The intentionally **unexposed** surfaces:
 - Per `requirments_new.md` line 19: workspace settings (`/api/settings`), model registry (`/api/cli-models`), and notification settings.
-- **Guardrails** (general + project) â€” removed from MCP 2026-05-28. Owner-only via REST + web UI; agents receive guardrails through the constitution baked into every spawned prompt by `buildConstitutionMarkdown()`, not by querying MCP. The 9 retired tools were `listGuardrails`, `createGuardrail`, `updateGuardrail`, `deleteGuardrail`, `listProjectGuardrails`, `createProjectGuardrail`, `updateProjectGuardrail`, `toggleProjectGuardrail`, `deleteProjectGuardrail`.
-- **Schedules** (project auto-fetch cron) â€” removed from MCP 2026-05-28. One-time Owner setup; agents have no business reshaping or firing their own cron. The 4 retired tools were `listSchedules`, `upsertProjectSchedule`, `deleteProjectSchedule`, `triggerProjectAutoFetch`.
+- **Guardrails** (general + project) — removed from MCP 2026-05-28. Owner-only via REST + web UI; agents receive guardrails through the constitution baked into every spawned prompt by `buildConstitutionMarkdown()`, not by querying MCP. The 9 retired tools were `listGuardrails`, `createGuardrail`, `updateGuardrail`, `deleteGuardrail`, `listProjectGuardrails`, `createProjectGuardrail`, `updateProjectGuardrail`, `toggleProjectGuardrail`, `deleteProjectGuardrail`.
+- **Schedules** (project auto-fetch cron) — removed from MCP 2026-05-28. One-time Owner setup; agents have no business reshaping or firing their own cron. The 4 retired tools were `listSchedules`, `upsertProjectSchedule`, `deleteProjectSchedule`, `triggerProjectAutoFetch`.
 
 ## Services (96 files in `packages/api/src/services/`, plus 3 in `transports/`)
 
@@ -651,7 +651,7 @@ The intentionally **unexposed** surfaces:
 | `workflow-run-diff.ts` | `getWorkflowRunDiff(runId)` / `getWorkflowRunFilePatch(...)` behind `GET /api/workflow-runs/:id/diff[/file]`. Only picks the directory + ref per repo (live checkout → `worktree`; else the repo's `git_path` clone with `resolveBranchHead` → `branch`; else `unavailable` with an honest reason) and hands it to `worktree-diff.ts`. Repo membership in `runRepos(run)` is the access control for `repo_id`; an empty `git_path` is never probed (it would resolve against the API's cwd). `WorkflowRunDiffNotFound` → 404. |
 | `workflow-lock.ts` | `registerWorkflowItemLock(app)` adds a global `preHandler`: `PATCH /api/{tasks,sub-tasks}/:id/{status,assign}` → `409 {kind:'conflict', workflow_run_id}` while a `running` Task run holds the item. Covers UI and MCP (which calls the same routes). `runningWorkflowRunOnItem(itemId)` is exported. |
 | `compile-prompt.ts` | Pure read; assembles the **exact prompt** the runner would send for a given agent+issue (calls `buildPrompt` like `agent-runner.ts` does), returns it for offline inspection. No spawn, no SSE, no DB write. Powers the Run Now dialog's **Preview prompt** button. |
-| `auto-fetch-runner.ts` | Periodic `git fetch`; dirty/idle/agent guards; auth-failure â†’ external notification escalation. |
+| `auto-fetch-runner.ts` | Periodic `git fetch`; dirty/idle/agent guards; auth-failure → external notification escalation. |
 | `clone-runner.ts`, `reclone-runner.ts`, `delete-runner.ts` | Git/fs subprocesses with SSE streaming. |
 | `external-notifications.ts` | Provider-agnostic dispatcher: per-event toggles, quiet hours (held, then `flushDeferredExternal` on the minute tick), `deliverExternalNow` for Resend. Transports in `transports/*.ts`. |
 | `app-log.ts` | `appLog()` — the Fastify logger for code outside a request (the Task runner). `buildApp` installs it via `setAppLog`; stderr before that. |
@@ -687,11 +687,11 @@ The intentionally **unexposed** surfaces:
 | `run-repos.ts` | **ADR 0017.** `runRepos(run)`: the repos a Task run works on (its Task's `repo_ids`; a run with no item reads `workflow_runs.repo_ids`) and where each is checked out. Single repo → its canonical worktree (the run's recorded `worktree_path`), `workspace: null`. Several → `workspace` = `<primary parent>/worktrees/<projectId>/ws/<branch__slug>/` holding one nested worktree per repo named by repo. `repositoriesMarkdown(repos, branch)` — the Repositories section appended to a multi-repo run's `.atlas/current-task.md`. |
 | `external-links.ts` | `item_external_links` CRUD (`delete` also nulls `items.pr_url` when it points at the removed PR — that column is written separately by the Task runner, so leaving it set kept the detail page rendering a PR the Owner had just unlinked) + `parseGithubPrUrl` / `fetchGithubPrTitle` (`gh`) / `fetchGithubPrState` (REST, token) / `fetchGithubPr` (state + head sha) / `fetchGithubCi(url, sha, token)` (`GET …/commits/{sha}/check-runs` + `…/status`, first 100 of each, 10 s timeout; null if either fails, since half the picture could hide the red check). **Migration 023:** for an open PR the sync also reads CI on its head commit and stores `ci_state`/`ci_head_sha`/`ci_summary`/`ci_checked_at` (a failed CI lookup keeps the last reading; merged/closed PRs are not re-read), broadcasts `counts_changed` when CI changes (best-effort; polling never throws). `list()` kicks a background PR-state refresh for stale links; `refreshPrStates(itemId)` does it synchronously. **ADR 0017:** each PR's state is read with the credential of the project repo whose `git_url` matches the PR's owner/repo (falling back to the project credential), and a Task closes (`closeMergedTask`) only when **every** `pull_request` link on it has merged. |
 | `cli-availability.ts` | `getCliAvailability()` — probes each CLI binary with `--version` (3 s timeout), 60 s in-memory cache. Backs `GET /api/cli/availability`. |
-| `reply-context.ts` | A12 â€” `assembleReplyContext(issueType, issueId, options?)` returns the `IReplyContext` envelope used by `replyToItem` / `GET /api/issues/:type/:id/reply-context`. Reuses `issueFullService` for item + project + activity, `itemLinks.list` for linked items (carries `direction`), `getItem` for linked-item description + AC (depends_on only), and `commentsService.list` for the target thread + per-depends_on recent comments. Applies `headTailElideComments` to the target thread and `takeRecentComments` to each depends_on neighbor. |
-| `context-budget.ts` | A12 â€” pure helper. `estimateTokens(text)` is char-based (`Math.ceil(chars/4)`), `headTailElideComments(comments, headN, tailN)` returns `{kept, elided_count}`, `takeRecentComments(comments, recentN)` slices the tail. Exports `DEFAULT_REPLY_CONTEXT_BUDGET_TOKENS=16_000`, `DEFAULT_THREAD_HEAD_COMMENTS=3`, `DEFAULT_THREAD_TAIL_COMMENTS=12`, `DEFAULT_LINKED_ITEM_RECENT_COMMENTS=3`, `DEFAULT_ACTIVITY_HIGHLIGHTS=20`. No external dependencies â€” no `tiktoken`. |
+| `reply-context.ts` | A12 — `assembleReplyContext(issueType, issueId, options?)` returns the `IReplyContext` envelope used by `replyToItem` / `GET /api/issues/:type/:id/reply-context`. Reuses `issueFullService` for item + project + activity, `itemLinks.list` for linked items (carries `direction`), `getItem` for linked-item description + AC (depends_on only), and `commentsService.list` for the target thread + per-depends_on recent comments. Applies `headTailElideComments` to the target thread and `takeRecentComments` to each depends_on neighbor. |
+| `context-budget.ts` | A12 — pure helper. `estimateTokens(text)` is char-based (`Math.ceil(chars/4)`), `headTailElideComments(comments, headN, tailN)` returns `{kept, elided_count}`, `takeRecentComments(comments, recentN)` slices the tail. Exports `DEFAULT_REPLY_CONTEXT_BUDGET_TOKENS=16_000`, `DEFAULT_THREAD_HEAD_COMMENTS=3`, `DEFAULT_THREAD_TAIL_COMMENTS=12`, `DEFAULT_LINKED_ITEM_RECENT_COMMENTS=3`, `DEFAULT_ACTIVITY_HIGHLIGHTS=20`. No external dependencies — no `tiktoken`. |
 | `projects.ts`, `agents.ts`, `credentials.ts`, `settings.ts`, `schedules.ts` | Entity CRUD. `credentials.ts` also accepts `human_name` / `human_email` on **both** kinds now (create + update); only `human_gh_login` and `app_installation_owner` stay github_app-only, since they feed `gh pr create --assignee` and the App installation respectively. |
 | `git-credentials.ts` | `buildGitAuth(credentialId, { identityOnly? })` writes the per-invocation temp dir (with `identityOnly` — the agent's config — there is no `[http] extraheader`) every credentialed git/gh call points `GIT_CONFIG_GLOBAL` at: `[http] extraheader` for auth, `[credential] helper =` to kill the helper chain, and a `[user]` block for commit identity. The `[user]` block is written for **github_app** (bot identity, `<app_slug>[bot]` + `<app_id>+<slug>[bot]@users.noreply.github.com`) and, since standalone terminals, also for **pat** when the credential carries both `human_name` and `human_email`. The two mean different things by kind: on github_app the human is a *co-author* (bot authors, human gets a `Co-Authored-By` trailer via the `prepare-commit-msg` hook); on a pat the human is the *author*, because a PAT has no identity of its own. Both-or-nothing on the pat branch — a name without an email leaves the block out entirely rather than fabricating half an identity, so every pre-existing credential behaves byte-identically. `GitAuth.humanName`/`humanEmail`/`humanGhLogin` stay github_app-only in the return value: callers use them to append an explicit trailer, and co-authoring yourself is noise. `buildMultiRepoGitAuth(repos)` is the multi-repo form: it builds one `buildGitAuth` per repo and composes a single config of `includeIf "gitdir:<clone>/"` sections, so a multi-repo Task's agent gets each repo's own `[user]`, `[http] extraheader` and `[core] hooksPath` — including inside linked worktrees, whose gitdir (`<clone>/.git/worktrees/<name>`) sits under the matched clone. Before it, the agent got `firstRepo.credential_id` for every checkout, so commits in repo #2 were authored by repo #1's bot with repo #1's trailer while `commitPending` used each repo's own credential. **The clone path is `realpath`-resolved** because git matches `gitdir:` against the resolved path (`/tmp` is a symlink to `/private/tmp` on macOS) — unresolved, it silently matches nothing and the run falls back to no identity, which looks exactly like the bug it fixes. Repo-local config is deliberately NOT used: `git config --local` in a linked worktree writes to the clone's shared config, which concurrent runs' worktrees also read. Returns `configDirs` — every temp dir to clean, not just one — and `null` when no repo has a usable credential. Also warns when a github_app credential has the App fields but no `human_name`/`human_email`, which yields bot-authored commits with no Owner trailer at all. |
-| `prompt-builder.ts` | Compose agent prompt from `prompt_md` + issue context. `buildLinkedItemsSection(itemId)` injects a `## Related items` section with `Depends on` (outgoing depends_on, must reach `done` first), `Blocks` (incoming depends_on), `Relates to` (undirected), and — **2026-09-14** — `Tests` (outgoing `tested_by`, on the QA twin → its dev sub-task) / `Tested by` (incoming `tested_by`, on the dev sub-task → its QA twin); before this, tested_by links were dropped from `.atlas/current-task.md` and QA Writer concluded its twin link was missing â€” so agents have linked-item context up front instead of fetching via MCP at runtime (Theme 04, line 14). **B04** â€” the `Depends on` subsection also inlines each dep's `description` + `acceptance_criteria` so the agent can plan against the dep without an MCP fetch. `Blocks` / `Relates to` stay shallow (id + status + title only). `spec_md` of linked items is intentionally NOT inlined. **ADR 0015:** `getIssueContext` / `renderIssueContext` (shared with `current-task-writer.ts`) render the item's acceptance criteria and, for a Task, its `spec_md`; a sub-task's context carries its parent Task (description, acceptance criteria, `spec_md`, latest 12 comments — the Owner often answers on the Task). `# Project Context` lists the project's Tasks (+ spec). |
+| `prompt-builder.ts` | Compose agent prompt from `prompt_md` + issue context. `buildLinkedItemsSection(itemId)` injects a `## Related items` section with `Depends on` (outgoing depends_on, must reach `done` first), `Blocks` (incoming depends_on), `Relates to` (undirected), and — **2026-09-14** — `Tests` (outgoing `tested_by`, on the QA twin → its dev sub-task) / `Tested by` (incoming `tested_by`, on the dev sub-task → its QA twin); before this, tested_by links were dropped from `.atlas/current-task.md` and QA Writer concluded its twin link was missing — so agents have linked-item context up front instead of fetching via MCP at runtime (Theme 04, line 14). **B04** — the `Depends on` subsection also inlines each dep's `description` + `acceptance_criteria` so the agent can plan against the dep without an MCP fetch. `Blocks` / `Relates to` stay shallow (id + status + title only). `spec_md` of linked items is intentionally NOT inlined. **ADR 0015:** `getIssueContext` / `renderIssueContext` (shared with `current-task-writer.ts`) render the item's acceptance criteria and, for a Task, its `spec_md`; a sub-task's context carries its parent Task (description, acceptance criteria, `spec_md`, latest 12 comments — the Owner often answers on the Task). `# Project Context` lists the project's Tasks (+ spec). |
 | `env-file.ts` | Mirror `settings.env` rows to a `.env` file on disk. |
 | `project-env-file.ts` | Read/write `<git_path>/.env` for a single project. Reuses `parseEnv`/`rewriteEnv` from `env-file.ts`. |
 | `git-status.ts`, `git-verify.ts` | Git inspection helpers. |

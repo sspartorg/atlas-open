@@ -6,6 +6,7 @@ import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from '../../components/ButtonSpinner.js';
 import LinearProgress from '@mui/material/LinearProgress';
 import { useNavigate } from 'react-router-dom';
 import CloseRounded from '@mui/icons-material/CloseRounded';
@@ -616,7 +617,7 @@ export function RecloneProjectModal({ open, project, repo, displayId, onClose }:
                             <Button
                                 variant="contained"
                                 disabled
-                                startIcon={<CircularProgress aria-hidden size={14} color="inherit" />}
+                                startIcon={<ButtonSpinner />}
                                 sx={{ textTransform: 'none', fontWeight: 600 }}
                             >
                                 Pulling…

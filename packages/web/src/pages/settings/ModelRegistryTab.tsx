@@ -6,6 +6,7 @@ import ButtonBase from '@mui/material/ButtonBase';
 import IconButton from '@mui/material/IconButton';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
+import { ButtonSpinner } from '../../components/ButtonSpinner.js';
 import Dialog from '@mui/material/Dialog';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
@@ -349,7 +350,7 @@ function ConfirmRemoveModelDialog({
                         color="error"
                         startIcon={
                             busy ? (
-                                <CircularProgress aria-hidden size={14} color="inherit" />
+                                <ButtonSpinner />
                             ) : (
                                 <DeleteOutlineRounded />
                             )

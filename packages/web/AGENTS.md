@@ -53,6 +53,7 @@ import { ATLAS_PALETTE, MOTION } from '@/theme/tokens';
 ### Component rules
 - Use MUI components only: `Box`, `Typography`, `Stack`, `Card`, `Chip`, `Button`, etc.
 - No raw `<div>`, `<span>`, `<p>` — use `<Box component="div">` only when MUI has no equivalent
+- A busy spinner inside a button is `<ButtonSpinner />` (`components/ButtonSpinner.tsx`, aria-hidden so the button keeps its own name). Any other `CircularProgress`/`LinearProgress` gets the theme's "Loading" name unless it passes its own `aria-label`.
 - One exception: `<Box component="span" className="material-symbols-rounded">` for Material icons
   - The self-hosted icon font ships only the names in `src/theme/icons.ts` (ADR 0030/0031). A new icon: add it there (sorted), then run `pnpm -F @atlas/web fonts:fetch` — `src/theme/icons.test.ts` fails with the missing name, or while the font is stale. An icon that comes from data (agent glyph, rule icon) goes through `iconOr(name, fallback)`.
 

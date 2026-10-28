@@ -316,11 +316,15 @@ async function spawnNode(run: RunRow, retryOf?: string): Promise<void> {
         await parkFailed(run, AGENT_NODE, `Agent ${node?.agent_id ?? '(none)'} is missing or inactive`, 'missing_agent');
         return;
     }
-    await db
+    // Every caller holds a running run; one the Owner stopped meanwhile (say,
+    // while its worktree was prepared) stays stopped and starts no agent.
+    const live = await db
         .updateTable('workflow_runs')
-        .set({ current_node_id: AGENT_NODE, status: 'running', parked_node_id: null, park_reason: null })
+        .set({ current_node_id: AGENT_NODE, parked_node_id: null, park_reason: null })
         .where('id', '=', run.id)
-        .execute();
+        .where('status', '=', 'running')
+        .executeTakeFirst();
+    if (Number(live.numUpdatedRows ?? 0) === 0) return;
     run.current_node_id = AGENT_NODE;
     const item = run.item_id ? await loadItem(run.item_id) : undefined;
     broadcastRun(run, 'running', AGENT_NODE);
@@ -508,11 +512,15 @@ async function park(
     stepPostedReason = false,
     failed = false,
 ): Promise<void> {
-    await db
+    // Only a live run parks: one the Owner stopped meanwhile (say, during
+    // delivery's push) stays stopped, and the Task keeps the Owner's status.
+    const parked = await db
         .updateTable('workflow_runs')
         .set({ status: 'waiting_for_owner', parked_node_id: nodeId, current_node_id: nodeId, park_reason: reason.slice(0, 1000) })
         .where('id', '=', run.id)
-        .execute();
+        .where('status', '=', 'running')
+        .executeTakeFirst();
+    if (Number(parked.numUpdatedRows ?? 0) === 0) return;
     run.status = 'waiting_for_owner';
     await recordRunEvent(run.id, 'parked', reason, kind);
     broadcastRun(run, 'waiting_for_owner', nodeId);
@@ -712,7 +720,9 @@ async function deliver(run: RunRow, opts: DeliveryFlags): Promise<DeliveryResult
         if (!pushOk) result.failure ??= `${tag}Push failed: ${push.error ?? 'unknown error'}`;
         if (workspace) await db.updateTable('workflow_runs').set({ updated_at: new Date().toISOString() }).where('id', '=', run.id).execute();
 
-        if (opts.openPr && pushOk) {
+        // A run the Owner stopped mid-push opens no PR, like any stopped run.
+        const live = async () => (await db.selectFrom('workflow_runs').select('status').where('id', '=', run.id).executeTakeFirst())?.status === 'running';
+        if (opts.openPr && pushOk && (await live())) {
             const pr = await openPullRequest({
                 worktreePath: path,
                 branch,
@@ -800,11 +810,14 @@ async function finishRun(run: RunRow): Promise<void> {
         return;
     }
 
-    await db
+    const completed = await db
         .updateTable('workflow_runs')
         .set({ status: 'completed', finished_at: new Date().toISOString(), pr_url: delivery.prUrl, pr_urls: JSON.stringify(delivery.prUrls) as never })
         .where('id', '=', run.id)
-        .execute();
+        .where('status', '=', 'running')
+        .executeTakeFirst();
+    // Stopped while delivering: cancelWorkflowRun already settled it.
+    if (Number(completed.numUpdatedRows ?? 0) === 0) return;
     broadcastRun(run, 'completed', END_NODE);
 
     if (run.item_id) {

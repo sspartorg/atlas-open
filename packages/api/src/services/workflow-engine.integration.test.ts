@@ -328,6 +328,41 @@ describe('task run — stop, reconcile, dispatch', () => {
         expect(await itemOf('ATL-2')).toMatchObject({ status: 'waiting_for_info' });
     });
 
+    // The Owner stops the run and closes the Task while delivery is pushing:
+    // whatever the push returns, the stop and the Owner's status stand.
+    for (const push of [
+        { pushed: false, alreadyUpToDate: false, error: 'project credential_id is not configured' },
+        { pushed: true, alreadyUpToDate: false },
+    ]) {
+        it(`a stop during delivery stays stopped (push ${push.pushed ? 'ok' : 'failed'})`, async () => {
+            const runId = await startTaskRun('ATL-2');
+            git.pushWorktree.mockImplementationOnce(async () => {
+                await cancelWorkflowRun(runId);
+                await testDb.updateTable('items').set({ status: 'done' }).where('id', '=', 'ATL-2').execute();
+                return push;
+            });
+            await finishStep('completed', 'done');
+            expect(await runOf(runId)).toMatchObject({ status: 'cancelled' });
+            expect(await itemOf('ATL-2')).toMatchObject({ status: 'done' });
+            expect(git.openPullRequest).not.toHaveBeenCalled();
+            expect(await tickWorkflowDispatch()).toBe(0);
+        });
+    }
+
+    it('a stop while the worktree is being prepared starts no agent', async () => {
+        let runId = '';
+        git.ensureWorktree.mockImplementationOnce(async () => {
+            runId = (await testDb.selectFrom('workflow_runs').select('id').executeTakeFirstOrThrow()).id;
+            await cancelWorkflowRun(runId);
+            await testDb.updateTable('items').set({ status: 'done' }).where('id', '=', 'ATL-2').execute();
+            return { path: '/tmp/atlas-run-test', branch: 'atlas/task/ATL-2', freshlyCreated: true };
+        });
+        await startTaskRun('ATL-2');
+        expect(spawned).toHaveLength(0);
+        expect(await runOf(runId)).toMatchObject({ status: 'cancelled' });
+        expect(await itemOf('ATL-2')).toMatchObject({ status: 'done' });
+    });
+
     it('cancelWorkflowRun stops the live agent run', async () => {
         const runId = await startTaskRun('ATL-2');
         await cancelWorkflowRun(runId);
