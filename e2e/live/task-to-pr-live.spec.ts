@@ -222,3 +222,60 @@ test('one agent at a time: a second Task waits until the first is done', async (
     }
     expect(overlap).toBe(false);
 });
+
+// The Jira bridge, for real: a throwaway issue (JQL `key = <it>`, so nothing
+// else is touched) imports as a Task for Solo Engineer, runs to a PR, and the
+// next sync comments on the issue. Needs LIVE_JIRA_SITE / _EMAIL / _TOKEN and
+// LIVE_JIRA_PROJECT (default ATL); the issue is deleted afterwards.
+test.describe('Jira bridge', () => {
+    const site = process.env['LIVE_JIRA_SITE'] ?? '';
+    const email = process.env['LIVE_JIRA_EMAIL'] ?? '';
+    const token = process.env['LIVE_JIRA_TOKEN'] ?? '';
+    test.skip(!site || !email || !token, 'set LIVE_JIRA_SITE, LIVE_JIRA_EMAIL and LIVE_JIRA_TOKEN');
+    const auth = `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}`;
+    const jira = async (method: string, path: string, body?: unknown) => {
+        const res = await fetch(`${site}${path}`, { method, headers: { Authorization: auth, Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : null });
+        const text = await res.text();
+        expect(res.ok, `${method} ${path}: ${text}`).toBe(true);
+        return (text ? JSON.parse(text) : null) as Record<string, any>;
+    };
+    let issueKey = '';
+    test.afterAll(async () => {
+        if (issueKey) await jira('DELETE', `/rest/api/3/issue/${issueKey}`);
+    });
+
+    test('an imported Jira issue runs to a PR, and the issue hears about it', async ({ request }) => {
+        const line = `Hello from Jira ${STAMP}`;
+        const types = await jira('GET', `/rest/api/3/issue/createmeta/${process.env['LIVE_JIRA_PROJECT'] ?? 'ATL'}/issuetypes`);
+        const taskType = (types['issueTypes'] ?? types['values']).find((t: { name: string }) => t.name === 'Task');
+        issueKey = (
+            await jira('POST', '/rest/api/3/issue', {
+                fields: {
+                    project: { key: process.env['LIVE_JIRA_PROJECT'] ?? 'ATL' },
+                    issuetype: { id: taskType.id },
+                    summary: `Atlas live test ${STAMP}`,
+                    labels: ['atlas-live-test'],
+                    description: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: `Append exactly this line to the end of README.md and change nothing else: ${line}` }] }] },
+                },
+            })
+        )['key'];
+
+        const put = await request.put(`${API}/api/integrations/jira`, { data: { enabled: true, site_url: site, email, api_token: token } });
+        expect(put.ok(), await put.text()).toBe(true);
+        const repoId = (await get<Array<{ id: string }>>(request, `/api/projects/${projectId}/repos`))[0]!.id;
+        await post(request, `/api/projects/${projectId}/jira-sources`, { jql: `key = ${issueKey}`, agent_id: 'agent-solo', repo_ids: [repoId] });
+        await post(request, '/api/integrations/jira/sync', {});
+
+        const tasks = await get<Array<{ id: string; title: string }>>(request, `/api/tasks?project_id=${projectId}`);
+        const task = tasks.find((t) => t.title.includes(STAMP) && t.title.includes('Atlas live test'));
+        expect(task, `imported Task for ${issueKey}`).toBeTruthy();
+
+        const run = await waitRun(request, task!.id, (r) => r.status === 'completed', ['error', 'cancelled', 'waiting_for_owner']);
+        rememberPrs(run);
+        expect(gh('pr', 'diff', run.pr_url!)).toContain(line);
+
+        await post(request, '/api/integrations/jira/sync', {});
+        const issue = await jira('GET', `/rest/api/3/issue/${issueKey}?fields=comment`);
+        expect(issue['fields'].comment.comments.length, 'Atlas commented on the issue').toBeGreaterThan(0);
+    });
+});
