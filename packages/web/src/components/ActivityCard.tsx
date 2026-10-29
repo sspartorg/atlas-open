@@ -105,14 +105,13 @@ function CommentRow({
     ownerAccent: string;
 }) {
     const agent = comment.agent_id ? agentsById.get(comment.agent_id) : null;
-    // An agent comment with no agent_id is Atlas itself speaking
-    // (e.g. "waiting for you" when a run parks).
+    // An agent comment with neither agent_id nor author_name is Atlas itself
+    // speaking (e.g. "waiting for you" when a run parks). A deleted agent's
+    // comments keep author_name but lose agent_id (ON DELETE SET NULL).
     const name =
         comment.author === 'owner'
             ? ownerName
-            : comment.agent_id
-              ? (agent?.name ?? 'Agent')
-              : 'Atlas';
+            : (agent?.name ?? comment.author_name ?? (comment.agent_id ? 'Agent' : 'Atlas'));
     const color =
         comment.author === 'owner' ? ownerAccent : (agent?.accent_color ?? ATLAS_PALETTE.slate);
     const isAgent = comment.author === 'agent';

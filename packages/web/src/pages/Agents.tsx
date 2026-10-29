@@ -180,7 +180,6 @@ export function Agents() {
         const base: Record<RoleFilterKey, number> = {
             all: agents?.length ?? 0,
             po: 0,
-            'spec-writer': 0,
             engineer: 0,
             qa: 0,
             architect: 0,

@@ -27,10 +27,9 @@ export class ModelNotInRegistryError extends Error {
     }
 }
 
-// `agents.role_id` is an FK into `roles`, but the Zod schemas validate
-// against the `SdlcRole` UNION in @atlas/shared, which declares 10 slugs
-// while the shipped baseline seeds only 5 (po, architect, engineer, qa,
-// automation). Assigning one of the other five produced a raw
+// `agents.role_id` is an FK into `roles`. The Zod schemas only admit the
+// `SdlcRole` slugs the baseline seeds, but a roles row can still be missing
+// (an older install, a hand-edited DB) and that used to surface as a raw
 // `agents_role_id_fkey` 500. Same shape as ModelNotInRegistryError: the FK
 // gives correctness, this gives an actionable 400.
 export class RoleNotInCatalogError extends Error {

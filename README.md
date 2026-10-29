@@ -13,14 +13,22 @@ worktree and branch. When the agent finishes, Atlas commits anything it left
 uncommitted, pushes, and opens the pull request (one per repo the Task
 touched). If the agent asks a question, the run parks and waits for you;
 your reply on the Task resumes it. A crashed run gets one automatic retry.
-Up to three Tasks run at once, and only one Task per repo at a time.
+One agent runs at a time; other Tasks wait in the Queue.
+
+**Why your first PR touches `.gitignore`.** Atlas writes its run files
+(`.atlas/`, `.claude/commands/atlas-*`, `.github/prompts/atlas-*`) into the
+worktree, so the first PR on a repo carries one extra commit,
+`chore(atlas): ignore Atlas scratch paths`, that adds those three patterns to
+`.gitignore`. Once it is merged, later PRs no longer include it. A
+local-only `.git/info/exclude` was tried first and let those files reach a
+PR once one had been tracked. A Task that changes nothing opens no PR.
 
 ## What's in Atlas Open
 
 - **Projects** with one or more repos, **Tasks**, sub-tasks, issues and comments
 - **One agent per Task**, run end to end with commit, push and PR handled by Atlas; a run page at `/runs/:runId` with steps, changes, Stop and Resume
 - **Agents** with memory, checklists and agent tests
-- **Marketplace** of installable agents: Solo Engineer (`agent-solo`), plus AI News, AI Readiness, Jira to Epic, Knowledge Base, Market Research and Regulations, which run on demand
+- **Marketplace** of installable agents. Assign a Task to Solo Engineer (`agent-solo`), AI Readiness or Knowledge Base and the PR comes back; AI News, Jira to Epic, Market Research and Regulations run on demand (fill in the placeholders at the top of their prompt first)
 - **Jira bridge**: each source is a JQL query, an agent and the repos to use; imported Tasks are assigned to that agent
 - **Guardrails** and guardrail scripts
 - **Reminders**, in-app and push **notifications**, external notifications (Telegram, Microsoft Teams)
@@ -98,7 +106,7 @@ sign in to the CLIs the script can't drive interactively:
 
 ```powershell
 claude login         # Anthropic sign-in
-gh auth login        # GitHub sign-in (also unlocks `gh copilot`)
+gh auth login        # GitHub sign-in (pushes and pull requests)
 ```
 
 ---

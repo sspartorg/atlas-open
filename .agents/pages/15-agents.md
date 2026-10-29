@@ -19,7 +19,7 @@ Grid of all agent cards, grouped by category. Per-card actions: open, edit, paus
 
 **Filters (`AgentFilterChips`)**
 - Category chips: software-dev / marketing / content / design + Favorites
-- **Role dropdown** (A08) — narrows to one of the 10 SDLC roles (PO / Spec Writer / Engineer / QA / Architect / Tester / Automation / DevOps / Security / Designer) on top of the category filter. Selecting a specific role excludes autonomous agents (`role_id` NULL) entirely; `All roles` keeps them visible. Per-role counts are computed client-side from `useAgents()` data — no separate fetch.
+- **Role dropdown** (A08) — narrows to one of the 10 seeded SDLC roles (PO / Engineer / QA / Architect / Tester / Automation / DevOps / Security / Designer / Docs; `SDLC_ROLES` in `@atlas/shared`) on top of the category filter. Selecting a specific role excludes autonomous agents (`role_id` NULL) entirely; `All roles` keeps them visible. Per-role counts are computed client-side from `useAgents()` data — no separate fetch.
 - Sort dropdown: last-run / queue-depth / category-role. Queue-depth sorts by the same item-based count the card shows.
 
 **Card grid (`AgentCategorySection` → `AgentCard`)**

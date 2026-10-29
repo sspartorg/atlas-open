@@ -1911,9 +1911,10 @@ describe('long activity', () => {
         renderWithProviders(<ConversationCard issueType="task" issueId="S1" />);
         expect(await screen.findByText('comment 60')).toBeInTheDocument();
         expect(screen.queryByText('comment 10')).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Show 10 earlier · 10 hidden' }));
+        // Text, not role: a name-filtered role query computes every comment's accessible name.
+        fireEvent.click(screen.getByText('Show 10 earlier · 10 hidden'));
         expect(await screen.findByText('comment 10')).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /earlier/ })).not.toBeInTheDocument();
+        expect(screen.queryByText(/earlier/)).not.toBeInTheDocument();
     });
 
     it('pages the activity log the same way', async () => {

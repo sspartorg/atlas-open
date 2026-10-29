@@ -339,6 +339,28 @@ describe('CommentRow — agent color fallback branch', () => {
         await screen.findByText('Known agent comment');
         expect(await screen.findByText('KnownAgent')).toBeInTheDocument();
     });
+
+    it('name falls back agent?.name → author_name → Agent / Atlas', async () => {
+        const agent = makeAgent({ id: 'agent-live', name: 'LiveName' });
+        const activity: IActivityItem[] = [
+            // Live agent wins over the stamped name (a rename shows the new one).
+            { kind: 'comment', data: makeComment({ id: 301, author: 'agent', agent_id: 'agent-live', author_name: 'OldName', body: 'c1' }) },
+            // Deleted agent: agent_id nulled by the FK, the stamped name survives.
+            { kind: 'comment', data: makeComment({ id: 302, author: 'agent', agent_id: null, author_name: 'GoneAgent', body: 'c2' }) },
+            { kind: 'comment', data: makeComment({ id: 303, author: 'agent', agent_id: 'agent-missing', author_name: null, body: 'c3' }) },
+            { kind: 'comment', data: makeComment({ id: 304, author: 'agent', agent_id: null, author_name: null, body: 'c4' }) },
+        ];
+        server.use(...defaultHandlers);
+        renderWithProviders(
+            <ConversationCard issueType="task" issueId="S1" activity={activity} agents={[agent]} />
+        );
+        await screen.findByText('c4');
+        expect(screen.getByText('LiveName')).toBeInTheDocument();
+        expect(screen.queryByText('OldName')).not.toBeInTheDocument();
+        expect(screen.getByText('GoneAgent')).toBeInTheDocument();
+        expect(screen.getByText('Agent')).toBeInTheDocument();
+        expect(screen.getByText('Atlas')).toBeInTheDocument();
+    });
 });
 
 describe('ActivityLogCard — truncateValue empty-string branch', () => {

@@ -166,11 +166,12 @@ describe('MobileTaskList paging', () => {
         renderWithProviders(
             <MobileTaskList rows={rows} projects={[]} agents={[]} ownerName="O" ownerAccent="" />
         );
-        expect(screen.getAllByRole('button', { name: /Task \d+/ })).toHaveLength(50);
-        await userEvent.click(screen.getByRole('button', { name: 'Show 50 more of 70' }));
-        expect(screen.getAllByRole('button', { name: /Task \d+/ })).toHaveLength(100);
-        await userEvent.click(screen.getByRole('button', { name: 'Show 20 more of 20' }));
-        expect(screen.getAllByRole('button', { name: /Task \d+/ })).toHaveLength(120);
-        expect(screen.queryByRole('button', { name: /more of/ })).not.toBeInTheDocument();
+        // Text, not role: a name-filtered role query computes every card's accessible name.
+        expect(screen.getAllByText(/^Task \d+$/)).toHaveLength(50);
+        await userEvent.click(screen.getByText('Show 50 more of 70'));
+        expect(screen.getAllByText(/^Task \d+$/)).toHaveLength(100);
+        await userEvent.click(screen.getByText('Show 20 more of 20'));
+        expect(screen.getAllByText(/^Task \d+$/)).toHaveLength(120);
+        expect(screen.queryByText(/more of/)).not.toBeInTheDocument();
     });
 });

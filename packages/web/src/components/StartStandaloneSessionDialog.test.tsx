@@ -6,7 +6,7 @@
  * below are mostly about the exact payload shape.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import type { ICredential } from '@atlas/shared';
@@ -87,12 +87,12 @@ describe('StartStandaloneSessionDialog', () => {
     it('includes the picked credential and trims the title', async () => {
         renderDialog();
         const folderInput = await screen.findByPlaceholderText('Pick any folder on this machine');
-        await userEvent.type(folderInput, '/Users/owner/code/atlas');
+        fireEvent.change(folderInput, { target: { value: '/Users/owner/code/atlas' } });
 
         await userEvent.click(screen.getByRole('combobox', { name: /git credentials/i }));
         await userEvent.click(await screen.findByRole('option', { name: 'Work PAT' }));
 
-        await userEvent.type(screen.getByLabelText(/title/i), '  My terminal  ');
+        fireEvent.change(screen.getByLabelText(/title/i), { target: { value: '  My terminal  ' } });
         await userEvent.click(screen.getByRole('button', { name: /open terminal/i }));
 
         await waitFor(() => expect(lastPayload).not.toBeNull());

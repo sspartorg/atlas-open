@@ -27,7 +27,7 @@ afterAll(async () => {
 });
 
 // Valid SDLC role ids from SdlcRoleSchema:
-// 'po'|'spec-writer'|'engineer'|'qa'|'architect'|'tester'|'automation'|'devops'|'security'|'designer'
+// 'po'|'engineer'|'qa'|'architect'|'tester'|'automation'|'devops'|'security'|'designer'|'docs'
 
 describe('GET /api/roles', () => {
     it('returns 200 with array of roles', async () => {

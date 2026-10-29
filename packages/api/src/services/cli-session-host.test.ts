@@ -1522,6 +1522,63 @@ describe('initial-prompt auto-type setTimeout body', () => {
         pauseSession(id);
     });
 
+    // Found live: a session's worktree is new to the CLI, so it opens on a
+    // folder-trust dialog; the prompt typed into it made the CLI exit (code 1).
+    it('holds the prompt while the folder-trust dialog is up, passing the Owner’s keys through', async () => {
+        const id = freshId();
+        startSession({ sessionId: id, cli: 'claude', worktreePath: '/tmp', cliSessionId: id, model: 'claude-opus-4-7', initialPrompt: 'do something' });
+        const ws = makeFakeWs();
+        attachWebSocket(id, ws);
+        const pty = ptyInstances[ptyInstances.length - 1]!;
+
+        pty.onDataCb?.('Quick safety check: Is this a project you created or one you trust?\r\n> 1. Yes, I trust this folder\r\n');
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(pty.write).not.toHaveBeenCalledWith('do something');
+
+        ws.emit('message', Buffer.from('\r')); // the Owner answers it
+        expect(pty.write).toHaveBeenCalledWith('\r');
+
+        pty.onDataCb?.('\x1b[2J\x1b[H> '); // the CLI's input box replaces the dialog
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(pty.write).not.toHaveBeenCalledWith('do something'); // still settling
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(pty.write).toHaveBeenCalledWith('do something');
+        await vi.advanceTimersByTimeAsync(500);
+        expect(__peekSessionStateForTest(id)?.autoPromptPending).toBe(false);
+
+        pauseSession(id);
+    });
+
+    const TRUST = (sel: 'no' | 'yes') =>
+        `\x1b[2J\x1b[HQuick safety check: Is this a project you created or one you trust?\r\n${sel === 'no' ? '❯ No, exit' : '  No, exit'}\r\n${sel === 'yes' ? '❯ Yes, I trust this folder' : '  Yes, I trust this folder'}\r\nEnter to confirm · Esc to cancel\r\n`;
+
+    it('answers the trust dialog "Yes" in a worktree Atlas made: Down off "No, exit", Enter on "Yes"', async () => {
+        const id = freshId();
+        startSession({ sessionId: id, cli: 'claude', worktreePath: '/tmp', cliSessionId: id, model: 'claude-opus-4-7', trustWorkspace: true });
+        const pty = ptyInstances[ptyInstances.length - 1]!;
+
+        pty.onDataCb?.(TRUST('no'));
+        await vi.advanceTimersByTimeAsync(500);
+        expect(pty.write).toHaveBeenCalledWith('\x1b[B');
+        expect(pty.write).not.toHaveBeenCalledWith('\r');
+
+        pty.onDataCb?.(TRUST('yes'));
+        await vi.advanceTimersByTimeAsync(500);
+        expect(pty.write).toHaveBeenLastCalledWith('\r');
+
+        pauseSession(id);
+    });
+
+    it('never answers the trust dialog for a folder the Owner picked', async () => {
+        const id = freshId();
+        startSession({ sessionId: id, cli: 'claude', worktreePath: '/tmp', cliSessionId: id, model: 'claude-opus-4-7' });
+        const pty = ptyInstances[ptyInstances.length - 1]!;
+        pty.onDataCb?.(TRUST('no'));
+        await vi.advanceTimersByTimeAsync(3_000);
+        expect(pty.write).not.toHaveBeenCalled();
+        pauseSession(id);
+    });
+
     it('skips writing the prompt when entry.pty has already exited before the timer fires', () => {
         const id = freshId();
         startSession({ sessionId: id, cli: 'claude', worktreePath: '/tmp', cliSessionId: id, model: 'claude-opus-4-7', initialPrompt: 'do something' });

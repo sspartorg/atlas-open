@@ -145,6 +145,8 @@ export interface ApiOptions {
     envFile: string;
     extraPath?: string;
     logName: string;
+    /** Real `claude` / `copilot` / `gh` and real github.com: no fakes on PATH or in git config. */
+    live?: boolean;
 }
 
 export function startApi(
@@ -164,8 +166,9 @@ export function startApi(
         'fixtures',
         process.platform === 'win32' ? 'fake-claude.cmd' : 'fake-claude.js',
     );
-    const claudeBinary =
-        process.env['ATLAS_CLAUDE_BINARY'] && process.env['ATLAS_CLAUDE_BINARY'].length > 0
+    const claudeBinary = o.live
+        ? 'claude'
+        : process.env['ATLAS_CLAUDE_BINARY'] && process.env['ATLAS_CLAUDE_BINARY'].length > 0
             ? process.env['ATLAS_CLAUDE_BINARY']
             : fakeClaudePath;
     // 2026-06-25 — Mirror block for copilot. Same shape as claude above:
@@ -179,8 +182,9 @@ export function startApi(
         'fixtures',
         process.platform === 'win32' ? 'fake-copilot.cmd' : 'fake-copilot.js',
     );
-    const copilotBinary =
-        process.env['ATLAS_COPILOT_BINARY'] && process.env['ATLAS_COPILOT_BINARY'].length > 0
+    const copilotBinary = o.live
+        ? 'copilot'
+        : process.env['ATLAS_COPILOT_BINARY'] && process.env['ATLAS_COPILOT_BINARY'].length > 0
             ? process.env['ATLAS_COPILOT_BINARY']
             : fakeCopilotPath;
     const child = spawn(
@@ -201,6 +205,8 @@ export function startApi(
                 WEB_PORT: String(WEB_PORT),
                 DATABASE_URL: dbUrl(o.dbName),
                 ATLAS_AI_ENABLED: String(o.aiEnabled),
+                // A simulated agent leaves one tracked edit, so delivery runs.
+                ...(o.live ? {} : { ATLAS_SIMULATED_EDIT: '1' }),
                 // The suite drives writes over plain HTTP with no browser
                 // headers, so it opts out of the generated MCP write token.
                 ATLAS_MCP_TOKEN_OPEN: '1',
@@ -211,14 +217,14 @@ export function startApi(
                 ATLAS_COPILOT_BINARY: copilotBinary,
                 ATLAS_DATA_DIR: o.dataDir,
                 ATLAS_ENV_FILE: o.envFile,
-                ATLAS_TELEGRAM_API_BASE: `http://127.0.0.1:${FAKE_TELEGRAM_PORT}`,
+                ...(o.live ? {} : { ATLAS_TELEGRAM_API_BASE: `http://127.0.0.1:${FAKE_TELEGRAM_PORT}` }),
                 ...(existsSync(join(PUSH_TLS_DIR, 'cert.pem')) ? { NODE_EXTRA_CA_CERTS: join(PUSH_TLS_DIR, 'cert.pem') } : {}),
                 // Add repo specs clone / connect github.com/atlas-e2e/* from
                 // local bare repos (helpers/fake-github.ts).
-                ...fakeGithubGitEnv(),
+                ...(o.live ? {} : fakeGithubGitEnv()),
                 // ...and a run's "open a PR" step reaches a fake `gh`
                 // (fixtures/fake-gh) instead of api.github.com.
-                PATH: `${o.extraPath ? `${o.extraPath}${delimiter}` : ''}${join(REPO_ROOT, 'e2e', 'fixtures', 'fake-gh')}${delimiter}${process.env['PATH'] ?? ''}`,
+                PATH: `${o.extraPath ? `${o.extraPath}${delimiter}` : ''}${o.live ? '' : `${join(REPO_ROOT, 'e2e', 'fixtures', 'fake-gh')}${delimiter}`}${process.env['PATH'] ?? ''}`,
             },
             shell: process.platform === 'win32',
             // POSIX: lead a process group so teardown can stop pnpm AND the

@@ -27,6 +27,9 @@ interface Check {
     args: string[];
     min?: Version;
     optional?: boolean;
+    /** Shown instead of "not installed or not on PATH" when the command fails. */
+    fail?: string;
+    timeoutMs?: number;
 }
 
 const checks: Check[] = [
@@ -35,6 +38,15 @@ const checks: Check[] = [
     { name: 'node', cmd: 'node', args: ['--version'], min: [20, 0, 0] },
     { name: 'pnpm', cmd: 'pnpm', args: ['--version'], min: [9, 0, 0] },
     { name: 'docker', cmd: 'docker', args: ['--version'] },
+    // `docker --version` passes with the engine stopped, and `pnpm dev` then
+    // fails at db:up. `docker info` needs the engine.
+    {
+        name: 'docker engine',
+        cmd: 'docker',
+        args: ['info', '--format', '{{.ServerVersion}}'],
+        fail: 'not running. Start Docker Desktop (or the Docker service) and run `pnpm doctor` again',
+        timeoutMs: 20_000,
+    },
     { name: 'git', cmd: 'git', args: ['--version'] },
     // Agent CLIs — all optional; Atlas only needs the one(s) your agents are
     // configured to use. `ollama` backs the third `cli` option: it does not
@@ -46,11 +58,12 @@ const checks: Check[] = [
     { name: 'gh', cmd: 'gh', args: ['--version'], optional: true },
 ];
 
-async function runCheck(c: Check): Promise<{ ok: boolean; line: string }> {
+export async function runCheck(c: Check): Promise<{ ok: boolean; line: string }> {
     try {
         // shell: true is required on Windows because pnpm (and claude, gh) are
         // .cmd shims that cannot be resolved by execFile with shell: false.
-        const { stdout } = await execFileP(c.cmd, c.args, { timeout: 5_000, shell: true });
+        // One command string: args beside shell: true trip Node's DEP0190.
+        const { stdout } = await execFileP([c.cmd, ...c.args].join(' '), [], { timeout: c.timeoutMs ?? 5_000, shell: true });
         const out = (stdout.trim().split('\n')[0] ?? '').trim();
         const v = parseVersion(out);
         if (c.min && (!v || !meetsMinVersion(v, c.min))) {
@@ -65,7 +78,7 @@ async function runCheck(c: Check): Promise<{ ok: boolean; line: string }> {
             ok: !!c.optional,
             line: c.optional
                 ? `[skip] ${c.name}: not found (optional)`
-                : `[FAIL] ${c.name}: not installed or not on PATH`,
+                : `[FAIL] ${c.name}: ${c.fail ?? 'not installed or not on PATH'}`,
         };
     }
 }

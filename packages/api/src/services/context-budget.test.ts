@@ -14,6 +14,7 @@ function mkComment(id: number, body: string): IComment {
         id,
         author: 'owner',
         agent_id: null,
+        author_name: null,
         issue_type: 'story',
         issue_id: 'ATL-1',
         body,

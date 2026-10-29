@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { server } from '../../test-setup.js';
 import { renderWithProviders } from '../../test-utils/renderWithProviders.js';
@@ -118,7 +118,7 @@ describe('GuardrailModal — submit success', () => {
                 onSubmit={onSubmit}
             />
         );
-        await userEvent.type(screen.getByLabelText(/^Rule/), 'Never commit secrets to git.');
+        fireEvent.change(screen.getByLabelText(/^Rule/), { target: { value: 'Never commit secrets to git.' } });
         const addBtn = screen.getByRole('button', { name: /Add Rule/i });
         expect(addBtn).not.toBeDisabled();
         await userEvent.click(addBtn);
@@ -145,8 +145,8 @@ describe('GuardrailModal — submit success', () => {
                 onSubmit={onSubmit}
             />
         );
-        await userEvent.type(screen.getByLabelText(/^Rule/), 'Block secrets.');
-        await userEvent.type(screen.getByLabelText(/^Detail/), 'Some extra context.');
+        fireEvent.change(screen.getByLabelText(/^Rule/), { target: { value: 'Block secrets.' } });
+        fireEvent.change(screen.getByLabelText(/^Detail/), { target: { value: 'Some extra context.' } });
         await userEvent.click(screen.getByRole('button', { name: /Add Rule/i }));
         await waitFor(() =>
             expect(onSubmit).toHaveBeenCalledWith(

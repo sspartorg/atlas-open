@@ -36,6 +36,9 @@
     "ignoreBinaries": [
         "where.exe",
         "reg",
-        "icacls"
+        "icacls",
+        "gh",
+        "taskkill",
+        "claude"
     ]
 }

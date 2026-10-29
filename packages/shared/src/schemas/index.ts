@@ -19,7 +19,6 @@ export const AgentKindSlugSchema = z.enum(
 // `SDLC_ROLES` in types/index.ts and the seed rows in migration 025.
 export const SdlcRoleSchema = z.enum([
     'po',
-    'spec-writer',
     'engineer',
     'qa',
     'architect',

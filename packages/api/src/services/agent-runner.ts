@@ -831,6 +831,8 @@ function simulateRun(
     issueType: IssueType | null,
     issueId: string | null,
     prompt: string,
+    /** The run's worktree; null for a throwaway folder. */
+    worktree: string | null,
 ): void {
     const lines = [
         'Analyzing the issue context...',
@@ -854,6 +856,14 @@ function simulateRun(
             // would turn `done` into a fail — lets AI-disabled environments
             // (e2e, demos) walk a workflow end to end.
             void (async () => {
+                // A simulated agent edits nothing, so its Task finishes with no
+                // PR. ATLAS_SIMULATED_EDIT=1 (the e2e stack) makes it leave one
+                // tracked change, so delivery — commit, push, PR, or the park
+                // when those fail — runs end to end too.
+                if (worktree && process.env['ATLAS_SIMULATED_EDIT'] === '1') {
+                    appendFileSync(join(worktree, 'SIMULATED.md'), `Simulated run ${runId}
+`);
+                }
                 const rows = await db
                     .selectFrom('agent_checklists')
                     .select('id')
@@ -915,16 +925,15 @@ interface SpawnCliOptions {
  * header. `--mcp-config` is variadic, so the prompt must stay on stdin.
  */
 export function claudeIsolationArgs(itemAttached: boolean): string[] {
+    const atlasOnly = JSON.stringify({ mcpServers: { atlas: { type: 'http', url: ATLAS_MCP_URL } } });
     // Runs without an item (ai-news, market-research, regulations,
     // jira-to-epic scouts) depend on Owner-scoped MCP servers — the Playwright
     // plugin and claude.ai connectors — that a strict Atlas-only config would
-    // strip.
-    if (!itemAttached) return [];
-    return [
-        '--setting-sources', 'project,local',
-        '--strict-mcp-config',
-        '--mcp-config', JSON.stringify({ mcpServers: { atlas: { type: 'http', url: ATLAS_MCP_URL } } }),
-    ];
+    // strip. They still get this instance's `atlas`: a --mcp-config entry
+    // overrides a same-named one in ~/.claude.json, which on a machine that
+    // also runs the commercial Atlas points at that product instead.
+    if (!itemAttached) return ['--mcp-config', atlasOnly];
+    return ['--setting-sources', 'project,local', '--strict-mcp-config', '--mcp-config', atlasOnly];
 }
 
 /**
@@ -1964,7 +1973,7 @@ export async function spawnAgentRun(
                     copilotUserAgentPath,
                 });
             } else {
-                simulateRun(runId, agentId, issueType, issueId, fullPrompt);
+                simulateRun(runId, agentId, issueType, issueId, fullPrompt, artefactTmpRoot ? null : cwd);
             }
         })().catch((err: unknown) => {
             // Anything thrown between promotion and spawn would otherwise be

@@ -8,7 +8,7 @@ import { syncToolCatalog } from './services/tool-catalog-sync.js';
 import { syncAgentDefaults } from './services/agent-defaults-sync.js';
 import { sweepOrphanSetupTmpfiles } from './services/project-setup-runner.js';
 import { runOutputRegistry } from './services/agent-runner.js';
-import { onStepFinished } from './services/workflow-engine.js';
+import { onStepFinished, resumeLostRetries } from './services/workflow-engine.js';
 import knexConfig from './db/knex-config.js';
 import { bootStep } from './utils/boot-errors.js';
 import { startMcpHost, stopMcpHost, type IMcpHostHandle } from './plugins/mcp-host.js';
@@ -164,6 +164,8 @@ async function main(): Promise<void> {
     // empty), so a 60 s cutoff is the right floor — only protects rows
     // mid-insert during a graceful restart.
     await bootStep('orphan run cleanup', () => failOrphanedRuns({ cutoffMs: 60_000 }));
+    // After the sweep: a step it just errored arms a fresh timer instead.
+    await bootStep('lost step retries', resumeLostRetries);
     // 2026-06-22 — Terminal v1. CLI sessions whose PTY died with the
     // previous process get flipped to `paused` so the Resume affordance
     // is offered. See `failOrphanedCliSessions` for the rationale.
@@ -195,7 +197,7 @@ async function main(): Promise<void> {
     // hasn't edited). No generated mcp-config.json is needed: a FREEDOM run
     // inherits the Owner's user-level MCP config (Atlas + Atlassian +
     // Playwright + …), and an item-attached run is confined instead — Claude
-    // by `claudeIsolationArgs` (strict, Atlas-only), Copilot by
+    // by `claudeIsolationArgs` (strict, Atlas-only; itemless runs keep the Owner servers but get this instance's `atlas`), Copilot by
     // `copilotDenyToolArgs`. See services/agent-runner.ts.
     await bootStep('agent defaults sync', syncAgentDefaults);
 

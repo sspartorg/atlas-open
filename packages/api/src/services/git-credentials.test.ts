@@ -54,13 +54,25 @@ function readFile(path: string): string {
 
 describe('buildGitAuth', () => {
     const cleanupDirs: string[] = [];
+    // The host's global git config, which buildGitAuth reads for a fallback
+    // identity: empty unless a test writes one, so the developer's own
+    // ~/.gitconfig never leaks into these assertions.
+    let hostConfig = '';
+    const savedGlobal = process.env['GIT_CONFIG_GLOBAL'];
 
     beforeEach(() => {
         svc.get.mockReset();
         svc.getToken.mockReset();
+        const dir = mkdtempSync(join(tmpdir(), 'git-cred-host-'));
+        cleanupDirs.push(dir);
+        hostConfig = join(dir, 'gitconfig');
+        writeFileSync(hostConfig, '');
+        process.env['GIT_CONFIG_GLOBAL'] = hostConfig;
     });
 
     afterEach(() => {
+        if (savedGlobal === undefined) delete process.env['GIT_CONFIG_GLOBAL'];
+        else process.env['GIT_CONFIG_GLOBAL'] = savedGlobal;
         while (cleanupDirs.length > 0) {
             const d = cleanupDirs.pop()!;
             if (existsSync(d)) rmSync(d, { recursive: true, force: true });
@@ -107,6 +119,37 @@ describe('buildGitAuth', () => {
         expect(content).toContain(expectedB64);
         // No hook file when human_* isn't set.
         expect(existsSync(join(auth!.configDir, 'prepare-commit-msg'))).toBe(false);
+    });
+
+    // GIT_CONFIG_GLOBAL replaces ~/.gitconfig: without a [user] block here the
+    // run's `git commit` fails with "Author identity unknown" and no PR opens.
+    it('carries the host identity into a PAT credential that has no human fields', async () => {
+        writeFileSync(hostConfig, '[user]\n\tname = Host Dev\n\temail = host@example.com\n');
+        svc.get.mockResolvedValueOnce({
+            id: 'p1h',
+            kind: 'pat',
+            username: 'x-access-token',
+            app_id: null,
+            app_slug: null,
+            human_name: null,
+            human_email: null,
+            human_gh_login: null,
+        });
+        svc.getToken.mockResolvedValueOnce('ghp_fake_token_1234');
+        const auth = await buildGitAuth('p1h');
+        cleanupDirs.push(auth!.configDir);
+        const content = readFile(auth!.configPath);
+        expect(content).toContain('[user]\n\tname = Host Dev\n\temail = host@example.com');
+
+        // And git really can commit under that config.
+        const repo = mkdtempSync(join(tmpdir(), 'git-cred-commit-'));
+        cleanupDirs.push(repo);
+        const env = { ...process.env, GIT_CONFIG_GLOBAL: auth!.configPath, GIT_CONFIG_NOSYSTEM: '1' };
+        execFileSync('git', ['init', '-q', repo], { env });
+        writeFileSync(join(repo, 'a.txt'), 'a');
+        execFileSync('git', ['-C', repo, 'add', 'a.txt'], { env });
+        execFileSync('git', ['-C', repo, 'commit', '-qm', 'x'], { env });
+        expect(execFileSync('git', ['-C', repo, 'log', '-1', '--format=%an <%ae>'], { env, encoding: 'utf8' }).trim()).toBe('Host Dev <host@example.com>');
     });
 
     // ADR 0015 — the agent's config: bot identity, no token on disk.
@@ -213,7 +256,7 @@ describe('buildGitAuth', () => {
         expect(existsSync(join(auth!.configDir, 'prepare-commit-msg'))).toBe(false);
     });
 
-    it('omits [user] when github_app credential has no slug yet (pre-backfill)', async () => {
+    it('falls back to the host identity when a github_app credential has no slug yet (pre-backfill)', async () => {
         svc.get.mockResolvedValue({
             id: 'g2',
             kind: 'github_app',
@@ -225,10 +268,12 @@ describe('buildGitAuth', () => {
             human_gh_login: null,
         });
         svc.getToken.mockResolvedValueOnce('ghs_installation_token');
+        writeFileSync(hostConfig, '[user]\n\tname = Host Dev\n\temail = host@example.com\n');
         const auth = await buildGitAuth('g2');
         expect(auth).not.toBeNull();
         cleanupDirs.push(auth!.configDir);
-        expect(readFile(auth!.configPath)).not.toContain('[user]');
+        // No bot identity yet, so the host's — never no identity at all.
+        expect(readFile(auth!.configPath)).toContain('name = Host Dev');
     });
 
     it('installs a prepare-commit-msg hook when github_app credential has human_name + human_email', async () => {

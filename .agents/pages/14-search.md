@@ -61,7 +61,7 @@ None.
 ## Edge cases / quirks
 - Switching modes resets the query parse state but keeps active filters in their respective pills.
 - KQL parser supports `field = "value"` and `AND` connector; other connectors or operators surface as "unknown" tokens.
-- `SearchEmptyState` has helper buttons for clearing filters and a **Create a Task / Sub-task** button (label from the first Type filter, default Task) that only toasts "Create from search is not wired up yet." (`Search.tsx:138`, see coming-soon).
+- `SearchEmptyState` keeps its message; its only actions are **Drop the Status Filter** / **Try a Different Project**, shown when that filter is active (no actions otherwise). There is no create-from-search button.
 
 ## Connectivity
 - **Pages**: [Task Detail](07-task-detail.md), [Sub-task Detail](10-sub-task-detail.md) — search results click through.
@@ -70,4 +70,4 @@ None.
 - **Entities**: `task`, `sub_task`, `agent` (prompt search).
 
 ## Coming soon on this page
-- "Create from search" — see [coming-soon.md](../coming-soon.md).
+None.

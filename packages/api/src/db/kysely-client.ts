@@ -8,11 +8,17 @@ const { Pool } = pg;
 
 function createPool(): pg.Pool {
     const config = loadConfig();
-    return new Pool({
+    const p = new Pool({
         connectionString: config.databaseUrl,
         max: 10,
         idleTimeoutMillis: 30_000,
     });
+    // An idle client whose server went away (Postgres restarted, Docker
+    // Desktop updated, the laptop woke up) emits 'error' on the pool; with no
+    // listener Node treats it as uncaught and the whole API exits. The pool
+    // already drops that client and opens a fresh one on the next query.
+    p.on('error', (err) => console.warn(`[db] idle connection lost, will reconnect: ${err.message}`));
+    return p;
 }
 
 let pool: pg.Pool | null = null;

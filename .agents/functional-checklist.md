@@ -24,8 +24,8 @@ Two structural reasons they survived, worth knowing before adding a test:
 - **e2e specs stop at open/close.** `e2e/pages/credentials.spec.ts` (37 lines)
   never saves a credential and never reads one back.
 
-Triage against [`coming-soon.md`](coming-soon.md) first — 6 controls toast or
-sit disabled **on purpose**. A stub is not a bug.
+Triage against [`coming-soon.md`](coming-soon.md) first — any control listed there toasts or
+sits disabled **on purpose** (none today). A stub is not a bug.
 
 ---
 
@@ -373,23 +373,6 @@ in this branch.
 
 ## Carried forward — needs an Owner decision
 
-**C1 — `comments.author_name` denormalization.** `comments_agent_id_fkey … ON
-DELETE SET NULL` means deleting an agent retroactively erases its name from
-every comment it ever wrote, and `ActivityCard.tsx` falls back to the literal
-`'Agent'`. The write-time attribution fix in this branch stops *new* comments
-losing their `agent_id`, but cannot survive the agent row being deleted. The
-change is scoped and ready — DB column + backfill migration, a stamp in
-`commentsService.create`, `author_name` on `IComment`, and
-`agent?.name ?? comment.author_name ?? 'Agent'` in the card — but it needs
-`author_name` added to `IComment` in `packages/shared/src/types/index.ts`, and
-`packages/shared/` is protected by `AGENTS.md`. **Not started: waiting on an
-explicit "yes, edit shared".** The in-repo precedent for denormalizing a name
-is `counts.ts:270,286`.
+**C1 — `comments.author_name` denormalization. RESOLVED** — migration `005_comment_author_name.ts` adds + backfills the column, `commentsService.create` stamps it, `IComment.author_name`, and `ActivityCard` / the Jira digest read `agent?.name ?? author_name ?? 'Agent'`.
 
-**C2 — five unseeded `SdlcRole` slugs.** `spec-writer`, `tester`, `devops`,
-`security` and `designer` are in the `SdlcRole` union in `@atlas/shared` but not
-in the `roles` table, so assigning one used to 500 on `agents_role_id_fkey`.
-That is fixed (`RoleNotInCatalogError` → 400 naming the valid slugs), but
-seeding them properly needs curated `default_prompt_md` for each, which is
-product content, not something to invent. Either seed the five with real prompts
-or narrow the union to the five that exist.
+**C2 — unseeded `SdlcRole` slugs. RESOLVED** — only `spec-writer` was actually unseeded (the baseline seeds `tester`, `devops`, `security`, `designer` and `docs`); it was dropped from the union, `SDLC_ROLES`, `SdlcRoleSchema` and the label/status maps, and `RoleNotInCatalogError` still guards a missing row.

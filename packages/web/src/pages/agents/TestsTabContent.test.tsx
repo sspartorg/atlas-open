@@ -441,8 +441,8 @@ describe('TestsTabContent', () => {
         it('requires a repo when the project has more than one', async () => {
             mount({ repos: [{ id: 'r1', name: 'web' }, { id: 'r2', name: 'cli' }] });
             await userEvent.click(await screen.findByRole('button', { name: 'New test' }));
-            await userEvent.type(screen.getByLabelText('Test name'), 'a test');
-            await userEvent.type(screen.getByLabelText('Item title'), 'an item');
+            fireEvent.change(screen.getByLabelText('Test name'), { target: { value: 'a test' } });
+            fireEvent.change(screen.getByLabelText('Item title'), { target: { value: 'an item' } });
             await userEvent.click(screen.getByLabelText('Project'));
             await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
             // The project has two repos and none is picked, so it stays disabled.
@@ -519,10 +519,10 @@ describe('TestsTabContent', () => {
             mount({ onWrite: (k, p) => writes.push([k, p]) });
 
             await userEvent.click(await screen.findByRole('button', { name: 'New test' }));
-            await userEvent.type(screen.getByLabelText('Test name'), 'refuses a Task');
+            fireEvent.change(screen.getByLabelText('Test name'), { target: { value: 'refuses a Task' } });
             await userEvent.click(screen.getByLabelText('Project'));
             await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
-            await userEvent.type(screen.getByLabelText('Item title'), 'Add a health endpoint');
+            fireEvent.change(screen.getByLabelText('Item title'), { target: { value: 'Add a health endpoint' } });
 
             await userEvent.click(screen.getByRole('button', { name: 'Create test' }));
             await waitFor(() => expect(writes).toHaveLength(1));
@@ -561,7 +561,7 @@ describe('TestsTabContent', () => {
             });
 
             await userEvent.click(await screen.findByRole('button', { name: 'New test' }));
-            await userEvent.type(screen.getByLabelText('Test name'), 'full form');
+            fireEvent.change(screen.getByLabelText('Test name'), { target: { value: 'full form' } });
 
             await userEvent.click(screen.getByLabelText('Project'));
             await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
@@ -572,8 +572,8 @@ describe('TestsTabContent', () => {
             await userEvent.click(screen.getByLabelText('Item kind'));
             await userEvent.click(await screen.findByRole('option', { name: 'Sub-task' }));
 
-            await userEvent.type(screen.getByLabelText('Item title'), 'Build the endpoint');
-            await userEvent.type(screen.getByLabelText('Item description'), 'some context');
+            fireEvent.change(screen.getByLabelText('Item title'), { target: { value: 'Build the endpoint' } });
+            fireEvent.change(screen.getByLabelText('Item description'), { target: { value: 'some context' } });
 
             await userEvent.click(screen.getByLabelText('Expected outcome'));
             await userEvent.click(await screen.findByRole('option', { name: /asked_question/ }));
@@ -596,10 +596,10 @@ describe('TestsTabContent', () => {
         it('closes the form and clears it after a successful create', async () => {
             mount();
             await userEvent.click(await screen.findByRole('button', { name: 'New test' }));
-            await userEvent.type(screen.getByLabelText('Test name'), 'x');
+            fireEvent.change(screen.getByLabelText('Test name'), { target: { value: 'x' } });
             await userEvent.click(screen.getByLabelText('Project'));
             await userEvent.click(await screen.findByRole('option', { name: 'Sandbox' }));
-            await userEvent.type(screen.getByLabelText('Item title'), 'y');
+            fireEvent.change(screen.getByLabelText('Item title'), { target: { value: 'y' } });
             await userEvent.click(screen.getByRole('button', { name: 'Create test' }));
             // The toggle goes back to "New test" only when `adding` is cleared.
             expect(await screen.findByRole('button', { name: 'New test' })).toBeInTheDocument();
@@ -773,8 +773,7 @@ describe('TestsTabContent — edit', () => {
         expect(nameField).toHaveValue('Asks rather than building a whole Task');
         expect(screen.getByLabelText('Item title')).toHaveValue('Add a health endpoint');
 
-        await userEvent.clear(nameField);
-        await userEvent.type(nameField, 'Asks first');
+        fireEvent.change(nameField, { target: { value: 'Asks first' } });
         await userEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
         await waitFor(() => expect(writes.find((w) => w.kind === 'update')).toBeDefined());

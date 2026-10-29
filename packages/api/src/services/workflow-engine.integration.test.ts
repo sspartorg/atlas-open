@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { RunOutcomeKind, RunStatus } from '@atlas/shared';
 
 // The engine is exercised against the real DB; only the parts that would
@@ -69,6 +69,7 @@ import {
     onStepFinished,
     reconcileWorkflowRuns,
     resumeWorkflowRun,
+    resumeLostRetries,
     retryStep,
     startTaskRun,
     STEP_RETRY_BACKOFF_MS,
@@ -283,6 +284,21 @@ describe('task run — a crashed agent is retried once', () => {
 
         await finishStep('completed', 'done');
         expect(await runOf(runId)).toMatchObject({ status: 'completed' });
+    });
+
+    // Found live: an API restart inside the backoff took the timer with it, and
+    // the run sat ten minutes until reconcile parked it as lost.
+    it('starts the retry a restarted API owed, once', async () => {
+        const runId = await startTaskRun('ATL-2');
+        const crashed = await crash(RESTART);
+        vi.clearAllTimers(); // the process that armed the timer is gone
+
+        expect(await resumeLostRetries()).toBe(1);
+        await vi.waitFor(() => expect(spawned).toHaveLength(2));
+        const retry = await testDb.selectFrom('agent_runs').select('parent_run_id').where('id', '=', spawned[1]!.runId).executeTakeFirstOrThrow(); // reason: length asserted above
+        expect(retry.parent_run_id).toBe(crashed);
+        expect(await resumeLostRetries()).toBe(0);
+        expect(await runOf(runId)).toMatchObject({ status: 'running' });
     });
 
     it('parks, saying it retried, when the retry crashes too', async () => {
@@ -534,12 +550,50 @@ describe('task run — multi-repo Tasks (ADR 0017/0018)', () => {
         );
     });
 
+    // A commit that fails must park with its own reason — pushing on past it
+    // surfaced only GitHub's "No commits between main and …".
+    it('parks with the commit error, and pushes nothing, when the commit fails', async () => {
+        await startTaskRun('ATL-2');
+        writeFileSync(join(ws, 'core', 'api.txt'), 'endpoint\n');
+        mkdirSync(join(ws, 'core', '.husky', '_'), { recursive: true });
+        writeFileSync(join(ws, 'core', '.husky', '_', 'pre-commit'), '#!/bin/sh\necho "hook says no" >&2\nexit 1\n', { mode: 0o755 });
+        const runId = (await testDb.selectFrom('workflow_runs').select('id').where('item_id', '=', 'ATL-2').executeTakeFirstOrThrow()).id;
+        await finishStep('completed', 'done');
+
+        const run = await runOf(runId);
+        expect(run).toMatchObject({ status: 'waiting_for_owner', parked_node_id: 'end' });
+        expect(run.park_reason).toMatch(/^core: Commit failed: .*hook says no/s);
+        expect(git.pushWorktree).not.toHaveBeenCalledWith(join(ws, 'core'), expect.anything(), expect.anything(), expect.anything());
+        expect(execFileSync('git', ['-C', join(ws, 'core'), 'status', '--porcelain'], { encoding: 'utf8' })).toContain('api.txt');
+    });
+
     it('skips a repo the Task did not change', async () => {
         await startTaskRun('ATL-2');
         writeFileSync(join(ws, 'core', 'api.txt'), 'endpoint\n');
         await finishStep('completed', 'done');
         expect(git.pushWorktree).toHaveBeenCalledTimes(1);
         expect(await linksOf()).toEqual(['https://github.com/o/core/pull/1']);
+    });
+});
+
+// Found live: a single-repo Task that needed no change opened a PR holding
+// only Atlas's own .gitignore commit.
+describe('task run — a single-repo Task with no changes', () => {
+    let dir = '';
+    beforeEach(() => {
+        dir = join(mkdtempSync(join(tmpdir(), 'atlas-single-')), 'wt');
+        initRepo(dir);
+        git.ensureWorktree.mockResolvedValueOnce({ path: dir, branch: 'atlas/task/ATL-2', freshlyCreated: true } as never);
+    });
+    afterEach(() => rmSync(dirname(dir), { recursive: true, force: true }));
+
+    it('pushes nothing, opens no PR, and finishes the Task as done', async () => {
+        const runId = await startTaskRun('ATL-2');
+        await finishStep('completed', 'done');
+        expect(git.pushWorktree).not.toHaveBeenCalled();
+        expect(git.openPullRequest).not.toHaveBeenCalled();
+        expect(await runOf(runId)).toMatchObject({ status: 'completed', pr_url: null });
+        expect(await itemOf('ATL-2')).toMatchObject({ status: 'done' });
     });
 });
 

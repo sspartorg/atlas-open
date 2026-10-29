@@ -45,7 +45,6 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $script:NonInteractive = [bool]$NonInteractive
 
 # MCP target paths
-$claudeCliConfigPath = Join-Path $env:USERPROFILE '.claude.json'
 $copilotConfigPath   = Join-Path $env:USERPROFILE '.copilot\mcp-config.json'
 
 # Desired Atlas MCP server entries.
@@ -219,7 +218,8 @@ function Write-JsonFile {
         New-Item -ItemType Directory -Path $directory | Out-Null
     }
 
-    Set-Content -Path $Path -Value (ConvertTo-OrderedJson -InputObject $InputObject) -Encoding UTF8
+    # 5.1's Set-Content -Encoding UTF8 writes a BOM, which Node's JSON.parse rejects.
+    [System.IO.File]::WriteAllText($Path, (ConvertTo-OrderedJson -InputObject $InputObject), (New-Object System.Text.UTF8Encoding $false))
 }
 
 function Ensure-ServerContainer {
@@ -575,7 +575,7 @@ function Ensure-GitHubCli {
             'skip'    { return }
         }
     } else {
-        $install = Prompt-OptionalInstall -DisplayName 'GitHub CLI (gh)' -ExtraContext 'Useful for PAT helpers and gh-copilot extension.'
+        $install = Prompt-OptionalInstall -DisplayName 'GitHub CLI (gh)' -ExtraContext 'Used to open pull requests and for PAT helpers.'
         if (-not $install) {
             Write-Mute 'Skipped GitHub CLI by user choice.'
             return
@@ -591,57 +591,37 @@ function Ensure-GitHubCli {
     }
 }
 
-function Ensure-CopilotExtension {
-    Write-Section 'GitHub Copilot CLI (gh extension)'
+function Ensure-CopilotCli {
+    # Atlas spawns the standalone `copilot` binary (npm @github/copilot), not
+    # the retired `gh copilot` extension.
+    Write-Section 'GitHub Copilot CLI (copilot)'
     if ($SkipOptionalCLIs) {
         Write-Mute 'Skipping (SkipOptionalCLIs flag set).'
         return
     }
 
-    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-        Write-Mute 'gh is not installed; skipping Copilot extension.'
-        return
-    }
-
-    # Probe whether the extension is already present
-    $extList = & gh extension list 2>$null
-    $hasCopilot = ($LASTEXITCODE -eq 0) -and ($extList -match 'github/gh-copilot')
-
-    if ($hasCopilot) {
-        Write-Info 'gh-copilot extension already installed.'
-        $choice = Read-Choice -Prompt 'gh copilot is already installed. Keep (K), upgrade (U), or skip (S)?' -DefaultKey 'K' -Options @{
+    $version = Get-ToolVersion -Command 'copilot'
+    if ($version) {
+        Write-Info "copilot detected: $version"
+        $choice = Read-Choice -Prompt 'Copilot CLI is already installed. Keep (K), upgrade (U), or skip (S)?' -DefaultKey 'K' -Options @{
             'K' = 'keep'; 'U' = 'upgrade'; 'S' = 'skip'
         }
-        switch ($choice) {
-            'keep'    { return }
-            'upgrade' {
-                & gh extension upgrade github/gh-copilot 2>&1 | Out-Host
-                if ($LASTEXITCODE -ne 0) { Write-Warn "gh extension upgrade exited with code $LASTEXITCODE (continuing)." }
-                return
-            }
-            'skip'    { return }
+        if ($choice -ne 'upgrade') { return }
+    } else {
+        $install = Prompt-OptionalInstall -DisplayName 'GitHub Copilot CLI' -ExtraContext 'Optional second agent CLI. Run `copilot` once and /login afterwards.'
+        if (-not $install) {
+            Write-Mute 'Skipped Copilot CLI by user choice.'
+            return
         }
     }
 
-    $install = Prompt-OptionalInstall -DisplayName 'GitHub Copilot CLI' -ExtraContext 'Adds `gh copilot suggest / explain`. Requires `gh auth login` afterwards.'
-    if (-not $install) {
-        Write-Mute 'Skipped Copilot extension by user choice.'
+    & npm install -g '@github/copilot@latest' 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "npm install -g @github/copilot exited with code $LASTEXITCODE (continuing)."
         return
     }
-
-    # Check gh auth status; warn (but do not block) if logged out
-    & gh auth status 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn 'gh is not authenticated. Run `gh auth login` after bootstrap completes, then re-run to enable Copilot.'
-        Write-Warn 'Attempting extension install anyway in case the registry is reachable ...'
-    }
-
-    & gh extension install github/gh-copilot 2>&1 | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn "gh extension install github/gh-copilot exited with code $LASTEXITCODE. Re-run after `gh auth login`."
-        return
-    }
-    Write-Info 'gh-copilot extension installed.'
+    Refresh-CurrentSessionPath -AdditionalPaths @((Join-Path $env:APPDATA 'npm'))
+    Write-Info "copilot ready: $(Get-ToolVersion -Command 'copilot'). Run ``copilot`` once and /login to sign in."
 }
 
 function Ensure-ClaudeCli {
@@ -852,24 +832,20 @@ function Ensure-McpClientConfigs {
     Write-Section 'MCP client registration'
     Write-Mute 'Existing entries on every client are preserved unless you opt to replace.'
 
-    # 1. Claude Code CLI: prefer `claude mcp add-json` when claude is installed,
-    #    otherwise edit ~/.claude.json directly.
+    # 1. Claude Code CLI: register through the CLI only. ~/.claude.json is the
+    #    CLI's own state file; Windows PowerShell 5.1's ConvertFrom-Json throws
+    #    on its case-variant project keys (C:/x and c:/x), so never rewrite it.
+    #    `mcp add --transport http` instead of `add-json`: 5.1 strips the inner
+    #    quotes from a JSON argument to a native exe.
     if (Get-Command claude -ErrorAction SilentlyContinue) {
-        # `claude mcp list` to check; `mcp add-json` to add (idempotent: errors if exists)
-        $list = & claude mcp list 2>$null
-        if ($LASTEXITCODE -eq 0 -and ($list -match '(?m)^\s*atlas\s')) {
-            Write-Mute 'atlas already registered with Claude Code CLI.'
+        & claude mcp get atlas *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Mute 'atlas already registered with Claude Code CLI; leaving it unchanged (claude mcp get atlas shows its URL).'
         } else {
             Write-Warn 'Registering atlas with Claude Code CLI ...'
-            $json = '{"url":"http://127.0.0.1:4600/mcp"}'
-            & claude mcp add-json atlas --scope user $json 2>&1 | Out-Host
+            & claude mcp add --transport http --scope user atlas $desiredAtlasServerHttp.url 2>&1 | Out-Host
             if ($LASTEXITCODE -ne 0) {
-                Write-Warn "claude mcp add-json exited with code $LASTEXITCODE. Falling back to editing ~/.claude.json."
-                Ensure-McpServerDefinitions `
-                    -Path $claudeCliConfigPath `
-                    -ContainerName 'mcpServers' `
-                    -DesiredServers @{ atlas = $desiredAtlasServerHttp } `
-                    -DisplayName '~/.claude.json'
+                Write-Warn "claude mcp add exited with code $LASTEXITCODE. Register it yourself: claude mcp add --transport http --scope user atlas $($desiredAtlasServerHttp.url)"
             } else {
                 Write-Info 'atlas registered with Claude Code CLI.'
             }
@@ -879,22 +855,14 @@ function Ensure-McpClientConfigs {
     }
 
     # 2. GitHub Copilot CLI config
-    if (Get-Command gh -ErrorAction SilentlyContinue) {
-        $hasCopilot = $false
-        $extList = & gh extension list 2>$null
-        if ($LASTEXITCODE -eq 0 -and ($extList -match 'github/gh-copilot')) { $hasCopilot = $true }
-        if ($hasCopilot) {
-            # Copilot CLI accepts HTTP form; fall back to stdio bridge if user already has stdio configured.
-            Ensure-McpServerDefinitions `
-                -Path $copilotConfigPath `
-                -ContainerName 'mcpServers' `
-                -DesiredServers @{ atlas = $desiredAtlasServerHttp } `
-                -DisplayName 'GitHub Copilot CLI config'
-        } else {
-            Write-Mute 'gh-copilot extension not installed; skipping Copilot CLI config.'
-        }
+    if (Get-Command copilot -ErrorAction SilentlyContinue) {
+        Ensure-McpServerDefinitions `
+            -Path $copilotConfigPath `
+            -ContainerName 'mcpServers' `
+            -DesiredServers @{ atlas = $desiredAtlasServerHttp } `
+            -DisplayName 'GitHub Copilot CLI config'
     } else {
-        Write-Mute 'gh not installed; skipping Copilot CLI config.'
+        Write-Mute 'copilot not installed; skipping Copilot CLI config.'
     }
 }
 
@@ -942,7 +910,7 @@ function Invoke-Bootstrap {
     Ensure-Pnpm
     Ensure-Docker
     Ensure-GitHubCli
-    Ensure-CopilotExtension
+    Ensure-CopilotCli
     Ensure-ClaudeCli
 
     # Repo-side setup
@@ -981,7 +949,7 @@ function Invoke-Bootstrap {
         Write-Host ''
         Write-Mute 'Manual auth steps (these need a real browser / interactive login):'
         if ($claudeInstalled) { Write-Mute '    claude login           # sign in to Anthropic if you have not already' }
-        if ($ghNeedsAuth)     { Write-Mute '    gh auth login          # sign in to GitHub (also unlocks `gh copilot`)' }
+        if ($ghNeedsAuth)     { Write-Mute '    gh auth login          # sign in to GitHub (pushes and pull requests)' }
     }
 
     Write-Host ''

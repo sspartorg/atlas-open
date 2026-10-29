@@ -141,6 +141,7 @@ export function makeComment(overrides: Partial<IComment> = {}): IComment {
         id: 1,
         author: 'owner',
         agent_id: null,
+        author_name: null,
         issue_type: 'task',
         issue_id: 'ATL-1',
         body: 'looks good',

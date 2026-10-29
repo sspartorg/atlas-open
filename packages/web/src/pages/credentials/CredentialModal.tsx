@@ -55,7 +55,7 @@ export function CredentialModal({ open, mode, onClose }: Props) {
     const qc = useQueryClient();
     // On edit we open directly into the form. On add we let the user pick
     // between PAT and GitHub App first.
-    const initialKind: 'pat' | 'ssh' | 'app' =
+    const initialKind: 'pat' | 'app' =
         mode.kind === 'edit' ? (mode.credential.kind === 'github_app' ? 'app' : 'pat') : 'pat';
     const [view, setView] = useState<View>(mode.kind === 'edit' ? 'form' : 'kind');
     // Switching view (kind -> form -> saved) unmounts whatever was focused —
@@ -65,7 +65,7 @@ export function CredentialModal({ open, mode, onClose }: Props) {
     // gone, so Tab walks the page behind the modal. Pull focus back onto the
     // dialog surface whenever the view changes.
     const paperRef = useRef<HTMLDivElement | null>(null);
-    const [chosenKind, setChosenKind] = useState<'pat' | 'ssh' | 'app'>(initialKind);
+    const [chosenKind, setChosenKind] = useState<'pat' | 'app'>(initialKind);
     const [label, setLabel] = useState(mode.kind === 'edit' ? mode.credential.label : '');
     const [token, setToken] = useState('');
     // Plaintext fetched on demand from GET /credentials/:id/token. Transient:
@@ -370,7 +370,7 @@ export function CredentialModal({ open, mode, onClose }: Props) {
                         <Typography sx={SECTION_LABEL_SX}>Credential type</Typography>
                         <RadioGroup
                             value={chosenKind}
-                            onChange={(e) => setChosenKind(e.target.value as 'pat' | 'ssh' | 'app')}
+                            onChange={(e) => setChosenKind(e.target.value as 'pat' | 'app')}
                         >
                             <Box
                                 sx={{
@@ -409,35 +409,6 @@ export function CredentialModal({ open, mode, onClose }: Props) {
                                             chosenKind === 'pat'
                                                 ? ATLAS_PALETTE.slate06
                                                 : 'transparent',
-                                    }}
-                                />
-                                <FormControlLabel
-                                    value="ssh"
-                                    disabled
-                                    control={<Radio />}
-                                    label={
-                                        <Box>
-                                            <Typography
-                                                sx={{
-                                                    fontSize: 13,
-                                                    fontWeight: 600,
-                                                    color: ATLAS_PALETTE.slate40,
-                                                }}
-                                            >
-                                                SSH key
-                                            </Typography>
-                                            <Typography
-                                                sx={{ fontSize: 11, color: ATLAS_PALETTE.slate40 }}
-                                            >
-                                                coming soon
-                                            </Typography>
-                                        </Box>
-                                    }
-                                    sx={{
-                                        border: `1px solid ${ATLAS_PALETTE.slate10}`,
-                                        borderRadius: '10px',
-                                        m: 0,
-                                        p: 2.5,
                                     }}
                                 />
                                 <FormControlLabel
@@ -501,7 +472,6 @@ export function CredentialModal({ open, mode, onClose }: Props) {
                                 color="success"
                                 endIcon={<ArrowForward />}
                                 onClick={() => setView('form')}
-                                disabled={chosenKind !== 'pat' && chosenKind !== 'app'}
                                 sx={{ textTransform: 'none', fontWeight: 600 }}
                             >
                                 Continue
@@ -891,13 +861,7 @@ export function CredentialModal({ open, mode, onClose }: Props) {
                                     color="success"
                                     onClick={handleSave}
                                     disabled={isPending}
-                                    endIcon={
-                                        isPending ? (
-                                            <ButtonSpinner />
-                                        ) : (
-                                            <CheckCircleOutline />
-                                        )
-                                    }
+                                    endIcon={isPending ? <ButtonSpinner /> : <CheckCircleOutline />}
                                     sx={{ textTransform: 'none', fontWeight: 600 }}
                                 >
                                     {mode.kind === 'edit'

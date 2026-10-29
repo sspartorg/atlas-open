@@ -135,3 +135,16 @@ export function gitInvokeEnv(
         ...(ghToken ? { GH_TOKEN: ghToken, GITHUB_TOKEN: ghToken } : {}),
     };
 }
+
+/**
+ * GitHub turning a credential away. With prompts disabled git rarely says so:
+ * an expired token surfaces as "could not read Username … terminal prompts
+ * disabled", which reads like a setup bug rather than a token to replace.
+ */
+export const GIT_AUTH_REJECTED = /could not read Username|terminal prompts disabled|Authentication failed|Invalid username or password|HTTP 40[13]|returned error: 40[13]/i;
+
+/** What to do first when GitHub rejected the credential (kept ahead of git's text, which may be cut), then the message. */
+export function explainGitAuth(message: string): string {
+    if (!GIT_AUTH_REJECTED.test(message)) return message;
+    return `GitHub rejected this repo's credential: the token may be expired, revoked, or missing access to the repo. Update it under Settings → Credentials, then Resume.\n${message}`;
+}

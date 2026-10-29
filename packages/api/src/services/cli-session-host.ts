@@ -123,6 +123,45 @@ const DEFAULT_ALLOWED_TOOLS = [
 ].join(',');
 const DEFAULT_DISALLOWED_TOOLS = ['Task', 'WebFetch', 'WebSearch'].join(',');
 
+/** Claude Code's and Copilot's folder-trust prompt (wording varies by version). */
+const TRUST_DIALOG = /one you trust\?|trust the files in this folder/i;
+const SETTLE_POLL_MS = 250;
+/** Polls of an unchanged screen before the initial prompt is typed (1.5 s). */
+const SETTLE_TICKS = 6;
+const MAX_SETTLE_POLLS = 120;
+
+/**
+ * Answers the folder-trust dialog "Yes" in a worktree Atlas created. The
+ * CLI highlights "No, exit" for a new folder, so: Down while a No option is
+ * highlighted, Enter once the highlighted option is a Yes. Reads the rendered
+ * screen, not the byte stream (the CLI moves the cursor instead of printing
+ * spaces, and draws the menu after the question). If the marker never shows,
+ * it does nothing and the dialog stays for the Owner, whose keys pass through.
+ */
+function answerTrustDialog(entry: SessionEntry): void {
+    let polls = 0;
+    let downs = 0;
+    const tick = (): void => {
+        if (!entry.pty || polls++ > 240) return;
+        const screen = entry.screen?.visibleText() ?? '';
+        if (!TRUST_DIALOG.test(screen) || !/Enter to confirm/i.test(screen)) {
+            setTimeout(tick, SETTLE_POLL_MS);
+            return;
+        }
+        const highlighted = screen.split('\n').find((l) => l.includes('❯')) ?? '';
+        if (/\bYes\b/i.test(highlighted)) {
+            entry.pty.write('\r');
+            return;
+        }
+        if (/\bNo\b/i.test(highlighted) && downs < 3) {
+            entry.pty.write('\x1b[B');
+            downs++;
+        }
+        setTimeout(tick, 400);
+    };
+    setTimeout(tick, SETTLE_POLL_MS);
+}
+
 export interface WebSocketLike {
     send(data: string | Buffer | Uint8Array): void;
     close(): void;
@@ -187,6 +226,10 @@ export interface StartSessionInput {
     model: string;
     /** Optional first prompt -- written to the PTY after a settle delay. */
     initialPrompt?: string | undefined;
+    /** The worktree is one Atlas made from the project's repo for this
+     *  session, so Atlas answers the CLI's folder-trust dialog "Yes" itself.
+     *  Never set for a folder the Owner picked (standalone sessions). */
+    trustWorkspace?: boolean | undefined;
     /** Optional tmp file path produced by `buildGitAuth(project.credential_id)`.
      *  Merged into the PTY spawn env as `GIT_CONFIG_GLOBAL` so `git push` from
      *  inside the session inherits the project's credential. Null when the
@@ -668,14 +711,41 @@ export function startSession(input: StartSessionInput): void {
     }
     attachPtyToEntry(entry, pty);
     startIdleCheck(entry);
+    if (input.trustWorkspace) answerTrustDialog(entry);
     if (hasInitialPrompt) {
-        // Settle delay so the CLI's welcome screen renders before we type.
-        // Without this, the prompt gets eaten by the boot sequence. While
-        // this timer is pending, the WS input handler queues user keystrokes
-        // so they don't interleave with the auto-write.
+        // Type the prompt once the CLI has gone quiet for SETTLE_TICKS polls,
+        // so the boot sequence doesn't eat it. While it is pending, the WS
+        // input handler queues user keystrokes so they don't interleave with
+        // the auto-write. Found live: every session's worktree is new to the
+        // CLI, so it opens on a folder-trust dialog; typing into that exited
+        // the CLI (code 1) and the session went `paused`. While that dialog
+        // is on screen the Owner's keys go straight through to answer it.
         const prompt = input.initialPrompt!;
-        setTimeout(() => {
-            if (entry.pty) entry.pty.write(prompt);
+        let quietTicks = 0;
+        let lastScreen = entry.screen?.visibleText() ?? '';
+        let polls = 0;
+        const poll = (): void => {
+            if (!entry.pty) {
+                entry.autoPromptPending = false;
+                return;
+            }
+            // Quiet = the screen stopped changing; keystrokes don't count.
+            const screen = entry.screen?.visibleText() ?? '';
+            const trusting = TRUST_DIALOG.test(screen);
+            entry.autoPromptPending = !trusting;
+            if (trusting && entry.pendingInputQueue.length > 0) {
+                for (const chunk of entry.pendingInputQueue) entry.pty.write(chunk);
+                entry.pendingInputQueue.length = 0;
+            }
+            quietTicks = screen === lastScreen && !trusting ? quietTicks + 1 : 0;
+            lastScreen = screen;
+            polls++;
+            // ponytail: a CLI that never stops painting gets the prompt after ~30 s anyway.
+            if (quietTicks < SETTLE_TICKS && !(polls >= MAX_SETTLE_POLLS && !trusting)) {
+                setTimeout(poll, SETTLE_POLL_MS);
+                return;
+            }
+            entry.pty.write(prompt);
             // Enter as its own write, a beat later: sent with the text, the
             // CLI reads the burst as a paste and the \r as a newline in it,
             // so the prompt sat in the input box unsubmitted.
@@ -688,7 +758,8 @@ export function startSession(input: StartSessionInput): void {
                 }
                 entry.pendingInputQueue.length = 0;
             }, 500);
-        }, 1_500);
+        };
+        setTimeout(poll, SETTLE_POLL_MS);
     }
 }
 
