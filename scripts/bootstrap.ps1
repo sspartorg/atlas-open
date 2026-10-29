@@ -551,7 +551,7 @@ function Prompt-OptionalInstall {
         [string]$ExtraContext = ''
     )
 
-    $msg = "Install $DisplayName? (Y/N)"
+    $msg = "Install ${DisplayName}? (Y/N)"
     if ($ExtraContext) { $msg = "$DisplayName - $ExtraContext`n$msg" }
     return Read-YesNo -Prompt $msg -Default 'Y'
 }
