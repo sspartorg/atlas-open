@@ -13,7 +13,7 @@ worktree and branch. When the agent finishes, Atlas commits anything it left
 uncommitted, pushes, and opens the pull request (one per repo the Task
 touched). If the agent asks a question, the run parks and waits for you;
 your reply on the Task resumes it. A crashed run gets one automatic retry.
-Up to three Tasks run at once, and only one Task per repo at a time.
+One agent runs at a time; other Tasks wait in the Queue.
 
 ## What's in Atlas Open
 
@@ -98,7 +98,7 @@ sign in to the CLIs the script can't drive interactively:
 
 ```powershell
 claude login         # Anthropic sign-in
-gh auth login        # GitHub sign-in (also unlocks `gh copilot`)
+gh auth login        # GitHub sign-in (pushes and pull requests)
 ```
 
 ---

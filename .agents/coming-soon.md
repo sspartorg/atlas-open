@@ -26,7 +26,7 @@ When a stub is shipped (or removed), delete its row here AND update the page doc
 
 Detection lives at `packages/web/src/utils/isSimulatedRun.ts`: sniffs `output_text.startsWith('[SIMULATED')` for completed runs, falls back to the global `ai_enabled === false` flag for queued / in-progress runs without output yet. The flag is exposed at `GET /api/settings` (`ai_enabled: boolean`, sourced from `process.env.ATLAS_AI_ENABLED` at every read — never persisted).
 
-This is intentional, not a stub; it's used so devs can play with the app without burning CLI credits. To use the real CLI: set `ATLAS_AI_ENABLED=true` in `packages/api/.env` and restart the API. New runs will spawn the real `claude` / `gh copilot` binary; old simulated runs keep their `[SIMULATED …]` chip because the marker persists in their `output_text`.
+This is intentional, not a stub; it's used so devs can play with the app without burning CLI credits. To use the real CLI: set `ATLAS_AI_ENABLED=true` in `packages/api/.env` and restart the API. New runs will spawn the real `claude` / `copilot` binary; old simulated runs keep their `[SIMULATED …]` chip because the marker persists in their `output_text`.
 
 ---
 

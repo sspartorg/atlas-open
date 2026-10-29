@@ -1,0 +1,92 @@
+# Release-readiness checklist — Atlas Open (this laptop)
+
+## Context
+The suites are 100% green, but green only covers what they test. Before publishing and marketing,
+every user-facing scenario must be proven on this Windows laptop. Gaps found while planning:
+- **The core Task → agent → PR flow has no live automated test.** e2e uses `e2e/fixtures/fake-claude.js`,
+  and `e2e/live/` only has `chrome-push-live` and `quiet-hours-live`.
+- **One-click install** (`scripts/bootstrap.ps1`) has never been run from a fresh clone.
+- **Jira / Telegram / Copilot** are only tested against mocks.
+- **e2e skips 325 specs** (mobile/ipad + visual baselines): need to confirm none of them hide a real gap.
+- `pnpm prod` / HTTPS mode is not in the gate.
+
+Rules for the session: token-lean (dot/line reporters, `tail` of failures only, no full logs in context);
+every failure gets a root-cause fix plus a regression test (per memory); live runs only, `ATLAS_AI_ENABLED=true`;
+no edits to `packages/*/src` while `pnpm e2e` runs (testing.md trap).
+
+## Deliverable
+A new `.agents/release-checklist.md`: the tiers below as checkboxes, each with its command, PASS/FAIL,
+and a link to the fix commit. Work happens on branch `chore/release-readiness`, with one PR at the end.
+
+## Tier 0 — Baseline (cheap, run first)
+- [ ] `pnpm gate` (typecheck, lint, knip, coverage) → record counts
+- [ ] `pnpm e2e --reporter=dot` → record pass/skip; list the skip reasons by tag and confirm each is intentional
+- [ ] `pnpm e2e:functional`, `pnpm e2e:state-transitions`
+- [ ] `pnpm doctor` is clean; API log shows 0 restarts and 0 unhandled rejections
+
+## Tier 1 — Clean install (fresh clone in `%TEMP%\atlas-fresh`)
+- [ ] First read `bootstrap.ps1` (`Ensure-McpServerDefinitions`, `Ensure-EnvFile`) to confirm it **backs up and merges**
+      `~/.claude.json` and `~/.copilot/mcp-config.json`. If it doesn't, back them up manually first.
+- [ ] `bootstrap.ps1 -NonInteractive` (admin) → exit 0; then `pnpm dev` → `/api/health` ok, UI loads
+- [ ] Rerun bootstrap → stays the same on a second run (no duplicate MCP entries, `.env` keeps its values)
+- [ ] README quick-start steps match what actually happened (fix the docs if not)
+- [ ] Port conflict: a fresh clone shouldn't clash with the main checkout's DB container/ports, or the README should say how
+- [ ] Docker stopped → bootstrap/dev print a clear message, not a stack trace
+
+## Tier 2 — Core flow, live (new `e2e/live/task-to-pr-live.spec.ts`, gated by `E2E_LIVE=1`)
+Sandbox: private `sspartorg/atlas-open-sandbox` (created with `gh`), reset to a known commit before each run.
+The spec drives the API (plus one UI assertion per step) with real `claude`, using tiny tasks to keep cost low:
+- [ ] Happy path: Task → queued → in_progress → agent edits a file → Atlas commits + pushes → PR exists (`gh pr view`) → run page shows steps and changes
+- [ ] Agent asks a question → run `waiting_for_owner` → Owner comment resumes it → PR
+- [ ] Agent makes no changes (single repo) → must not park as `delivery_failed` with a raw "No commits between" error (suspected from code; verify)
+- [ ] Stop mid-run → stays stopped (regression for ff5997b) → Resume works
+- [ ] Crash (kill the CLI process) → exactly one automatic retry after 30 s; a second crash parks the run (`step_error`) with a visible reason
+- [ ] Concurrency: 2 Tasks queued → only one runs (`MAX_CONCURRENT_AGENTS` = 1), the second starts when the first finishes; a parked run frees the slot but keeps its repo
+- [ ] Multi-repo project → one PR per repo touched; untouched repo → no PR
+- [ ] API restart mid-run → orphan sweep marks the step `error` ("API restarted before run completed") → retry or park, visible on the run page. Known: the 30 s retry timer is in memory, so a restart during it loses the retry; the 10-min reconcile must then park it
+- [ ] No GitHub auth / push rejected → run fails with the reason on the run page, not only in the log
+- [ ] Copilot CLI agent: the happy path again with the standalone `copilot` CLI
+- [ ] Teardown closes PRs and deletes every `atlas/task/LIV-*` branch in the sandbox
+- [ ] DB reset against a repo that still has `atlas/task/<KEY>-1` from an earlier install → new run must not fail delivery on a non-fast-forward push (to verify)
+
+## Tier 3 — Integrations, live
+- [ ] Jira bridge: real JQL source → Tasks imported, assigned to the agent; status mapping writes back (extend `e2e/flows/jira-bridge.spec.ts` with an `E2E_LIVE` variant)
+- [ ] Telegram: test message + a real run-finished notification arrives (check through the Bot API `getUpdates`, or I ask you to confirm on your phone)
+- [ ] Teams: no credentials. Mark it as "mock-tested only" in the checklist and README
+- [ ] Each marketplace agent (AI News, AI Readiness, Jira to Epic, Knowledge Base, Market Research, Regulations): install → run on demand once → output recorded. Most expensive item: run each one once, sequentially
+- [ ] MCP: `testing-mcp.md` scripted smoke against a live API; real `claude` CLI uses the Atlas MCP to create a Task
+
+## Tier 4 — Modes and resilience
+- [ ] `pnpm prod` and `pnpm prod:https` start, serve the UI, and a live run completes
+- [ ] DB container restart while the app runs → it recovers
+- [ ] Terminal/CLI sessions with real `claude`: start / pause / resume / stop + PR
+- [ ] Secrets: X1 invariant spot-check through raw API responses (no plaintext in list/get)
+
+## Tier 5 — Open owner decisions (from functional-checklist.md)
+- [ ] C1 `comments.author_name`: needs your "yes, edit shared"; I'll ask when we get there
+- [ ] C2 unseeded SdlcRole slugs: recommend narrowing the union (no content to invent)
+- [ ] 3 coming-soon stubs: hide or keep the toast before launch (I'll ask)
+
+## Order and cost control
+Tier 0 → 1 → 2 → 3 → 4. Stop and fix at the first red, then rerun only the affected suite, then the full
+gate once at the end. Live tests use one-line prompts on the sandbox repo. Marketplace agents run once each.
+
+## Verification (exit criteria)
+Every box is ticked or explicitly marked out of scope with a reason. A final `pnpm gate:full` plus
+`pnpm e2e:live` are green in one session. `.agents/release-checklist.md` is committed with results, and the PR is opened.
+
+## Findings log (2026-10-29)
+
+| # | Tier | Finding | Status |
+|---|---|---|---|
+| R1 | 0 | `pnpm gate` red: 2 web tests timed out under coverage (9 s alone, >30 s in parallel). A timed run of the whole suite found ~15 more at 10–22 s. Causes: `userEvent.type` re-rendering big MUI forms per keystroke; name-filtered role queries over 50+ row lists. | Fixed: worst 22.4 s → 3.9 s; no timeout raised, no assertion weakened |
+| R2 | 1 | bootstrap.ps1: the "atlas already registered" regex never matched `claude mcp list` output (`atlas:`). | Fixed: `claude mcp get atlas` (as bootstrap.sh) |
+| R3 | 1 | bootstrap.ps1: Windows PowerShell 5.1 strips the inner quotes of a JSON arg to a native exe, so `claude mcp add-json` always failed. | Fixed: `claude mcp add --transport http` |
+| R4 | 1 | bootstrap.ps1 fallback rewrote `~/.claude.json` via ConvertFrom-Json, which throws on Claude Code's case-variant project keys (`C:/x` and `c:/x`), and would have written a BOM. | Fixed: never rewrite it; print the manual command. JSON writes are BOM-free |
+| R5 | 1 | Both bootstraps installed the retired `gh copilot` extension; Atlas spawns the standalone `copilot` (npm @github/copilot). | Fixed in both scripts |
+| R6 | docs | README claimed "up to three Tasks run at once"; code is `MAX_CONCURRENT_AGENTS = 1` (ADR 0033). | Fixed |
+| R7 | 2 | **Launch blocker.** A PAT credential without the optional human name/email → `GIT_CONFIG_GLOBAL` replaces ~/.gitconfig with a config that has no `[user]` → `git commit` fails "Author identity unknown" → every Task delivers nothing. | Fixed: `buildGitAuth` carries the host's global identity; unit test commits for real |
+| R8 | 2 | A failed commit was only a log line nobody reads; delivery pushed on and parked with GitHub's misleading "No commits between main and …". On resume, a failed commit was followed by a worktree reset that discarded the agent's work. | Fixed: delivery parks `Commit failed: <git error>`; resume refuses instead of resetting. Integration test with a failing hook |
+| R9 | 2 | Delivery `log` lines: on success they go into the Owner notification (`finishRun`); on failure only `failure` becomes `park_reason`. The commit error was the one reason that never reached `failure`. | Closed by R8: every failing step (commit, push, PR) now sets `failure` with its own error |
+| R10 | 3 | Atlas and Atlas Open both register the MCP server as `atlas`. On a machine with both, itemless (marketplace) runs use whichever `atlas` is in ~/.claude.json. | Open: verify live in Tier 3 |
+| — | 2 | Sandbox repo's `node --test test/` breaks on Node 22+ (not an Atlas bug; the agent correctly reported red tests and Atlas correctly parked). | Fixed in sandbox |
