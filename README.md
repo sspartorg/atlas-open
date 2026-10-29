@@ -20,7 +20,7 @@ One agent runs at a time; other Tasks wait in the Queue.
 - **Projects** with one or more repos, **Tasks**, sub-tasks, issues and comments
 - **One agent per Task**, run end to end with commit, push and PR handled by Atlas; a run page at `/runs/:runId` with steps, changes, Stop and Resume
 - **Agents** with memory, checklists and agent tests
-- **Marketplace** of installable agents: Solo Engineer (`agent-solo`), plus AI News, AI Readiness, Jira to Epic, Knowledge Base, Market Research and Regulations, which run on demand
+- **Marketplace** of installable agents. Assign a Task to Solo Engineer (`agent-solo`), AI Readiness or Knowledge Base and the PR comes back; AI News, Jira to Epic, Market Research and Regulations run on demand (fill in the placeholders at the top of their prompt first)
 - **Jira bridge**: each source is a JQL query, an agent and the repos to use; imported Tasks are assigned to that agent
 - **Guardrails** and guardrail scripts
 - **Reminders**, in-app and push **notifications**, external notifications (Telegram, Microsoft Teams)

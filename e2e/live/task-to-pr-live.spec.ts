@@ -67,8 +67,8 @@ async function get<T>(request: APIRequestContext, path: string): Promise<T> {
     return (await res.json()) as T;
 }
 
-async function createTask(request: APIRequestContext, title: string, description: string): Promise<string> {
-    const t = await post<{ id: string }>(request, '/api/tasks', { project_id: projectId, title, description, assignee_agent_id: 'agent-solo' });
+async function createTask(request: APIRequestContext, title: string, description: string, agent = 'agent-solo'): Promise<string> {
+    const t = await post<{ id: string }>(request, '/api/tasks', { project_id: projectId, title, description, assignee_agent_id: agent });
     return t.id;
 }
 
@@ -307,6 +307,20 @@ test.describe('marketplace agents', () => {
             expect(run!.status, out.slice(-1500)).toBe('completed');
             expect(out).not.toMatch(/ECONNREFUSED|Failed to connect/);
             if (slug === 'agent-jira-to-epic') expect(created, 'an unconfigured importer imports nothing').toBe(0);
+        });
+    }
+
+    // These two read the repo, so they work through a Task (an on-demand run
+    // gets a throwaway folder with no source).
+    for (const [slug, path] of [['agent-knowledge-base', 'skills/'], ['agent-ai-readiness', 'AGENTS.md']] as const) {
+        test(`${slug} turns a Task into a PR`, async ({ request }) => {
+            const res = await request.post(`${API}/api/marketplace/agents/${slug}/install`, { data: {} });
+            expect([200, 201, 409], await res.text()).toContain(res.status());
+            const taskId = await createTask(request, `${slug} pass ${STAMP}`, 'Do your job for this repository.', slug);
+            const run = await waitRun(request, taskId, (r) => r.status !== 'running', [], 25 * 60_000);
+            rememberPrs(run);
+            expect(run.status, run.park_reason ?? '').toBe('completed');
+            expect(gh('pr', 'diff', run.pr_url!)).toContain(path);
         });
     }
 });
