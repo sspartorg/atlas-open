@@ -109,6 +109,14 @@ describe('catalog contract', () => {
         const { manifest } = entry;
 
         describe(manifest.id, () => {
+            // Install copies this status, and Run refuses an inactive agent: an
+            // `inactive` manifest meant "Agent is not active" on the first Run.
+            // Schedules stay off (`schedule_enabled`), so active starts nothing.
+            it('ships active, with any schedule off, so Run works right after install', () => {
+                expect(manifest.status).toBe('active');
+                expect((manifest as { schedule_enabled?: boolean }).schedule_enabled ?? false).toBe(false);
+            });
+
             it('validates against the bundle manifest schema', () => {
                 const parsed = AgentBundleManifestSchema.safeParse(manifest);
                 if (!parsed.success) {

@@ -1,27 +1,27 @@
 {
   "agent-ai-news": {
-    "version": 2,
-    "hash": "b2ed5d51281d8bbe"
+    "version": 3,
+    "hash": "0934344e2ef86d19"
   },
   "agent-ai-readiness": {
-    "version": 2,
-    "hash": "5f2b2450687b8416"
+    "version": 3,
+    "hash": "8f86be15711ea086"
   },
   "agent-jira-to-epic": {
-    "version": 2,
-    "hash": "eebce584272e8c5e"
+    "version": 3,
+    "hash": "2cd1197b2e9168ea"
   },
   "agent-knowledge-base": {
-    "version": 2,
-    "hash": "87c20580f99bfd55"
+    "version": 3,
+    "hash": "71f38d497468ec56"
   },
   "agent-market-research": {
-    "version": 2,
-    "hash": "1cac9aa52c694b22"
+    "version": 3,
+    "hash": "bcfa1395f2f1ceee"
   },
   "agent-regulations": {
-    "version": 2,
-    "hash": "c253ba4634ffceb2"
+    "version": 3,
+    "hash": "35996b3b68b122fa"
   },
   "agent-solo": {
     "version": 2,
