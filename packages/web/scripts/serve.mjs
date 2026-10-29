@@ -8,6 +8,7 @@
 // files vite.config.ts and the API read.
 
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
@@ -17,9 +18,12 @@ const isProd = process.env.ATLAS_ENV?.toLowerCase() === 'prod';
 loadDotenv({ path: join(WEB, '..', '..', isProd ? '.env.prod' : '.env'), quiet: true });
 
 const httpsPort = process.env.ATLAS_HTTPS_PORT;
+// vite's own bin under this node: spawning `vite` finds no binary on Windows,
+// where node_modules/.bin holds only a .cmd shim (spawn ENOENT).
+const viteBin = join(dirname(createRequire(import.meta.url).resolve('vite/package.json')), 'bin', 'vite.js');
 const [cmd, args] = httpsPort
     ? ['caddy', ['run', '--config', join(WEB, 'Caddyfile'), '--adapter', 'caddyfile']]
-    : ['vite', ['preview', '--host', ...process.argv.slice(2)]];
+    : [process.execPath, [viteBin, 'preview', '--host', ...process.argv.slice(2)]];
 
 const child = spawn(cmd, args, {
     cwd: WEB,
