@@ -12,7 +12,9 @@ export default defineConfig({
         env: {
             DATABASE_URL:
                 process.env['TEST_DATABASE_URL'] ??
-                'postgres://atlas:atlas@localhost:5600/atlas_open_test',
+                // 127.0.0.1: on Windows, localhost is ::1, served by WSL's wslrelay,
+                // which reset or hung a few connections every run (see .env.example).
+                'postgres://atlas:atlas@127.0.0.1:5600/atlas_open_test',
             // Silence Fastify pino during tests.
             ATLAS_LOG_LEVEL: 'error',
             // Force the MCP-write gate into degraded/open mode so route-

@@ -3,6 +3,7 @@
 // coordination-logic test — no real filesystem writes.
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { join } from 'node:path';
 
 // -- Mock every assembler dependency before the module under test loads --
 
@@ -144,12 +145,12 @@ describe('stageCliWorktree', () => {
 
         expect(renderOutcomeMock).toHaveBeenCalledWith('agent-coder');
         expect(writeFileSyncMock).toHaveBeenCalledWith(
-            `${WORKTREE}/.atlas/outcome.md`,
+            join(WORKTREE, '.atlas', 'outcome.md'),
             '# Run Outcome Contract\n',
             'utf8',
         );
         expect(writeFileSyncMock).toHaveBeenCalledWith(
-            `${WORKTREE}/.atlas/self-memory.md`,
+            join(WORKTREE, '.atlas', 'self-memory.md'),
             '## Self-memory\n\n- prefer small commits\n',
             'utf8',
         );
@@ -162,7 +163,7 @@ describe('stageCliWorktree', () => {
             includeOutcome: { agentId: 'agent-coder' },
         });
         expect(writeFileSyncMock).toHaveBeenCalledWith(
-            `${WORKTREE}/.atlas/self-memory.md`,
+            join(WORKTREE, '.atlas', 'self-memory.md'),
             '# Self-memory\n\n_No entries yet._\n',
             'utf8',
         );

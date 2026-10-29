@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -21,9 +21,19 @@ import { describe, expect, it } from 'vitest';
 
 const SCRIPT = resolve(__dirname, '../../../scripts/bootstrap.sh');
 const BASH = execFileSync('bash', ['-c', 'command -v bash'], { encoding: 'utf8' }).trim();
+// What Node spawns: under Git Bash, BASH is /usr/bin/bash, which Windows cannot
+// launch, so ask for its Windows path. Shebangs keep BASH.
+const BASH_EXE = process.platform === 'win32'
+    ? execFileSync('bash', ['-c', 'cygpath -w "$(command -v bash)"'], { encoding: 'utf8' }).trim()
+    : BASH;
 const REAL_TOOLS = ['sed', 'tr', 'head', 'grep', 'awk', 'cat', 'dirname', 'id', 'mktemp', 'chmod', 'mv', 'cp', 'mkdir', 'base64', 'openssl'];
 
 type Stubs = Record<string, string>;
+
+function writeExecutable(path: string, body: string) {
+    writeFileSync(path, `#!${BASH}\n${body}\n`);
+    chmodSync(path, 0o755);
+}
 
 function sandbox(stubs: Stubs, opts: { osRelease?: string } = {}) {
     const root = mkdtempSync(join(tmpdir(), 'bootstrap-sh-'));
@@ -37,16 +47,15 @@ function sandbox(stubs: Stubs, opts: { osRelease?: string } = {}) {
     writeFileSync(join(root, '.env.prod.example'), 'ATLAS_MCP_TOKEN=\n');
     for (const tool of REAL_TOOLS) {
         const real = spawnSync('bash', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim();
-        if (real) symlinkSync(real, join(bin, tool));
+        // A wrapper, not a symlink: `real` is a bash path (/usr/bin/sed under
+        // Git Bash, which Node cannot resolve) and Windows symlinks need admin.
+        if (real) writeExecutable(join(bin, tool), `exec ${real} "$@"`);
     }
-    for (const [name, body] of Object.entries(stubs)) {
-        writeFileSync(join(bin, name), `#!${BASH}\n${body}\n`);
-        chmodSync(join(bin, name), 0o755);
-    }
+    for (const [name, body] of Object.entries(stubs)) writeExecutable(join(bin, name), body);
     const osRelease = join(root, 'os-release');
     writeFileSync(osRelease, opts.osRelease ?? '');
     const run = (...args: string[]) => {
-        const r = spawnSync(BASH, [join(root, 'scripts', 'bootstrap.sh'), ...args], {
+        const r = spawnSync(BASH_EXE, [join(root, 'scripts', 'bootstrap.sh'), ...args], {
             cwd: root,
             encoding: 'utf8',
             env: { PATH: bin, HOME: home, USER: 'tester', ATLAS_BOOTSTRAP_OS_RELEASE: osRelease },

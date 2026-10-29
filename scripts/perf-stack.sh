@@ -15,7 +15,7 @@ DB=atlas_open_perf
 WEB_PORT=4800
 API_PORT=4801
 MCP_PORT=4810
-DB_URL="postgres://atlas:atlas@localhost:5600/${DB}"
+DB_URL="postgres://atlas:atlas@127.0.0.1:5600/${DB}"
 LOGS="$ROOT/e2e-logs/perf-stack"
 psql() { docker exec atlas-open-postgres psql -U atlas -d postgres -qc "$1"; }
 

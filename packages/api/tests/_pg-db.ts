@@ -53,7 +53,7 @@ export async function closeTestDb(): Promise<void> {
     pool = null;
 }
 
-// Order matters: child tables first so FK CASCADE doesn't surprise. The
+// Tables truncateAll() wipes, with every table that references them. The
 // list is intentionally explicit (not "every table") so adding new tables
 // makes you think about whether they need test cleanup.
 const TRUNCATE_TABLES = [
@@ -178,30 +178,62 @@ async function reseedCliModels(): Promise<void> {
         .execute();
 }
 
+// What `TRUNCATE <list> RESTART IDENTITY CASCADE` did, as DELETEs: TRUNCATE
+// makes new files for every table and index, and before each of ~3,300 tests
+// that churn cost ~2.5s and stalled every other query on the server (Docker
+// on Windows most of all); DELETE on these near-empty tables takes ~70ms.
+// The tables are the list plus every table referencing it (what CASCADE
+// reached); `replica` turns FK triggers off so delete order does not matter,
+// which needs the test role to be a superuser (it is in docker-compose).
+let wipeStatements: string | null = null;
+async function wipeSql(db: Kysely<DB>): Promise<string> {
+    if (wipeStatements) return wipeStatements;
+    const tables = await sql<{ t: string }>`
+        WITH RECURSIVE hit(oid) AS (
+            SELECT unnest(${TRUNCATE_TABLES}::regclass[])::oid
+            UNION
+            SELECT c.conrelid FROM pg_constraint c JOIN hit ON c.confrelid = hit.oid WHERE c.contype = 'f'
+        )
+        SELECT oid::regclass::text AS t FROM hit
+    `.execute(db);
+    const seqs = await sql<{ s: string }>`
+        SELECT DISTINCT d.objid::regclass::text AS s FROM pg_depend d JOIN pg_class s ON s.oid = d.objid
+        WHERE s.relkind = 'S' AND d.refobjid = ANY(${tables.rows.map((r) => r.t)}::regclass[])
+    `.execute(db);
+    wipeStatements = [
+        'SET LOCAL session_replication_role = replica',
+        ...tables.rows.map((r) => `DELETE FROM ${r.t}`),
+        // setval, not ALTER SEQUENCE RESTART: that one rewrites the file too.
+        ...seqs.rows.map((r) => `SELECT setval('${r.s}', seqstart, false) FROM pg_sequence WHERE seqrelid = '${r.s}'::regclass`),
+        'SET LOCAL session_replication_role = DEFAULT',
+    ].join(';\n');
+    return wipeStatements;
+}
+
 interface TruncateOptions {
     lockTimeoutMs?: number;
     attempts?: number;
 }
 
-// TRUNCATE needs ACCESS EXCLUSIVE on every table, so one straggler (an
-// un-awaited background query from the previous test, or another vitest
-// process on the same DB) used to park it silently until the 60s hook
+// The wipe waits on any row a straggler holds (an un-awaited background
+// query from the previous test, or another vitest process on the same DB),
+// which used to park it silently until the 60s hook
 // timeout. Bound the wait, retry, and name the blocker when it never clears.
 export async function truncateAll({ lockTimeoutMs = 10_000, attempts = 3 }: TruncateOptions = {}): Promise<void> {
     const db = getTestDb();
-    // One statement, RESTART IDENTITY resets serial counters, CASCADE handles
-    // any FK dependency we forgot.
-    const list = sql.raw(TRUNCATE_TABLES.join(', '));
+    const wipe = await wipeSql(db);
     for (let attempt = 1; ; attempt++) {
         try {
             await db.transaction().execute(async (trx) => {
                 await sql.raw(`SET LOCAL lock_timeout = ${Math.max(1, Math.floor(lockTimeoutMs))}`).execute(trx);
-                await sql`TRUNCATE ${list} RESTART IDENTITY CASCADE`.execute(trx);
+                await sql.raw(wipe).execute(trx);
             });
             break;
         } catch (err) {
-            const lockTimedOut = (err as { code?: string }).code === '55P03';
-            if (!lockTimedOut) throw err;
+            // A straggler from the previous test can deadlock with the wipe
+            // instead of merely blocking it; either way, try again.
+            const code = (err as { code?: string }).code;
+            if (code !== '55P03' && code !== '40P01') throw err;
             if (attempt >= attempts) {
                 const blockers = await sql<{ pid: number; state: string | null; query: string }>`
                     SELECT pid, state, left(query, 200) AS query
@@ -209,7 +241,7 @@ export async function truncateAll({ lockTimeoutMs = 10_000, attempts = 3 }: Trun
                     WHERE datname = current_database() AND pid <> pg_backend_pid() AND state <> 'idle'
                 `.execute(db);
                 const detail = blockers.rows.map((b) => `pid ${b.pid} (${b.state}): ${b.query}`).join('; ');
-                throw new Error(`truncateAll: TRUNCATE blocked by ${detail || 'an unknown lock holder'}`);
+                throw new Error(`truncateAll: wipe blocked by ${detail || 'an unknown lock holder'}`);
             }
         }
     }

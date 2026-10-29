@@ -25,12 +25,16 @@ test('model registry: add, duplicate, edit twice, delete', async ({ page, reques
     await page.getByRole('dialog').getByRole('textbox').nth(1).fill('note one');
     await page.getByRole('dialog').getByRole('button', { name: 'Add model' }).click();
     await expect.poll(async () => (await findModel(request))?.note).toBe('note one');
+    // The DB write lands before the browser sees the response; until the dialog
+    // closes, its own submit button is the last 'Add model' on the page.
+    await expect(page.getByRole('dialog')).toBeHidden();
 
     await addOllama().click();
     await page.getByRole('dialog').getByRole('textbox').first().fill(NAME);
     await page.getByRole('dialog').getByRole('button', { name: 'Add model' }).click();
     await expect(page.getByText('Model already in registry for this CLI')).toBeVisible();
     await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toBeHidden();
 
     for (const note of ['note two', 'note three']) {
         await page.getByRole('button', { name: `Edit ${NAME}` }).click();
@@ -38,6 +42,7 @@ test('model registry: add, duplicate, edit twice, delete', async ({ page, reques
         await page.getByRole('dialog').getByRole('textbox').nth(1).fill(note);
         await page.getByRole('dialog').getByRole('button', { name: /Save/ }).click();
         await expect.poll(async () => (await findModel(request))?.note).toBe(note);
+        await expect(page.getByRole('dialog')).toBeHidden();
     }
 
     await page.locator(`button[aria-label="Remove ${NAME}"]`).click();

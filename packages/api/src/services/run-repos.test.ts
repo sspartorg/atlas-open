@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../routes/events.js', () => ({ eventsRoutes: async () => undefined, broadcastSSE: vi.fn() }));
 
-import { join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { closeTestDb, testDb, truncateAll } from '../../tests/_pg-db.js';
 import { insertItem, insertProject } from '../../tests/_items.js';
 import { repositoriesMarkdown, runRepos } from './run-repos.js';
@@ -36,7 +36,7 @@ describe('runRepos', () => {
     it("nests a multi-repo Task's checkouts in one workspace, and a sub-task uses its Task's repos", async () => {
         await testDb.updateTable('items').set({ repo_ids: JSON.stringify(['repo-web', 'p1']) }).where('id', '=', 'ATL-1').execute();
         const r = await runRepos({ project_id: 'p1', item_id: 'ATL-2', branch: BRANCH, worktree_path: '/ignored' });
-        const ws = join('/ws', 'worktrees', 'p1', 'ws', 'atlas__wf__ATL-1');
+        const ws = join(resolve('/ws'), 'worktrees', 'p1', 'ws', 'atlas__wf__ATL-1');
         expect(r.workspace).toBe(ws);
         expect(r.repos.map((x) => [x.repo.name, x.path])).toEqual([
             ['web', join(ws, 'web')],
@@ -79,7 +79,7 @@ describe('runRepos', () => {
             .where('id', '=', 'ATL-1')
             .execute();
         const r = await runRepos({ project_id: 'p1', item_id: 'ATL-1', branch: BRANCH });
-        expect(r.workspace).toBe(join('/ws', 'worktrees', 'p1', 'ws', 'atlas__wf__ATL-1'));
-        expect(r.repos.map((x) => x.path.split('/').pop())).toEqual(['web', 'core']);
+        expect(r.workspace).toBe(join(resolve('/ws'), 'worktrees', 'p1', 'ws', 'atlas__wf__ATL-1'));
+        expect(r.repos.map((x) => basename(x.path))).toEqual(['web', 'core']);
     });
 });

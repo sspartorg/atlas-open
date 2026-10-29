@@ -24,7 +24,7 @@ const __dirname = dirname(__filename);
 
 const E2E_DB = 'atlas_open_e2e';
 // The dev postgres container (docker compose `atlas-open-postgres`, host port 5600).
-const dbUrl = (dbName: string) => `postgres://atlas:atlas@localhost:5600/${dbName}`;
+const dbUrl = (dbName: string) => `postgres://atlas:atlas@127.0.0.1:5600/${dbName}`;
 const API_PORT = E2E_API_PORT;
 // 2026-06-23 — moved off 6000 (X11 server port) because it sits on the
 // WHATWG "bad ports" blocklist. Node's undici-backed fetch refuses it
