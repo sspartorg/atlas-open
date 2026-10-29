@@ -35,6 +35,7 @@
     },
     "ignoreBinaries": [
         "where.exe",
+        "powershell.exe",
         "reg",
         "icacls",
         "gh",

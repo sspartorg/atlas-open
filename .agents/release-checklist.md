@@ -158,6 +158,8 @@ responsive sweep, the installer run for real from a fresh clone, and failure pro
 | T2-MULTI | live | Two-repo Task with real `claude` + GitHub (`sspartorg/atlas-open-sandbox-2`): one PR, on the repo it changed. | PASS |
 | T4-SEC | security | API and MCP bind 127.0.0.1; browser storage holds UI preferences only. | PASS |
 
+**Final state:** `pnpm gate` green (shared 260, mcp 134, web 4340, api 3343 + 3 skipped; bundle in budget). `pnpm e2e` across all 7 projects: **867 passed, 0 failed** (374 skipped: Linux-only visual baselines, live specs without their flags).
+
 **Still open**
 - **Owner:** recreate the two Postgres containers so they publish on 127.0.0.1 (`db:up` reuses existing containers by design; new installs are fine). Data stays in the named volumes: `docker rm -f atlas-open-postgres atlas-open-postgres-prod && pnpm db:up && pnpm db:up:prod`.
 - Copilot CLI: installed by the bootstrap run (1.0.105) but not signed in; Copilot agent runs untested (Owner decision: later).
