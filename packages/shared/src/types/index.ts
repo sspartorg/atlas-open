@@ -32,7 +32,6 @@ export type AgentCategory = 'software-dev' | 'marketing' | 'content' | 'design';
 // override; when empty, the UI falls back to the role's label.
 export type SdlcRole =
     | 'po'
-    | 'spec-writer'
     | 'engineer'
     | 'qa'
     | 'architect'
@@ -45,7 +44,6 @@ export type SdlcRole =
 
 export const SDLC_ROLES: readonly SdlcRole[] = [
     'po',
-    'spec-writer',
     'engineer',
     'qa',
     'architect',
@@ -912,6 +910,11 @@ export interface IComment {
     id: number;
     author: 'owner' | 'agent';
     agent_id: string | null;
+    /**
+     * The authoring agent's name, copied when the comment was written. Kept
+     * after the agent is deleted (which nulls `agent_id`).
+     */
+    author_name: string | null;
     issue_type: IssueType;
     issue_id: string;
     body: string;

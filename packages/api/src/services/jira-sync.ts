@@ -1227,6 +1227,7 @@ async function digestSince(taskId: string, pushedCommentId: number, imported: Re
             'c.author',
             'c.body',
             'c.agent_id',
+            'c.author_name',
             'i.id as item_id',
             'i.type',
             'i.title',
@@ -1246,7 +1247,9 @@ async function digestSince(taskId: string, pushedCommentId: number, imported: Re
         maxId = Math.max(maxId, id);
         if (imported.has(id)) continue;
         const who =
-            r.author === 'owner' ? 'Owner' : r.agent_id ? (r.agent_name ?? 'Agent') : 'Atlas';
+            r.author === 'owner'
+                ? 'Owner'
+                : (r.agent_name ?? r.author_name ?? (r.agent_id ? 'Agent' : 'Atlas'));
         const where = r.type === 'sub_task' ? ` on ${r.item_id} "${r.title}"` : '';
         const body = flatten(r.body);
         const text = `: ${body.length > DIGEST_LINE_CHARS ? body.slice(0, DIGEST_LINE_CHARS) + '…' : body}`;
