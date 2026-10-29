@@ -71,4 +71,19 @@ test('a Task created with an agent runs, shows its run on the rail, and opens on
     await expect(steps).toContainText('outcome: done');
     await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
     await expect(page.getByRole('link', { name: taskId }).first()).toHaveAttribute('href', `/tasks/${taskId}`);
+
+    // Resume retries delivery; still no credential, so it parks again.
+    const resumed = page.waitForResponse((r) => r.url().endsWith(`/api/workflow-runs/${run!.id}/resume`));
+    await page.getByRole('button', { name: 'Resume' }).click();
+    expect((await resumed).ok()).toBe(true);
+    await expect
+        .poll(async () => (await taskRuns(request, taskId))[0]?.status, { timeout: 60_000, intervals: [1_000] })
+        .toBe('waiting_for_owner');
+
+    // Stop ends it for good: no Resume, no Stop.
+    await page.reload();
+    await page.getByRole('button', { name: 'Stop' }).click();
+    await expect.poll(async () => (await taskRuns(request, taskId))[0]?.status, { timeout: 30_000 }).toBe('cancelled');
+    await expect(page.getByRole('button', { name: 'Resume' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0);
 });
