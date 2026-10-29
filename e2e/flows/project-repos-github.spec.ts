@@ -437,8 +437,6 @@ test.describe('auto-fetch, run now', () => {
 
 test.describe('Generate AI scaffold', () => {
     test('Generate makes a Task on the AI Readiness agent for the picked repo; its run pushes the Task branch to GitHub and opens a PR', async ({ page, request }) => {
-        // execFile('gh') on Windows resolves gh.exe only, so the API reaches the real gh, not fixtures/fake-gh/gh.cmd.
-        test.skip(process.platform === 'win32', 'fake gh is not reachable by execFile on Windows');
         const repoId = (await repos(request)).find((r) => r.name === 'base')?.id ?? '';
         const agentBefore = one(`SELECT count(*) FROM agents WHERE id = 'agent-ai-readiness'`);
         const prsBefore = fakeGhCalls().length;
@@ -475,6 +473,15 @@ test.describe('Generate AI scaffold', () => {
             expect(fakeGithubBranches('rgh-base')).toContain(branch);
             const pr = fakeGhCalls().slice(prsBefore);
             expect(pr).toEqual([expect.objectContaining({ repo: 'atlas-e2e/rgh-base', head: branch, base: 'main' })]);
+            // What the Owner sees: the PR on the Task, and the run page's steps and changes.
+            const prUrl = 'https://github.com/atlas-e2e/rgh-base/pull/1';
+            await goto(page, `/tasks/${task_id}`);
+            await expect(page.locator(`a[href="${prUrl}"]`).first()).toBeVisible();
+            const runId = one(`SELECT id FROM workflow_runs WHERE item_id = '${task_id}'`);
+            await goto(page, `/runs/${runId}`);
+            await expect(page.locator(`a[href="${prUrl}"]`).first()).toBeVisible();
+            await expect(page.getByRole('region', { name: 'Steps' })).toContainText('Steps · 1');
+            await expect(page.getByRole('region', { name: 'Changes' })).toContainText('SIMULATED.md', { timeout: 15_000 });
             // A second Generate is a second Task of its own.
             const again = await request.post(`${API}/api/projects/${projectId}/generate-ai-scaffold`, { data: { repo_id: repoId } });
             expect(again.status()).toBe(202);
