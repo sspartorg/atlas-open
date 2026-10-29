@@ -21,7 +21,7 @@ WEB_PORT=7010
 API_PORT=7001
 # Not 4600: a real agent's `atlas` MCP calls must reach this API, never the dev one.
 MCP_PORT=4820
-DB_URL="postgres://atlas:atlas@localhost:5600/${DB}"
+DB_URL="postgres://atlas:atlas@127.0.0.1:5600/${DB}"
 # Outside the repo on purpose: Claude Code walks up from its cwd for CLAUDE.md,
 # and a worktree nested in this repo would hand every guide run Atlas's own rules.
 DATA=/tmp/atlas-open-guide

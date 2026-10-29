@@ -165,5 +165,7 @@ export function resolveSpawn(bin: string, args: string[]): ResolvedSpawn {
         /* v8 ignore next */
         return { command: process.execPath, args: [entry, ...args], useShell: false };
     }
-    return { command: bin, args: quoteArgsForShell(args), useShell: process.platform === 'win32' };
+    // cmd.exe splits an unquoted path at its spaces (C:\Program Files\...), so
+    // the binary is quoted like any arg.
+    return { command: quoteArgsForShell([bin])[0]!, args: quoteArgsForShell(args), useShell: process.platform === 'win32' };
 }

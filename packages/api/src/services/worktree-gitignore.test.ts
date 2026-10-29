@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { ensureWorktreeGitignore } from './worktree-orchestrator.js';
 
 // 2026-06-10 — `.gitignore` injection that gets COMMITTED.
@@ -89,7 +89,7 @@ describe('ensureWorktreeGitignore', () => {
         const wt = await makeGitRepo();
         await exec('git', ['-C', wt, 'config', '--unset', 'user.name'], { timeout: 5_000 });
         await exec('git', ['-C', wt, 'config', '--unset', 'user.email'], { timeout: 5_000 });
-        const cfg = join(wt, '..', `${wt.split('/').pop()}-gitconfig`);
+        const cfg = join(wt, '..', `${basename(wt)}-gitconfig`);
         cleanupDirs.push(cfg);
         writeFileSync(cfg, '[user]\n\tname = atlas-app[bot]\n\temail = 1+atlas-app[bot]@users.noreply.github.com\n', 'utf8');
 

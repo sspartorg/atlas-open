@@ -118,7 +118,7 @@ describe('claudeRecordedCwd', () => {
         const real = join(tmpRoot, 'real');
         await mkdir(real);
         const link = join(tmpRoot, 'link');
-        await symlink(real, link);
+        await symlink(real, link, 'junction'); // a junction needs no admin rights on Windows; POSIX ignores the type
         expect(claudeRecordedCwd(join(link, 'worktrees', 'gone'))).toBe(
             join(await realpath(real), 'worktrees', 'gone'),
         );

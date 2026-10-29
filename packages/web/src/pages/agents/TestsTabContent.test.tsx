@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import type { IAgent } from '@atlas/shared';
@@ -819,18 +819,22 @@ describe('TestsTabContent — edit', () => {
 // ADR 0023 amendment — scope an agent in the form: read-only, what its reply
 // may say, what it may run, a judge question and the Owner's own script.
 describe('TestsTabContent — checks', () => {
+    // One change per field: this test is about the payload, and typing ~100
+    // keystrokes into the form outlasts the timeout on a loaded machine.
+    const fill = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+
     it('sends every check the form collects, and summarises them on the card', async () => {
         const writes: Array<[string, unknown]> = [];
         mount({ onWrite: (k, p) => writes.push([k, p]) });
         await userEvent.click(await screen.findByRole('button', { name: 'New test' }));
-        await userEvent.type(screen.getByLabelText('Test name'), 'stays on the menu');
-        await userEvent.type(screen.getByLabelText('Item title'), 'Who is the president?');
+        fill('Test name', 'stays on the menu');
+        fill('Item title', 'Who is the president?');
         await userEvent.click(screen.getByLabelText('Read-only agent — must not edit any file'));
-        await userEvent.type(screen.getByLabelText('Reply must match'), 'menu');
-        await userEvent.type(screen.getByLabelText('Reply must not match'), 'president');
-        await userEvent.type(screen.getByLabelText('Forbidden shell commands'), '^curl');
-        await userEvent.type(screen.getByLabelText('Judge questions'), 'It declines politely.');
-        await userEvent.type(screen.getByLabelText('Check script (bash)'), 'exit 0');
+        fill('Reply must match', 'menu');
+        fill('Reply must not match', 'president');
+        fill('Forbidden shell commands', '^curl');
+        fill('Judge questions', 'It declines politely.');
+        fill('Check script (bash)', 'exit 0');
         await userEvent.click(screen.getByRole('button', { name: 'Create test' }));
 
         await waitFor(() => expect(writes).toHaveLength(1));

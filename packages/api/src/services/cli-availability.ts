@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { AGENT_CLIS, type ICliAvailability } from '@atlas/shared';
 import { resolveCliBinary } from './cli-session-host.js';
+import { quoteArgsForShell } from './cli-model-naming.js';
 
 const execFileP = promisify(execFile);
 const CACHE_MS = 60_000;
@@ -13,8 +14,9 @@ async function probe(binary: string): Promise<{ available: boolean; version: str
     try {
         // Array-form args, no shell on POSIX. Windows needs one: the CLIs
         // install as `.cmd` shims, which execFile cannot launch without
-        // cmd.exe (same constraint as scripts/check-prereqs.ts).
-        const { stdout } = await execFileP(binary, ['--version'], {
+        // cmd.exe (same constraint as scripts/check-prereqs.ts). cmd.exe also
+        // splits an unquoted path at its spaces, so the binary is quoted.
+        const { stdout } = await execFileP(quoteArgsForShell([binary])[0]!, ['--version'], {
             timeout: PROBE_TIMEOUT_MS,
             shell: process.platform === 'win32',
             windowsHide: true,

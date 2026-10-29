@@ -16,7 +16,7 @@ import {
 // month of golden-set runs leaves behind. Deterministic: same counts, same ids,
 // every run, so a before/after comparison measures the code and not the seed.
 //
-// Usage: DATABASE_URL=postgres://atlas:atlas@localhost:5600/atlas_open_perf tsx e2e/fixtures/perf-seed.ts
+// Usage: DATABASE_URL=postgres://atlas:atlas@127.0.0.1:5600/atlas_open_perf tsx e2e/fixtures/perf-seed.ts
 // (after migrating that DB). `scripts/perf-stack.sh` does all of it.
 
 const url = process.env['DATABASE_URL'] ?? '';

@@ -12,7 +12,7 @@ import { API, apiGet } from '../helpers/api.js';
 test.afterAll(() => {
     execFileSync('pnpm', ['exec', 'tsx', 'e2e/fixtures/run-seed.ts'], {
         cwd: resolve(fileURLToPath(new URL('.', import.meta.url)), '../..'),
-        env: { ...process.env, DATABASE_URL: 'postgres://atlas:atlas@localhost:5600/atlas_open_e2e' },
+        env: { ...process.env, DATABASE_URL: 'postgres://atlas:atlas@127.0.0.1:5600/atlas_open_e2e' },
         stdio: 'ignore',
         shell: process.platform === 'win32',
     });

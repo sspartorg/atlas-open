@@ -433,7 +433,7 @@ new_token() {
         openssl rand -base64 48
     else
         head -c 48 /dev/urandom | base64
-    fi | tr -d '\n=' | tr '+/' '-_'
+    fi | tr -d '\r\n=' | tr '+/' '-_' # \r: openssl on Windows ends lines with CRLF
 }
 
 ensure_mcp_token() {
