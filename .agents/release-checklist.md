@@ -1,5 +1,28 @@
 # Release-readiness checklist — Atlas Open (this laptop)
 
+## Final state (2026-10-29, branch `chore/release-readiness`)
+
+| Suite | Result |
+|---|---|
+| `pnpm gate` (typecheck ×5, lint, knip, coverage, build, bundle budget) | **green** — shared 260, mcp 134, web 4335, api 3338 (+3 skipped) |
+| `pnpm e2e` (hermetic) | **723 passed, 0 failed** (374 skipped: `@mobile`/`@ipad` tags, visual baselines, live specs without their flags); API log 0 unhandled, 0 restarts |
+| `e2e/live/task-to-pr-live.spec.ts`, real `claude` + `gh` + GitHub + Jira | **21/21 in one run** (16.9 min, $1.78): secrets, owner MCP, happy path, question → reply, no-change Task, Stop, API restart, one at a time, expired token, stale branch, Postgres restart, Terminal, Jira bridge, all 6 marketplace agents + 2 via Tasks |
+| `pnpm e2e:functional` / `pnpm e2e:state-transitions` (against `pnpm dev`) | **29/29**, **10/10** |
+| `pnpm e2e:live` (quiet hours on the real clock: Teams + Telegram; real Chrome + FCM push) | **3/3** — the Chrome push spec hung once in `pushManager.subscribe` (Google's push service) and passed on the rerun: test push and a run park both shown |
+| Telegram (Atlas's own test send, real bot) | PASS |
+| `pnpm prod` | PASS (after R18, R19) |
+
+**Not covered here, and why**
+- **Tier 1 clean install** — `bootstrap.ps1` needs an elevated shell; waiting on the Owner to run it from `%TEMP%\atlas-fresh`. Its four bugs (R2–R5) were found by reading and reproducing each step, and fixed.
+- **Copilot CLI** — not installed on this laptop. Copilot itemless runs still read `~/.copilot/mcp-config.json` (see R10).
+- **Multi-repo Task live** — needs a second sandbox repo; creating one was blocked by the permission classifier. Covered by `workflow-engine.integration.test.ts` with real git.
+- **Teams** — no credentials; tested only against a local webhook receiver (hermetic notification specs and `pnpm e2e:live`'s quiet-hours spec).
+- **`prod:https`** — Caddy not installed (optional).
+
+**For the Owner's own machine** (gitignored files / existing containers, not changed by this branch)
+- `.env.prod`: set `DATABASE_URL=postgres://atlas:atlas@127.0.0.1:5610/atlas_open_prod` (R18).
+- The existing Postgres containers still publish on 0.0.0.0; `docker rm -f atlas-open-postgres atlas-open-postgres-prod && pnpm db:up` recreates them on 127.0.0.1 (data stays in the volumes).
+
 ## Context
 The suites are 100% green, but green only covers what they test. Before publishing and marketing,
 every user-facing scenario must be proven on this Windows laptop. Gaps found while planning:
