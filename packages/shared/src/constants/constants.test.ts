@@ -161,10 +161,9 @@ describe('guardrails', () => {
 });
 
 describe('A08 — SDLC role catalog', () => {
-    it('SDLC_ROLES has the 11 canonical roles in catalog order', () => {
+    it('SDLC_ROLES has the 10 seeded roles in catalog order', () => {
         expect(SDLC_ROLES).toEqual([
             'po',
-            'spec-writer',
             'engineer',
             'qa',
             'architect',
@@ -184,11 +183,11 @@ describe('A08 — SDLC role catalog', () => {
         }
     });
 
-    it('SDLC_ROLE_DEFAULT_STATUS marks only po/spec-writer/engineer/qa as active', () => {
+    it('SDLC_ROLE_DEFAULT_STATUS marks only po/engineer/qa as active', () => {
         const active = SDLC_ROLES.filter((r) => SDLC_ROLE_DEFAULT_STATUS[r] === 'active');
         // Mirror of `roles.default_status` seeded in migration 025 — these are
         // the SDLC chain roles that ship enabled on a fresh install.
-        expect(active.sort()).toEqual(['engineer', 'po', 'qa', 'spec-writer']);
+        expect(active.sort()).toEqual(['engineer', 'po', 'qa']);
     });
 
     it('SDLC_ROLE_DEFAULT_STATUS has an entry for every role', () => {

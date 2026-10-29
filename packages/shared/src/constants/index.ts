@@ -51,7 +51,6 @@ export const AGENT_CATEGORY_LABELS: Record<AgentCategory, string> = {
 // from the slug — always read from this map.
 export const SDLC_ROLE_LABELS: Record<SdlcRole, string> = {
     po: 'Product Owner',
-    'spec-writer': 'Specification Writer',
     engineer: 'Engineer',
     qa: 'Quality Assurance',
     architect: 'Software Architect',
@@ -63,14 +62,13 @@ export const SDLC_ROLE_LABELS: Record<SdlcRole, string> = {
     docs: 'Technical Writer',
 };
 
-// A08 — Default activation policy. Engineer + the three engineering-
-// adjacent roles (PO Writer, Spec Writer, QA Writer) ship `active` so
+// A08 — Default activation policy. Engineer + the engineering-adjacent
+// roles (PO Writer, QA Writer) ship `active` so
 // the SDLC chain keeps running on fresh installs. Everything else ships
 // `inactive`: the Owner must explicitly enable before the scheduler will
 // dispatch. Mirrors `default_status` on the `roles` table — keep in sync.
 export const SDLC_ROLE_DEFAULT_STATUS: Record<SdlcRole, AgentStatus> = {
     po: 'active',
-    'spec-writer': 'active',
     engineer: 'active',
     qa: 'active',
     architect: 'inactive',

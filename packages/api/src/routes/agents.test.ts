@@ -1084,11 +1084,11 @@ describe('agents marketplace endpoints — defensive re-throw (spy-based)', () =
     });
 });
 
-// Regression — 2026-09-12. `agents.role_id` is an FK into `roles`, but the Zod
-// schemas validate against the `SdlcRole` union in @atlas/shared, which
-// declares 10 slugs while the shipped catalog seeds 5 (po, architect,
-// engineer, qa, automation). Assigning one of the other five produced a raw
+// Regression — 2026-09-12. `agents.role_id` is an FK into `roles`. A slug the
+// `SdlcRole` union admitted but the catalog had no row for produced a raw
 // `agents_role_id_fkey` 500 — same shape as the marketplace (cli, model) hole.
+// The union now matches the seed, so an unknown slug is a Zod 400; a seeded
+// slug whose row is gone is still the service's ROLE_NOT_IN_CATALOG 400.
 describe('role_id not in the roles catalog', () => {
     const agentPayload = (id: string, extra: Record<string, unknown> = {}) => ({
         id,
@@ -1114,29 +1114,34 @@ describe('role_id not in the roles catalog', () => {
         });
         expect(created.statusCode).toBe(201);
 
-        const res = await app.inject({
-            method: 'PATCH',
-            url: '/api/agents/agent-role-guard',
-            // `spec-writer` is the one slug that is deliberately type-only:
-            // its job folded into Architect, and migration 012 pointedly did
-            // NOT seed it. `tester` / `designer` used to stand in here and
-            // stopped being uncatalogued when 012 gave them rows.
-            payload: { role_id: 'spec-writer' },
-        });
-        expect(res.statusCode).toBe(400);
-        const body = JSON.parse(res.body);
-        expect(body.code).toBe('ROLE_NOT_IN_CATALOG');
-        expect(body.error).toContain('spec-writer');
+        // `roles` is reference data truncateAll() never touches: take one row
+        // out for this test and put it back whatever happens.
+        const docs = await testDb.selectFrom('roles').selectAll().where('id', '=', 'docs').executeTakeFirstOrThrow();
+        await testDb.deleteFrom('roles').where('id', '=', 'docs').execute();
+        try {
+            const res = await app.inject({
+                method: 'PATCH',
+                url: '/api/agents/agent-role-guard',
+                payload: { role_id: 'docs' },
+            });
+            expect(res.statusCode).toBe(400);
+            const body = JSON.parse(res.body);
+            expect(body.code).toBe('ROLE_NOT_IN_CATALOG');
+            expect(body.error).toContain('docs');
+        } finally {
+            await testDb.insertInto('roles').values(docs).execute();
+        }
     });
 
-    it('POST returns 400 for an uncatalogued role', async () => {
+    it('POST returns 400 for a slug outside the SdlcRole union', async () => {
+        // `spec-writer` was in the union but never seeded; it was dropped.
         const res = await app.inject({
             method: 'POST',
             url: '/api/agents',
             payload: agentPayload('agent-role-guard-2', { role_id: 'spec-writer' }),
         });
         expect(res.statusCode).toBe(400);
-        expect(JSON.parse(res.body).code).toBe('ROLE_NOT_IN_CATALOG');
+        expect(JSON.parse(res.body).kind).toBe('validation_error');
     });
 
     it('accepts null role_id — autonomous agents sit outside the SDLC chain', async () => {
