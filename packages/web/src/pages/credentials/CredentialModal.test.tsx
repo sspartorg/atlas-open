@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../test-setup.js';
@@ -599,16 +599,13 @@ describe('CredentialModal — attribution fields reach the API', () => {
         );
         await openAppForm();
 
-        await userEvent.type(screen.getByLabelText(/^Label/), 'atlas-bot');
-        await userEvent.type(
-            screen.getByLabelText(/Bot info folder/i),
-            '/home/me/bots-info/atlas-bot'
-        );
-        await userEvent.type(screen.getByLabelText(/Installation owner/i), 'sspartorg');
-        await userEvent.type(screen.getByLabelText(/Your name/i), 'Sunny');
-        await userEvent.type(screen.getByLabelText(/Your email/i), 'sunny@acme.test');
-        await userEvent.type(screen.getByLabelText(/Your GitHub login/i), 'octocat');
-        await userEvent.type(screen.getByLabelText(/Repo scope/i), 'acme/*, mantra-*');
+        fireEvent.change(screen.getByLabelText(/^Label/), { target: { value: 'atlas-bot' } });
+        fireEvent.change(screen.getByLabelText(/Bot info folder/i), { target: { value: '/home/me/bots-info/atlas-bot' } });
+        fireEvent.change(screen.getByLabelText(/Installation owner/i), { target: { value: 'sspartorg' } });
+        fireEvent.change(screen.getByLabelText(/Your name/i), { target: { value: 'Sunny' } });
+        fireEvent.change(screen.getByLabelText(/Your email/i), { target: { value: 'sunny@acme.test' } });
+        fireEvent.change(screen.getByLabelText(/Your GitHub login/i), { target: { value: 'octocat' } });
+        fireEvent.change(screen.getByLabelText(/Repo scope/i), { target: { value: 'acme/*, mantra-*' } });
         await userEvent.click(screen.getByRole('button', { name: /Verify & save|Save credential/i }));
 
         await waitFor(() => expect(body).not.toBeNull());
@@ -640,11 +637,11 @@ describe('CredentialModal — attribution fields reach the API', () => {
             );
             await openAppForm();
 
-            await userEvent.type(screen.getByLabelText(/^Label/), 'atlas-bot');
-            await userEvent.type(screen.getByLabelText(/Bot info folder/i), '/bots/atlas');
-            await userEvent.type(screen.getByLabelText(/Installation owner/i), 'sspartorg');
+            fireEvent.change(screen.getByLabelText(/^Label/), { target: { value: 'atlas-bot' } });
+            fireEvent.change(screen.getByLabelText(/Bot info folder/i), { target: { value: '/bots/atlas' } });
+            fireEvent.change(screen.getByLabelText(/Installation owner/i), { target: { value: 'sspartorg' } });
             // Whitespace only — must be treated as "not set", not as a name.
-            await userEvent.type(screen.getByLabelText(/Your name/i), '   ');
+            fireEvent.change(screen.getByLabelText(/Your name/i), { target: { value: '   ' } });
             await userEvent.click(screen.getByRole('button', { name: /Verify & save|Save credential/i }));
 
             await waitFor(() => expect(body).not.toBeNull());
@@ -672,11 +669,11 @@ describe('CredentialModal — attribution fields reach the API', () => {
         await userEvent.click(screen.getByRole('button', { name: /Continue/i }));
         await screen.findByLabelText(/^Label/);
 
-        await userEvent.type(screen.getByLabelText(/^Label/), 'my-pat');
-        await userEvent.type(screen.getByLabelText(/^Token/), 'ghp_1234567890abcdef');
-        await userEvent.type(screen.getByLabelText(/Your name/i), 'Sunny');
-        await userEvent.type(screen.getByLabelText(/Your email/i), 'sunny@acme.test');
-        await userEvent.type(screen.getByLabelText(/Repo scope/i), 'acme/*');
+        fireEvent.change(screen.getByLabelText(/^Label/), { target: { value: 'my-pat' } });
+        fireEvent.change(screen.getByLabelText(/^Token/), { target: { value: 'ghp_1234567890abcdef' } });
+        fireEvent.change(screen.getByLabelText(/Your name/i), { target: { value: 'Sunny' } });
+        fireEvent.change(screen.getByLabelText(/Your email/i), { target: { value: 'sunny@acme.test' } });
+        fireEvent.change(screen.getByLabelText(/Repo scope/i), { target: { value: 'acme/*' } });
         await userEvent.click(screen.getByRole('button', { name: /Verify & save|Save credential/i }));
 
         await waitFor(() => expect(body).not.toBeNull());

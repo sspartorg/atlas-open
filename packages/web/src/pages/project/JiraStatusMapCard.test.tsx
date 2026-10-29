@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../test-setup.js';
@@ -43,19 +43,18 @@ describe('JiraStatusMapCard', () => {
     it('requires Ready, refuses a Jira status in two groups, then saves trimmed lists', async () => {
         const sent = mount();
         const user = userEvent.setup();
-        await user.type(screen.getByLabelText('Jira statuses for In Progress'), 'Dev, QA');
+        fireEvent.change(screen.getByLabelText('Jira statuses for In Progress'), { target: { value: 'Dev, QA' } });
         await user.click(screen.getByRole('button', { name: 'Save mapping' }));
         expect(screen.queryByText(/Jira status to Draft/)).not.toBeInTheDocument();
         expect(screen.getByText('Map at least one Jira status to Ready')).toBeInTheDocument();
         expect(sent()).toBeNull();
 
-        await user.type(screen.getByLabelText('Jira statuses for Draft'), ' Backlog , ');
-        await user.type(screen.getByLabelText('Jira statuses for Ready'), 'Selected, qa');
+        fireEvent.change(screen.getByLabelText('Jira statuses for Draft'), { target: { value: ' Backlog , ' } });
+        fireEvent.change(screen.getByLabelText('Jira statuses for Ready'), { target: { value: 'Selected, qa' } });
         await user.click(screen.getByRole('button', { name: 'Save mapping' }));
         expect(screen.getByText(/"QA" is already mapped to Ready/)).toBeInTheDocument();
 
-        await user.clear(screen.getByLabelText('Jira statuses for Ready'));
-        await user.type(screen.getByLabelText('Jira statuses for Ready'), 'Selected for Development');
+        fireEvent.change(screen.getByLabelText('Jira statuses for Ready'), { target: { value: 'Selected for Development' } });
         await user.click(screen.getByRole('button', { name: 'Save mapping' }));
         await waitFor(() => expect(sent()).not.toBeNull());
         expect(sent()).toEqual({

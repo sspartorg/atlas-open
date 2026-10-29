@@ -339,9 +339,10 @@ describe('Notifications page', () => {
             ...defaultHandlers,
         );
         renderWithProviders(<Notifications />, { initialEntries: ['/notifications?tab=in-app'] });
-        fireEvent.click(await screen.findByRole('button', { name: 'Load more' }));
+        // Text, not role: a name-filtered role query computes all 200 rows' accessible names.
+        fireEvent.click(await screen.findByText('Load more'));
         await waitFor(() => expect(seen).toEqual([null, '801']));
-        await waitFor(() => expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument());
+        await waitFor(() => expect(screen.queryByText('Load more')).not.toBeInTheDocument());
     });
 });
 

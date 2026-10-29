@@ -450,7 +450,8 @@ describe('WorkItemKanban — long columns', () => {
         );
         expect(screen.getByText('Card 49')).toBeInTheDocument();
         expect(screen.queryByText('Card 50')).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Show 10 more · 10 hidden' }));
+        // Text, not role: a name-filtered role query computes every card's accessible name.
+        fireEvent.click(screen.getByText('Show 10 more · 10 hidden'));
         expect(screen.getByText('Card 59')).toBeInTheDocument();
     });
 

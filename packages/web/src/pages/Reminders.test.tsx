@@ -95,10 +95,11 @@ describe('Reminders page — lists', () => {
         await within(region).findByText('Old 0');
         expect(seen).toContain('?status=cancelled%2Ccompleted&limit=50&offset=0');
         expect(within(region).queryByText('Old 50')).toBeNull();
-        fireEvent.click(screen.getByRole('button', { name: 'Show more history' }));
+        // Text, not role: a name-filtered role query computes every row's accessible name.
+        fireEvent.click(screen.getByText('Show more history'));
         expect(await within(region).findByText('Old 50')).toBeInTheDocument();
         expect(seen).toContain('?status=cancelled%2Ccompleted&limit=50&offset=50');
-        expect(screen.queryByRole('button', { name: 'Show more history' })).toBeNull();
+        expect(screen.queryByText('Show more history')).toBeNull();
     });
 
     it('names the Owner time zone in the subtitle', async () => {
@@ -476,8 +477,9 @@ describe('Reminders page — edge states', () => {
         );
         renderWithProviders(<Reminders />);
         await openHistory();
-        fireEvent.click(await screen.findByRole('button', { name: 'Show more history' }));
-        expect(await screen.findByRole('button', { name: 'Loading…' })).toBeDisabled();
+        // Text, not role: a name-filtered role query computes every row's accessible name.
+        fireEvent.click(await screen.findByText('Show more history'));
+        expect((await screen.findByText('Loading…')).closest('button')).toBeDisabled();
     });
 });
 
