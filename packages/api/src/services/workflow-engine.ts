@@ -461,18 +461,19 @@ export async function onStepFinished(agentRunId: string): Promise<void> {
     );
 }
 
+const RETRY_MARKER = '[atlas] Retrying this step automatically at';
+
 /**
  * A crashed step gets one more try before the Owner hears about it.
  *
- * ponytail: an in-process timer. An API restart during the 30 s loses it and
- * the run sits with no live step until reconcile parks it ten minutes later.
- * Persist a `retry_at` if that window ever matters.
+ * The timer is in-process; an API restart during the 30 s loses it, and
+ * `resumeLostRetries` at boot starts the retry the dead process owed.
  */
 async function scheduleStepRetry(run: RunRow, crashedStepId: string): Promise<void> {
     const at = new Date(Date.now() + STEP_RETRY_BACKOFF_MS).toISOString();
     await db
         .updateTable('agent_runs')
-        .set({ output_text: sql`coalesce(output_text, '') || ${`\n[atlas] Retrying this step automatically at ${at}.`}` as never })
+        .set({ output_text: sql`coalesce(output_text, '') || ${`\n${RETRY_MARKER} ${at}.`}` as never })
         .where('id', '=', crashedStepId)
         .execute();
     // Stamp updated_at so the reconcile window starts fresh.
@@ -497,6 +498,33 @@ export async function retryStep(runId: string, crashedStepId: string): Promise<v
         .executeTakeFirst();
     if (live) return;
     await spawnNode(run, crashedStepId);
+}
+
+/**
+ * Boot: retries a dead process scheduled but never ran — a crashed step that
+ * carries the retry marker, on a still-running run, with no retry step after
+ * it. Found live: killing the API also killed the CLI, the dying process
+ * recorded the error and armed its timer, and the run sat ten minutes until
+ * reconcile parked it as lost.
+ */
+export async function resumeLostRetries(): Promise<number> {
+    const owed = await db
+        .selectFrom('agent_runs as ar')
+        .innerJoin('workflow_runs as wr', 'wr.id', 'ar.workflow_run_id')
+        .select(['wr.id as runId', 'ar.id as stepId'])
+        .where('wr.status', '=', 'running')
+        .where('ar.status', '=', 'error')
+        .where('ar.parent_run_id', 'is', null)
+        .where('ar.output_text', 'like', `%${RETRY_MARKER}%`)
+        .where(({ not, exists, selectFrom }) =>
+            not(exists(selectFrom('agent_runs as retry').select('retry.id').whereRef('retry.parent_run_id', '=', 'ar.id'))),
+        )
+        .execute();
+    for (const { runId, stepId } of owed) {
+        // Never fails boot: a retry that cannot start leaves the run to reconcile.
+        await retryStep(runId, stepId).catch((err: unknown) => console.warn(`[task-run-retry] ${runId}: ${(err as Error).message}`));
+    }
+    return owed.length;
 }
 
 // ─── Park / resume ──────────────────────────────────────────────────────────

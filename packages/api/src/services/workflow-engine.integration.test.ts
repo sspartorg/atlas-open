@@ -69,6 +69,7 @@ import {
     onStepFinished,
     reconcileWorkflowRuns,
     resumeWorkflowRun,
+    resumeLostRetries,
     retryStep,
     startTaskRun,
     STEP_RETRY_BACKOFF_MS,
@@ -283,6 +284,21 @@ describe('task run — a crashed agent is retried once', () => {
 
         await finishStep('completed', 'done');
         expect(await runOf(runId)).toMatchObject({ status: 'completed' });
+    });
+
+    // Found live: an API restart inside the backoff took the timer with it, and
+    // the run sat ten minutes until reconcile parked it as lost.
+    it('starts the retry a restarted API owed, once', async () => {
+        const runId = await startTaskRun('ATL-2');
+        const crashed = await crash(RESTART);
+        vi.clearAllTimers(); // the process that armed the timer is gone
+
+        expect(await resumeLostRetries()).toBe(1);
+        await vi.waitFor(() => expect(spawned).toHaveLength(2));
+        const retry = await testDb.selectFrom('agent_runs').select('parent_run_id').where('id', '=', spawned[1]!.runId).executeTakeFirstOrThrow(); // reason: length asserted above
+        expect(retry.parent_run_id).toBe(crashed);
+        expect(await resumeLostRetries()).toBe(0);
+        expect(await runOf(runId)).toMatchObject({ status: 'running' });
     });
 
     it('parks, saying it retried, when the retry crashes too', async () => {
