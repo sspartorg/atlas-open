@@ -64,6 +64,7 @@ function asComment(
         id: number;
         author: 'owner' | 'agent';
         agent_id: string | null;
+        author_name: string | null;
         item_id: string;
         body: string;
         edited_at: string | null;
@@ -75,6 +76,7 @@ function asComment(
         id: row.id,
         author: row.author,
         agent_id: row.agent_id,
+        author_name: row.author_name,
         issue_type,
         issue_id: row.item_id,
         body: row.body,
@@ -152,6 +154,10 @@ export const commentsService = {
                 .values({
                     author: data.author,
                     agent_id: agentId,
+                    // Copied, not joined: agent_id is ON DELETE SET NULL.
+                    author_name: data.author === 'agent' && agentId
+                        ? trx.selectFrom('agents').select('name').where('id', '=', agentId)
+                        : null,
                     item_id: data.issue_id,
                     body: data.body,
                 })

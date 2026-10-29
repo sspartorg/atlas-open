@@ -11,8 +11,8 @@
 //     with ON DELETE RESTRICT. A manifest naming a model that is not registered
 //     cannot be installed at all — this is exactly how marketplace install
 //     broke once before (see `packages/api/AGENTS.md`).
-//   - `agents.role_id` is an FK into `roles`, and five `SdlcRole` slugs are
-//     type-level only with no seeded row (`.agents/role-catalog.md`).
+//   - `agents.role_id` is an FK into `roles`; a catalog `role_id` with no
+//     seeded row cannot be installed.
 //   - A workflow template naming an agent that is not in the catalog installs a
 //     graph whose node can never resolve; the run parks on first dispatch.
 //

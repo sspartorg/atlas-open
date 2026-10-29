@@ -672,6 +672,9 @@ export interface CommentsTable {
     id: Generated<number>;
     author: 'owner' | 'agent';
     agent_id: StrN;
+    // Migration 005 — the agent's name when the comment was written; survives
+    // the agent being deleted (agent_id is ON DELETE SET NULL).
+    author_name: StrN;
     item_id: string;
     body: string;
     edited_at: TSn;

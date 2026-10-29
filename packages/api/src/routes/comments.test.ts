@@ -237,6 +237,34 @@ describe('GET /api/comments', () => {
         expect(body).toHaveLength(1);
         expect(body[0].body).toBe('hello');
     });
+
+    it("keeps an agent comment's author_name after the agent is deleted", async () => {
+        await insertAgent({ id: 'agent-doomed', name: 'Doomed Agent' });
+        const created = await commentsService.create({
+            author: 'agent',
+            agent_id: 'agent-doomed',
+            issue_type: 'task',
+            issue_id: 'ATL-1',
+            body: 'my last words',
+        });
+        expect(created.author_name).toBe('Doomed Agent');
+        const owner = await commentsService.create({ author: 'owner', issue_type: 'task', issue_id: 'ATL-1', body: 'ok' });
+        expect(owner.author_name).toBeNull();
+
+        await testDb.deleteFrom('agents').where('id', '=', 'agent-doomed').execute();
+
+        const list = JSON.parse(
+            (await app.inject({ method: 'GET', url: '/api/comments?issue_type=task&issue_id=ATL-1' })).body,
+        ) as IComment[];
+        const comment = list.find((c) => c.id === created.id);
+        expect(comment).toMatchObject({ agent_id: null, author_name: 'Doomed Agent' });
+
+        const activity = JSON.parse(
+            (await app.inject({ method: 'GET', url: '/api/issues/task/ATL-1/activity' })).body,
+        ) as IActivityItem[];
+        const fromFeed = activity.find((a) => a.kind === 'comment' && a.data.id === created.id);
+        expect(fromFeed?.data).toMatchObject({ agent_id: null, author_name: 'Doomed Agent' });
+    });
 });
 
 describe('POST /api/comments', () => {
