@@ -36,7 +36,8 @@ const child = spawn(cmd, args, {
 });
 child.on('error', (err) => {
     if (httpsPort && err.code === 'ENOENT') {
-        console.error('ATLAS_HTTPS_PORT is set but `caddy` is not installed (brew install caddy).');
+        const install = { win32: 'winget install CaddyServer.Caddy', darwin: 'brew install caddy' }[process.platform] ?? 'see https://caddyserver.com/docs/install';
+        console.error(`ATLAS_HTTPS_PORT is set but \`caddy\` is not installed (${install}).`);
     } else {
         console.error(err);
     }
