@@ -831,6 +831,8 @@ function simulateRun(
     issueType: IssueType | null,
     issueId: string | null,
     prompt: string,
+    /** The run's worktree; null for a throwaway folder. */
+    worktree: string | null,
 ): void {
     const lines = [
         'Analyzing the issue context...',
@@ -854,6 +856,14 @@ function simulateRun(
             // would turn `done` into a fail — lets AI-disabled environments
             // (e2e, demos) walk a workflow end to end.
             void (async () => {
+                // A simulated agent edits nothing, so its Task finishes with no
+                // PR. ATLAS_SIMULATED_EDIT=1 (the e2e stack) makes it leave one
+                // tracked change, so delivery — commit, push, PR, or the park
+                // when those fail — runs end to end too.
+                if (worktree && process.env['ATLAS_SIMULATED_EDIT'] === '1') {
+                    appendFileSync(join(worktree, 'SIMULATED.md'), `Simulated run ${runId}
+`);
+                }
                 const rows = await db
                     .selectFrom('agent_checklists')
                     .select('id')
@@ -1963,7 +1973,7 @@ export async function spawnAgentRun(
                     copilotUserAgentPath,
                 });
             } else {
-                simulateRun(runId, agentId, issueType, issueId, fullPrompt);
+                simulateRun(runId, agentId, issueType, issueId, fullPrompt, artefactTmpRoot ? null : cwd);
             }
         })().catch((err: unknown) => {
             // Anything thrown between promotion and spawn would otherwise be

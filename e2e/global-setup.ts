@@ -205,6 +205,8 @@ export function startApi(
                 WEB_PORT: String(WEB_PORT),
                 DATABASE_URL: dbUrl(o.dbName),
                 ATLAS_AI_ENABLED: String(o.aiEnabled),
+                // A simulated agent leaves one tracked edit, so delivery runs.
+                ...(o.live ? {} : { ATLAS_SIMULATED_EDIT: '1' }),
                 // The suite drives writes over plain HTTP with no browser
                 // headers, so it opts out of the generated MCP write token.
                 ATLAS_MCP_TOKEN_OPEN: '1',
