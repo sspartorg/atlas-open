@@ -565,6 +565,8 @@ export async function cliSessionsRoutes(app: FastifyInstance): Promise<void> {
                 cliSessionId,
                 model,
                 initialPrompt: initialPrompt ?? undefined,
+                // Atlas made this worktree from the project's repo for this session.
+                trustWorkspace: true,
                 gitConfigPath,
                 ghToken,
             });
