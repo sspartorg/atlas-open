@@ -10,9 +10,8 @@ When a stub is shipped (or removed), delete its row here AND update the page doc
 
 | Feature | Location (file:line) | Page doc | Trigger UI | What it should do | Blocking on |
 |---|---|---|---|---|---|
-| **SSH key credential** | `CredentialModal.tsx:415-432` | [`20-credentials`](pages/20-credentials.md) | Kind picker radio (disabled) | Add an SSH key as a credential kind | Backend support for ssh kind |
-| **Prompt formatting toolbar** | `PromptTab.tsx:157-183` | [`16-agent-detail`](pages/16-agent-detail.md) | Toolbar icons not wired | Markdown formatting actions in the prompt editor | Editor library decision |
-| **Search → "Create from search"** | `Search.tsx:138-140` (`createType`) | [`14-search`](pages/14-search.md) | Empty state's **Create a Task / Sub-task** button → toast "Create from search is not wired up yet." | One-click create with prefilled fields | New item creation from search |
+
+None today. The last three — the SSH key radio, the Prompt tab formatting toolbar and Search's **Create a Task / Sub-task** button — were **removed** from the UI for launch (not shipped); add them back as rows only when a control that toasts or disables reappears.
 
 ---
 
@@ -52,4 +51,4 @@ Four rows were **deleted, not re-dated**: *Verify credential*, *Check expiries (
 
 This is the sweep `conventions.md` prescribes when a UI file is deleted, and it had not been run — the same drift the B14 autonomous-tab rip-out produced. A stale row here is worse than a missing one: the triage rule tells a tester *"a stub is not a bug"*, so a row for a deleted control teaches them to ignore a real absence.
 
-**3 rows remain** (the table above). Anything citing this file's count should use that number.
+**0 rows remain** (the table above) — the last three were removed from the UI for launch. Anything citing this file's count should use that number.

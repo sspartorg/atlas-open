@@ -8,7 +8,6 @@ import { useProjects } from '../hooks/useProjects.js';
 import { useProjectLabels } from '../hooks/useProjectLabels.js';
 import { useSettings } from '../hooks/useSettings.js';
 import { useSearch, useDebouncedValue } from '../hooks/useSearch.js';
-import { useToast } from '../hooks/useToast.js';
 import { ATLAS_PALETTE } from '../theme/tokens.js';
 import { SearchModeToggle, type SearchMode } from './search/SearchModeToggle.js';
 import { SearchFilterBuilder } from './search/SearchFilterBuilder.js';
@@ -24,7 +23,6 @@ import {
     promptHits,
     type FilterState,
     type SearchHit,
-    type SearchType,
 } from './search/searchViewModel.js';
 import { useSetPageTitle } from '../components/shell/index.js';
 import { PageHeader } from '../components/PageHeader.js';
@@ -37,7 +35,6 @@ import { PageHeader } from '../components/PageHeader.js';
 // so they're still filtered client-side and mixed into the result set.
 export function Search() {
     useSetPageTitle('Search');
-    const toast = useToast();
     const [urlParams, setUrlParams] = useSearchParams();
     const { data: agents = [] } = useAgentsWithPrompts();
     const { data: projects = [] } = useProjects();
@@ -135,10 +132,6 @@ export function Search() {
         }
     }
 
-    function createType(_type: SearchType) {
-        toast.show({ message: 'Create from search is not wired up yet.' });
-    }
-
     return (
         <Box sx={{ px: { xs: 3, md: 8 }, py: 4 }}>
             <PageHeader
@@ -215,7 +208,6 @@ export function Search() {
                     queryText={mode === 'query' ? committedQuery : null}
                     onDropStatus={dropStatus}
                     onDropProject={dropProject}
-                    onCreateType={createType}
                 />
             ) : (
                 <SearchResults

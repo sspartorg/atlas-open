@@ -67,10 +67,10 @@ describe('CredentialModal — open add mode (kind view)', () => {
         expect(screen.getByText('Add credential')).toBeInTheDocument();
     });
 
-    it('shows three credential type options', async () => {
+    it('shows the two credential type options', async () => {
         renderWithProviders(<CredentialModal open mode={{ kind: 'add' }} onClose={vi.fn()} />);
         expect(screen.getByText('Personal Access Token')).toBeInTheDocument();
-        expect(screen.getByText('SSH key')).toBeInTheDocument();
+        expect(screen.queryByText('SSH key')).not.toBeInTheDocument();
         expect(screen.getByText('GitHub App')).toBeInTheDocument();
     });
 

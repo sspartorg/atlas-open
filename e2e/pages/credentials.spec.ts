@@ -18,10 +18,7 @@ test.describe('/settings/credentials', () => {
         await expect(dialog).toBeVisible();
         // Kind view: FormHeading renders as <p>, assert text inside dialog
         await expect(dialog.getByText('Add credential')).toBeVisible();
-        // PAT radio is the only enabled kind
         await expect(dialog.getByRole('radio', { name: /personal access token/i })).toBeVisible();
-        // SSH and App password are disabled placeholders
-        await expect(dialog.getByRole('radio', { name: /ssh key/i })).toBeVisible();
         await expect(dialog.getByRole('radio', { name: /github app/i })).toBeVisible();
         // Close without submitting
         await page.keyboard.press('Escape');
