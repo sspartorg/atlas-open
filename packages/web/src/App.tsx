@@ -2,6 +2,8 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Typography from '@mui/material/Typography';
 import { Sidenav, Topbar, ErrorBoundary } from './components/index.js';
 import { BrandedFallback } from './components/BrandedFallback.js';
 import {
@@ -172,7 +174,7 @@ function AppShell() {
 
 function RouteGuard() {
     const location = useLocation();
-    const { data: settings, isLoading } = useSettings();
+    const { data: settings, isLoading, isError, refetch } = useSettings();
 
     // F-003 fix: use the BrandedFallback so the Atlas logo is visible
     // during the settings fetch. The previous bare CircularProgress on
@@ -184,6 +186,39 @@ function RouteGuard() {
     // slow 4G that wait chained onto every cold load). The wrapper keeps the
     // route at one position in the tree, so revealing it never remounts it;
     // `display: contents` makes the wrapper invisible to layout.
+    // No settings because the API is down (Docker stopped, API crashed or
+    // still booting) is not a new install: say so and stay on this URL,
+    // instead of sending the Owner through onboarding again.
+    if (isError && !settings) {
+        return (
+            <Box
+                role="alert"
+                sx={{
+                    minHeight: '100vh',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 2,
+                    px: 2,
+                    textAlign: 'center',
+                    background: ATLAS_PALETTE.pageBg,
+                }}
+            >
+                <Typography component="h1" variant="h5" sx={{ fontWeight: 600 }}>
+                    Atlas can&apos;t reach its API
+                </Typography>
+                <Typography sx={{ color: ATLAS_PALETTE.slate60, maxWidth: 480 }}>
+                    Check that <code>pnpm dev</code> is still running and Docker Desktop is started (<code>pnpm doctor</code>{' '}
+                    tells you which). This page retries every few seconds.
+                </Typography>
+                <Button variant="contained" onClick={() => void refetch()}>
+                    Retry
+                </Button>
+            </Box>
+        );
+    }
+
     let route = <Outlet />;
     if (!isLoading && !settings?.onboarding_complete && location.pathname !== '/onboarding') {
         route = <Navigate to="/onboarding" replace />;

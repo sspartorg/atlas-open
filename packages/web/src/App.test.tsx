@@ -88,6 +88,34 @@ describe('App', () => {
         resolveSettings(undefined);
     });
 
+    it('API unreachable: says so and keeps the page instead of sending the Owner to onboarding', async () => {
+        queryClient.clear();
+        window.history.pushState({}, '', '/tasks');
+        let up = false;
+        // First wins in MSW: this settings handler shadows the default one.
+        server.use(
+            http.get(`${BASE}/settings`, () =>
+                up
+                    ? HttpResponse.json({ id: 1, owner_name: 'Owner', onboarding_complete: 1 })
+                    : new HttpResponse(null, { status: 500 })
+            ),
+            ...defaultHandlers
+        );
+        render(
+            <ThemeModeProvider>
+                <App />
+            </ThemeModeProvider>
+        );
+        expect(await screen.findByText("Atlas can't reach its API")).toBeInTheDocument();
+        expect(document.location.pathname).toBe('/tasks');
+
+        up = true;
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        await waitFor(() => expect(screen.queryByText("Atlas can't reach its API")).not.toBeInTheDocument());
+        expect(document.location.pathname).toBe('/tasks');
+        window.history.pushState({}, '', '/');
+    });
+
     it('redirects to /onboarding when onboarding_complete is 0', async () => {
         server.use(
             ...defaultHandlers,
