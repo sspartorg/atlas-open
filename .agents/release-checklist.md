@@ -136,3 +136,30 @@ Every box is ticked or explicitly marked out of scope with a reason. A final `pn
 | T4-X1 | 4 | Raw `/api/credentials`, `/api/credentials/:id`, `/api/integrations/jira`, `/api/settings` never contain the GitHub or Jira token. | PASS |
 | T3-TG | 3 | Telegram: Atlas's own `testExternalNotification` against the real bot and chat. | PASS (`@Jarvis_sentinal_bot`) |
 | — | 2 | Sandbox repo's `node --test test/` breaks on Node 22+ (not an Atlas bug; the agent correctly reported red tests and Atlas correctly parked). | Fixed in sandbox |
+
+## Campaign 2 (2026-10-29/30, branch `chore/launch-confidence-2`)
+
+Goal: find what the green suites did not test. Method: a README/guide/page-doc claims → test trace, an every-route
+responsive sweep, the installer run for real from a fresh clone, and failure probes (API down, LAN reachability).
+
+| # | Area | Finding | Status |
+|---|---|---|---|
+| R23 | security | **Launch blocker.** `vite --host` (dev, and `vite preview` under `pnpm start`) bound the web to 0.0.0.0. It proxies `/api` to an API with no login: from the same Wi-Fi anyone could read everything, and with a forged `Origin` header write — verified `POST` via 192.168.x.x:4300 → 201, Terminal sessions included. | Fixed 7f1c5c5: web binds 127.0.0.1 unless `ATLAS_LAN_ACCESS=true`; Caddy `default_bind`; README says what LAN mode means. Verified on a fresh clone: LAN refused, localhost OK |
+| R24 | install | **Launch blocker.** `bootstrap.ps1` crashed on every machine without gh or copilot: `"Install $DisplayName?"` reads the variable `DisplayName?` (StrictMode). | Fixed 8155256 + `bootstrap-ps1.test.ts` (PowerShell AST check) |
+| R25 | install | **Launch blocker.** Windows PowerShell 5.1 + `ErrorActionPreference=Stop` turns any redirected native stderr line into a terminating error: `claude mcp get atlas` for a new user, `gh auth status` always, copilot's first-run notice. Also `Ensure-ServerContainer` threw on a new (empty) `~/.copilot/mcp-config.json`. | Fixed 13f4fad: all 13 redirected native calls via `Invoke-Native`; AST test that none escapes; tests for both |
+| T1 | install | `bootstrap.ps1 -NonInteractive`, elevated, fresh clone (`%TEMP%\atlas-fresh`): exit 0; second run keeps `.env`, tokens, node_modules; Copilot config gets one `atlas` entry; `pnpm doctor` passes; `pnpm dev` → `/api/health` ok, web 200, proxy ok, MCP `initialize` ok. | PASS (after R24, R25) |
+| R26 | web | API unreachable (Docker stopped, API crashed/booting): RouteGuard read the failed settings fetch as "not onboarded" and redirected every page to the first-run wizard, losing the URL. | Fixed 770f049: "Atlas can't reach its API" + Retry, URL kept, auto-retry every 5 s; unit + `e2e/flows/api-unreachable.spec.ts` |
+| R27 | harness | The only hermetic run → push → PR test was skipped on Windows (fake `gh` is a .cmd; `execFile('gh')` finds .exe only) and CI only builds — so it ran nowhere. | Fixed 659b506: global setup compiles a `gh.exe` forwarder with csc.exe; test also asserts the PR link, Steps and Changes in the UI |
+| R28 | harness | fake-claude wrote transcripts under the old project-dir encoding, so no fake session's history was ever ingested ("Transcript unavailable"). | Fixed 19cc9bf |
+| R29 | web/a11y | `/terminal/layout` had no h1. | Fixed 54f8258 (sr-only h1) |
+| R30 | docs | 10 README claims that no longer matched the code (gh is required for PRs; doctor checks Docker not Postgres; DB name; PowerShell MCP command; copilot is the npm CLI; no "Free" label in Analytics; dev/start both migrate; …). | Fixed 89225ca |
+| T2-RESP | ui | `e2e/responsive/all-routes.spec.ts`: 29 routes × phone 390 / iPad 834 / tablet landscape 1194 / laptop 1366, plus 6 core routes on Firefox and iPhone WebKit — heading, nav reachable, no sideways scroll, no control past the right edge. Screenshots reviewed by eye. | PASS 128/128 |
+| T2-UI | ui | New journeys driven through the UI, asserted after reload: agent lifecycle (7), marketplace install, Run now + log download, Queue cancel, scratch pad autosave, search click-through, terminal history, onboarding Finish, run page Resume/Stop. | PASS |
+| T2-MULTI | live | Two-repo Task with real `claude` + GitHub (`sspartorg/atlas-open-sandbox-2`): one PR, on the repo it changed. | PASS |
+| T4-SEC | security | API and MCP bind 127.0.0.1; browser storage holds UI preferences only. | PASS |
+
+**Still open**
+- **Owner:** recreate the two Postgres containers so they publish on 127.0.0.1 (`db:up` reuses existing containers by design; new installs are fine). Data stays in the named volumes: `docker rm -f atlas-open-postgres atlas-open-postgres-prod && pnpm db:up && pnpm db:up:prod`.
+- Copilot CLI: installed by the bootstrap run (1.0.105) but not signed in; Copilot agent runs untested (Owner decision: later).
+- `prod:https` (Caddy) still not run here; the `default_bind` line is untested at runtime.
+- CI runs `build` only. The hermetic e2e and unit suites run on this laptop only.
