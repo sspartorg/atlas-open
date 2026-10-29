@@ -47,7 +47,7 @@ The spec drives the API (plus one UI assertion per step) with real `claude`, usi
 - [ ] No GitHub auth / push rejected → run fails with the reason on the run page, not only in the log
 - [ ] Copilot CLI agent: the happy path again with the standalone `copilot` CLI
 - [ ] Teardown closes PRs and deletes every `atlas/task/LIV-*` branch in the sandbox
-- [ ] DB reset against a repo that still has `atlas/task/<KEY>-1` from an earlier install → new run must not fail delivery on a non-fast-forward push (to verify)
+- [x] DB reset against a repo that still has `atlas/task/<KEY>-1` from an earlier install → delivers (T2-STALE)
 
 ## Tier 3 — Integrations, live
 - [ ] Jira bridge: real JQL source → Tasks imported, assigned to the agent; status mapping writes back (extend `e2e/flows/jira-bridge.spec.ts` with an `E2E_LIVE` variant)
@@ -98,6 +98,9 @@ Every box is ticked or explicitly marked out of scope with a reason. A final `pn
 | R18 | 1/4 | **Launch blocker.** Both example env files shipped `DATABASE_URL` with no user/password while compose creates the container as atlas/atlas: a copied `.env` (bootstrap's path) failed at `db:wait` ("client password must be a string"). Found by `pnpm prod`. Also: both Postgres ports published on every interface with public default credentials. | Fixed: examples match compose defaults; ports bound to 127.0.0.1 (applies to newly created containers) |
 | R19 | 4 | `pnpm prod` never started the web on Windows: `serve.mjs` spawned `vite`, a .cmd shim there (ENOENT). | Fixed: runs vite's bin/vite.js under the current node |
 | T4-PROD | 4 | `pnpm prod` (build → prod DB → migrate → serve): API health, built web (HTML + 134 KB bundle), web→API proxy, MCP `initialize` on 4600. A live Task was not run on prod (same code path as T2; avoids writing to a prod DB). | PASS after R18/R19 |
+| R20 | 2 | An expired/revoked token parked with git's "could not read Username … terminal prompts disabled" — no mention of GitHub or the credential. Found live. | Fixed: failure parks lead with "GitHub rejected this repo's credential … Update it under Settings → Credentials, then Resume."; live: park → token fix → Resume → PR |
+| R21 | 4 | **The API exited when Postgres restarted** (idle pooled client 'error' with no pool listener → uncaught). A Docker Desktop update or sleep/wake would take Atlas down. Found live. | Fixed: pool error listener; live: container restarted under the API, next write OK |
+| T2-STALE | 2 | A branch `atlas/task/<key>` left on GitHub by an earlier install (DB reset renumbers Tasks). | PASS: delivered over it |
 | T5 | 5 | Owner decisions: keep the `.gitignore` commit + README note (done); hide SSH key radio and Create from search (done; the formatting toolbar was already gone); C1 author_name and C2 roles narrowing (in progress). | — |
 | T2 | 2 | `e2e/live/task-to-pr-live.spec.ts` against real `claude`, `gh`, GitHub: happy path, question → reply → PR, no-change Task, Stop stays stopped, API restart → retry → PR, one agent at a time. | PASS, all 6 (two runs: 4 + 2 after the R14 fix) |
 | T3-JIRA | 3 | Same spec, Jira bridge: a throwaway ATL issue (JQL `key = …`) imports as a Task, runs to a PR, Atlas comments on the issue, issue deleted. | PASS (ATL-18, deleted afterwards) |

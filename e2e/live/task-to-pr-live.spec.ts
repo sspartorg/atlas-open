@@ -250,6 +250,58 @@ test('one agent at a time: a second Task waits until the first is done', async (
     expect(overlap).toBe(false);
 });
 
+// The everyday failure: the token expired. The first fetch is turned away, the
+// run parks saying which credential to fix, and after a good token Resume delivers.
+test('an expired token parks saying what to fix, and Resume after a token fix delivers', async ({ request }) => {
+    const line = `Delivered after a token fix ${STAMP}`;
+    const patch = (token: string) => request.patch(`${API}/api/credentials/${credId}`, { data: { token } });
+    expect((await patch('ghp_expired0000000000000000000000000000')).ok()).toBe(true);
+    try {
+        const taskId = await createTask(request, `Append after token fix ${STAMP}`, `Append exactly this line to the end of README.md and change nothing else:
+
+${line}`);
+        const parked = await waitRun(request, taskId, (r) => r.status === 'waiting_for_owner', ['error', 'cancelled', 'completed']);
+        expect(parked.park_reason).toMatch(/^GitHub rejected this repo's credential.*Settings → Credentials, then Resume\./);
+
+        expect((await patch(gh('auth', 'token'))).ok()).toBe(true);
+        await post(request, `/api/workflow-runs/${parked.id}/resume`, {});
+        const run = await waitRun(request, taskId, (r) => r.status === 'completed', ['error', 'cancelled']);
+        rememberPrs(run);
+        expect(gh('pr', 'diff', run.pr_url!)).toContain(line);
+    } finally {
+        await patch(gh('auth', 'token'));
+    }
+});
+
+// A reset DB numbers Tasks from 1 again, and the remote may still hold
+// atlas/task/<key> from the earlier install. The new Task must still deliver.
+test('a branch left on GitHub by an earlier install does not block delivery', async ({ request }) => {
+    const key = `LIV-${(await get<unknown[]>(request, `/api/tasks?project_id=${projectId}`)).length + 1}`;
+    const base = gh('api', `repos/${REPO}/commits/main`, '--jq', '.parents[0].sha');
+    gh('api', '-X', 'POST', `repos/${REPO}/git/refs`, '-f', `ref=refs/heads/atlas/task/${key}`, '-f', `sha=${base}`);
+    const line = `Delivered over a stale branch ${STAMP}`;
+    const taskId = await createTask(request, `Append over stale branch ${STAMP}`, `Append exactly this line to the end of README.md and change nothing else:
+
+${line}`);
+    expect(taskId).toBe(key);
+    const run = await waitRun(request, taskId, (r) => r.status !== 'running', [], 12 * 60_000);
+    rememberPrs(run);
+    expect(run.status, run.park_reason ?? '').toBe('completed');
+    expect(gh('pr', 'diff', run.pr_url!)).toContain(line);
+});
+
+// Postgres restarts under a running API (Docker Desktop update, a reboot of
+// the container): the API keeps serving once it is back, without a restart.
+test('the API recovers by itself after Postgres restarts', async ({ request }) => {
+    execFileSync('docker', ['restart', 'atlas-open-postgres'], { stdio: 'ignore', timeout: 120_000 });
+    await expect
+        .poll(async () => (await request.get(`${API}/api/tasks?project_id=${projectId}`)).status(), { timeout: 90_000, intervals: [2_000] })
+        .toBe(200);
+    // Unassigned, so it stays a draft and starts no agent.
+    const { id } = await post<{ id: string }>(request, '/api/tasks', { project_id: projectId, title: `After a DB restart ${STAMP}` });
+    expect((await get<{ status: string }>(request, `/api/tasks/${id}`)).status).toBe('draft');
+});
+
 // The Jira bridge, for real: a throwaway issue (JQL `key = <it>`, so nothing
 // else is touched) imports as a Task for Solo Engineer, runs to a PR, and the
 // next sync comments on the issue. Needs LIVE_JIRA_SITE / _EMAIL / _TOKEN and
