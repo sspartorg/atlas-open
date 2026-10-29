@@ -55,8 +55,12 @@ const greeting = resumeId
     : `[fake-claude] new session ${sessionId ?? '(no id)'} (model=${model})\r\n`;
 process.stdout.write(greeting);
 
+// Claude's own rule, mirrored by the api's encodeClaudeProjectDir: every
+// character outside [a-zA-Z0-9-] becomes `-`, nothing collapsed or trimmed.
+// The old `[:\\/]` guess kept the `__` in Atlas's worktree dir names, so the
+// transcript landed where ingest never looks.
 function encodeCwd(p) {
-    return p.replace(/[:\\/]/g, '-').replace(/^-+/, '');
+    return p.replace(/[^a-zA-Z0-9-]/g, '-');
 }
 
 const claudeSid = sessionId ?? resumeId;
