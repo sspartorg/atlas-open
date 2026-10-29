@@ -279,3 +279,34 @@ test.describe('Jira bridge', () => {
         expect(issue['fields'].comment.comments.length, 'Atlas commented on the issue').toBeGreaterThan(0);
     });
 });
+
+// Every marketplace agent once, on demand (no item): it installs, runs to the
+// end, and the agents that write through `mcp__atlas__*` reach THIS instance —
+// itemless runs get its `atlas` even when ~/.claude.json names another.
+// Jira to Epic ships with unfilled placeholders and must refuse to import.
+// Opt-in on top of E2E_LIVE_PR (AI Readiness runs Opus): LIVE_MARKETPLACE=1.
+test.describe('marketplace agents', () => {
+    test.skip(process.env['LIVE_MARKETPLACE'] !== '1', 'set LIVE_MARKETPLACE=1');
+    type AgentRun = { id: string; status: string; output_text: string | null; outcome_kind: string | null; total_cost_usd: number | null };
+
+    for (const slug of ['agent-ai-news', 'agent-market-research', 'agent-regulations', 'agent-knowledge-base', 'agent-ai-readiness', 'agent-jira-to-epic']) {
+        test(`${slug} installs and runs to the end`, async ({ request }) => {
+            const res = await request.post(`${API}/api/marketplace/agents/${slug}/install`, { data: {} });
+            expect([200, 201, 409], await res.text()).toContain(res.status());
+            const before = (await get<Array<{ id: string }>>(request, `/api/tasks?project_id=${projectId}`)).length;
+
+            const { runId } = await post<{ runId: string }>(request, '/api/run', { agent_id: slug, project_id: projectId });
+            let run: AgentRun | null = null;
+            await expect
+                .poll(async () => (run = await get<AgentRun>(request, `/api/run/${runId}`)).status, { timeout: 25 * 60_000, intervals: [10_000] })
+                .toMatch(/^(completed|error|cancelled)$/);
+            const out = run!.output_text ?? '';
+            const created = (await get<Array<{ id: string }>>(request, `/api/tasks?project_id=${projectId}`)).length - before;
+            test.info().annotations.push({ type: 'result', description: `${run!.status} · outcome ${run!.outcome_kind} · $${run!.total_cost_usd ?? '?'} · ${created} task(s)` });
+
+            expect(run!.status, out.slice(-1500)).toBe('completed');
+            expect(out).not.toMatch(/ECONNREFUSED|Failed to connect/);
+            if (slug === 'agent-jira-to-epic') expect(created, 'an unconfigured importer imports nothing').toBe(0);
+        });
+    }
+});

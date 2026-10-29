@@ -52,6 +52,9 @@ async function killTree(pid: number, platform: NodeJS.Platform): Promise<void> {
 }
 
 export default async function globalTeardown(): Promise<void> {
+    // Setup started nothing, so stop nothing: the PID file may belong to a
+    // full `pnpm e2e` still running beside this one (or be stale).
+    if (process.env['E2E_SKIP_SETUP'] === '1') return;
     if (!existsSync(PID_FILE)) return;
     let pids: PidFile;
     try {
