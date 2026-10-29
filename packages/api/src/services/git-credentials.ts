@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
@@ -154,6 +155,15 @@ export async function buildGitAuth(
             lines.push('[user]');
             lines.push(`\tname = ${enriched.human_name}`);
             lines.push(`\temail = ${enriched.human_email}`);
+        }
+
+        // GIT_CONFIG_GLOBAL replaces ~/.gitconfig, so a config with no [user]
+        // block leaves `git commit` with no identity at all ("Author identity
+        // unknown") and the run delivers nothing. Carry the host's own identity
+        // over so the fallback the branches above describe actually happens.
+        if (!lines.includes('[user]')) {
+            const host = hostGitIdentity();
+            if (host) lines.push('[user]', `\tname = ${host.name}`, `\temail = ${host.email}`);
         }
 
         // Install the co-author hook when the credential has both human
@@ -357,6 +367,19 @@ export async function buildGitConfig(
 // whole tmpdir. mkdtempSync's prefix argument guarantees every temp
 // dir we create passes this check.
 const TEMP_DIR_PREFIX = 'atlas-git-';
+
+/** `user.name` + `user.email` from the API host's global git config, or null unless both are set. */
+function hostGitIdentity(): { name: string; email: string } | null {
+    try {
+        const out = execFileSync('git', ['config', '--global', '--get-regexp', '^user\\.(name|email)$'], { encoding: 'utf8', timeout: 10_000 });
+        const get = (key: string) => out.match(new RegExp(`^user\\.${key} (.+)$`, 'mi'))?.[1]?.trim();
+        const name = get('name');
+        const email = get('email');
+        return name && email ? { name, email } : null;
+    } catch {
+        return null; // git exits 1 when neither key is set
+    }
+}
 
 /**
  * Delete the temp git config directory produced by `buildGitAuth`.

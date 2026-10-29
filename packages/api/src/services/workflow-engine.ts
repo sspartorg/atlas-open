@@ -268,7 +268,10 @@ async function prepareWorktree(run: RunRow): Promise<string | null> {
                 throw new Error(workspace ? `Repo ${repo.name} has no cloned repository on disk` : 'Project has no cloned repository on disk');
             }
             if (flags.commit) {
-                if (run.worktree_path) await commitPending(path, repo.credential_id, await commitMessage(run));
+                // ensureWorktree resets what is left uncommitted, so a failed
+                // commit here would throw the earlier run's work away.
+                const committed = run.worktree_path ? await commitPending(path, repo.credential_id, await commitMessage(run)) : null;
+                if (committed?.startsWith('could not commit')) throw new Error(`Could not commit the earlier run's changes in ${path}: ${committed.slice('could not commit: '.length)}`);
             } else {
                 // ensureWorktree resets a worktree it reuses. With commits off,
                 // that would throw away what an earlier run left uncommitted.
@@ -633,8 +636,15 @@ async function commitMessage(run: Pick<RunRow, 'id' | 'item_id'>): Promise<strin
 async function commitPending(worktreePath: string, credentialId: string | null, message: string): Promise<string | null> {
     const auth = credentialId ? await buildGitAuth(credentialId).catch(() => null) : null;
     const env = gitInvokeEnv(auth?.configPath ?? null);
+    let status;
     try {
-        const status = await exec('git', ['-C', worktreePath, 'status', '--porcelain'], { env, timeout: 60_000 });
+        status = await exec('git', ['-C', worktreePath, 'status', '--porcelain'], { env, timeout: 60_000 });
+    } catch (err) {
+        // No readable worktree: the push that follows fails with its own reason.
+        if (auth?.configPath) cleanupGitConfig(auth.configPath);
+        return `could not read status: ${(err as Error).message}`;
+    }
+    try {
         if (!status.stdout.trim()) return null;
         await exec('git', ['-C', worktreePath, ...stageArgs()], { env, timeout: 60_000 });
         const args = ['-c', 'core.hooksPath=.husky/_', '-C', worktreePath, 'commit', '-m', message];
@@ -698,18 +708,26 @@ async function deliver(run: RunRow, opts: DeliveryFlags): Promise<DeliveryResult
     const message = await commitMessage(run);
     const opened: { repo: (typeof repos)[number]['repo']; path: string; base: string; url: string }[] = [];
 
-    // ADR 0017 — each repo of the Task delivers on its own; a multi-repo Task
-    // skips the repos it did not change (their PR would be empty).
+    // ADR 0017 — each repo of the Task delivers on its own, and a repo the
+    // Task did not change is skipped (its PR would be empty).
     for (const { repo, path } of repos) {
         const tag = workspace ? `${repo.name}: ` : '';
         const base = repo.default_branch?.trim() ? repo.default_branch : 'main';
         const committed = await commitPending(path, repo.credential_id, message);
         if (committed) log.push(tag + committed);
+        // Pushing past a failed commit opens nothing and reports GitHub's "No
+        // commits between …" instead of the reason the work never landed.
+        if (committed?.startsWith('could not commit')) {
+            result.failure ??= `${tag}Commit failed: ${committed.slice('could not commit: '.length)}`;
+            continue;
+        }
         if (!opts.push) {
             log.push(`${tag}not pushed; the work stays on ${branch} in ${path}`);
             continue;
         }
-        if (workspace && !(await hasChanges(path, base))) {
+        // Single-repo too: otherwise a Task that needed no change opens a PR
+        // holding nothing but Atlas's own .gitignore commit.
+        if (!(await hasChanges(path, base))) {
             log.push(`${tag}no changes`);
             continue;
         }
