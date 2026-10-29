@@ -22,7 +22,7 @@ services:
       - "-c"
       - "pg_stat_statements.max=5000"
     ports:
-      - "5600:5432"
+      - "127.0.0.1:5600:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-atlas_open}
       POSTGRES_USER: ${POSTGRES_USER:-atlas}
@@ -55,7 +55,7 @@ services:
       - "-c"
       - "pg_stat_statements.max=5000"
     ports:
-      - "5610:5432"
+      - "127.0.0.1:5610:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB_PROD:-atlas_open_prod}
       POSTGRES_USER: ${POSTGRES_USER_PROD:-atlas}
