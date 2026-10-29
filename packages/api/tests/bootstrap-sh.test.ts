@@ -78,7 +78,8 @@ const CONFIGURED: Stubs = {
     node: 'echo v22.11.0',
     pnpm: 'echo 9.15.0',
     docker: 'case "$1" in --version) echo "Docker version 27.3.1";; *) exit 0;; esac',
-    gh: 'case "$1" in --version) echo "gh version 2.60.0";; extension) echo "gh copilot github/gh-copilot v1.0.5";; *) exit 0;; esac',
+    gh: 'case "$1" in --version) echo "gh version 2.60.0";; *) exit 0;; esac',
+    copilot: 'case "$1" in --version) echo "0.0.354";; *) exit 0;; esac',
     claude: 'case "$1" in --version) echo "2.0.0 (Claude Code)";; *) exit 0;; esac',
 };
 
@@ -101,7 +102,7 @@ describe('scripts/bootstrap.sh', () => {
             'corepack enable pnpm',
             'brew install --cask docker',
             'brew install gh',
-            'gh extension install github/gh-copilot',
+            'npm install -g @github/copilot@latest',
             'npm install -g @anthropic-ai/claude-code',
             'cp .env.example .env',
             'cp .env.prod.example .env.prod',
@@ -192,7 +193,7 @@ describe('scripts/bootstrap.sh', () => {
             'Docker version',
             'Docker engine is running',
             'gh version',
-            'gh-copilot extension',
+            'copilot CLI',
             'claude 2.0.0',
             '.env already exists',
             '.env.prod already exists',

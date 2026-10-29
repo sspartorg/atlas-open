@@ -376,22 +376,16 @@ ensure_gh() {
     esac
 }
 
-has_copilot_ext() { have gh && gh extension list 2>/dev/null | grep -q 'github/gh-copilot'; }
-
 ensure_copilot() {
-    step 'GitHub Copilot CLI (gh extension) - optional'
+    # Atlas spawns the standalone `copilot` binary (npm @github/copilot), not
+    # the retired `gh copilot` extension.
+    step 'GitHub Copilot CLI (copilot) - optional'
     if [ "$SKIP_OPTIONAL" -eq 1 ]; then info 'skipped (--skip-optional-clis)'; return; fi
-    if has_copilot_ext; then keep 'gh-copilot extension'; return; fi
-    if ! have gh && [ "$DRY_RUN" -eq 0 ]; then info 'gh is not installed; skipping.'; return; fi
-    ask_yn 'Install the GitHub Copilot CLI extension? Needs gh auth login afterwards.' Y ||
+    if have copilot; then keep 'copilot CLI'; return; fi
+    ask_yn 'Install the GitHub Copilot CLI (npm @github/copilot)? Run copilot and /login afterwards.' Y ||
         { info 'skipped by choice'; return; }
-    if [ "$DRY_RUN" -eq 1 ]; then
-        run gh extension install github/gh-copilot
-        PLANNED_COPILOT=1
-        return
-    fi
-    gh auth status >/dev/null 2>&1 || warn 'gh is not signed in; the install may fail. Run gh auth login and re-run if so.'
-    run gh extension install github/gh-copilot || warn 'gh extension install failed (continuing). Re-run after gh auth login.'
+    [ "$DRY_RUN" -eq 1 ] && PLANNED_COPILOT=1
+    run npm install -g @github/copilot@latest || warn 'npm install -g @github/copilot failed (continuing).'
 }
 
 ensure_claude() {
@@ -528,10 +522,10 @@ ensure_mcp_clients() {
         info 'claude not installed; skipping Claude Code CLI registration.'
     fi
 
-    if has_copilot_ext || [ "$PLANNED_COPILOT" -eq 1 ]; then
+    if have copilot || [ "$PLANNED_COPILOT" -eq 1 ]; then
         merge_mcp_json "$HOME/.copilot/mcp-config.json" 'GitHub Copilot CLI config'
     else
-        info 'gh-copilot extension not installed; skipping Copilot CLI config.'
+        info 'copilot not installed; skipping Copilot CLI config.'
     fi
 }
 
@@ -577,7 +571,7 @@ API: http://localhost:4301   MCP: http://localhost:4600/mcp   Postgres: localhos
 
 For live agent runs, sign in to the CLIs that need a browser:
     claude login         # Anthropic
-    gh auth login        # GitHub (also unlocks gh copilot)
+    gh auth login        # GitHub (pushes and pull requests)
 Optional: Ollama (https://ollama.com) enables the free local `ollama` CLI option.
 EOF
 if [ "$DOCKER_GROUP_ADDED" -eq 1 ]; then
