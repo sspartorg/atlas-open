@@ -10,7 +10,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { gitInvokeEnv } from './git-env.js';
+import { explainGitAuth, gitInvokeEnv } from './git-env.js';
 
 /** A fresh git-env (it caches the system config) reading `systemConfig` as /etc/gitconfig. */
 async function withSystemConfig(dir: string, systemConfig: string) {
@@ -119,5 +119,23 @@ describe('gitInvokeEnv', () => {
         expect(env['CLAUDE_CODE_CHILD_SESSION']).toBeUndefined();
         // Owner configuration is not session identity — it stays.
         expect(env['CLAUDE_CONFIG_DIR']).toBe('/home/me/.claude-work');
+    });
+});
+
+// Found live: an expired token parks with git's "could not read Username …
+// terminal prompts disabled", which names neither GitHub nor the credential.
+describe('explainGitAuth', () => {
+    const live = "Could not prepare the worktree: Command failed: git fetch origin main\nfatal: could not read Username for 'https://github.com': terminal prompts disabled";
+
+    it('leads a rejected-credential failure with what to do, and keeps git’s text', () => {
+        const out = explainGitAuth(live);
+        expect(out.split('\n')[0]).toMatch(/^GitHub rejected this repo's credential.*Settings → Credentials, then Resume\.$/);
+        expect(out).toContain(live);
+        expect(explainGitAuth('remote: Invalid username or password.\nfatal: Authentication failed')).toMatch(/^GitHub rejected/);
+        expect(explainGitAuth('The requested URL returned error: 403')).toMatch(/^GitHub rejected/);
+    });
+
+    it('leaves every other failure as it was', () => {
+        expect(explainGitAuth('Push failed: non-fast-forward')).toBe('Push failed: non-fast-forward');
     });
 });

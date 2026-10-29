@@ -46,7 +46,7 @@ import {
     computeWorktreePath,
 } from './worktree-orchestrator.js';
 import { buildGitAuth, cleanupGitConfig } from './git-credentials.js';
-import { gitInvokeEnv } from './git-env.js';
+import { explainGitAuth, gitInvokeEnv } from './git-env.js';
 import { runRepos } from './run-repos.js';
 import { stageArgs } from './atlas-artifacts.js';
 import { spawnAgentRun, cancelRun } from './agent-runner.js';
@@ -532,7 +532,7 @@ export async function resumeLostRetries(): Promise<number> {
 /** A park caused by something breaking (not a question): it goes outward as
  *  `workflow.failed`, with its own toggle. */
 function parkFailed(run: RunRow, nodeId: string | null, reason: string, kind: WorkflowParkKind): Promise<void> {
-    return park(run, nodeId, reason, kind, false, true);
+    return park(run, nodeId, explainGitAuth(reason), kind, false, true);
 }
 
 async function park(

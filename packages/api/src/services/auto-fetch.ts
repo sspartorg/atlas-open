@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import { gitInvokeEnv } from './git-env.js';
+import { GIT_AUTH_REJECTED, gitInvokeEnv } from './git-env.js';
 
 const execFileP = promisify(execFile);
 
@@ -116,7 +116,7 @@ export async function performAutoFetch(
         log(fetch.stderr);
         if (fetch.exitCode !== 0) {
             const joined = `${fetch.stdout} ${fetch.stderr}`.trim().replace(/\r?\n/g, ' | ');
-            if (/Authentication failed|HTTP 401|HTTP 403/.test(joined)) {
+            if (GIT_AUTH_REJECTED.test(joined)) {
                 return { code: 'AUTH_FAILED', detail: joined };
             }
             return { code: 'FETCH_FAILED', detail: joined };
