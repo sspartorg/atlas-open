@@ -62,6 +62,12 @@ function inspectContainer(name: string): ContainerState {
 async function main(): Promise<void> {
     console.log(`[db-up] target=${isProd ? 'prod' : 'dev'} service=${service} container=${container} db=${dbName}`);
 
+    // A stopped engine otherwise reads as "absent" and surfaces as compose's raw pipe error.
+    if (spawnSync('docker', ['info', '--format', '{{.ServerVersion}}'], { stdio: 'ignore', shell: false }).status !== 0) {
+        console.error('[db-up] Docker is not running. Start Docker Desktop (or the Docker service), then run this again.');
+        process.exit(1);
+    }
+
     const state = inspectContainer(container);
     if (state === 'running') {
         console.log(`[db-up] container ${container} already running, reusing.`);

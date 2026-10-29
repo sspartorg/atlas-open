@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { meetsMinVersion, parseVersion } from './check-prereqs.js';
+import { meetsMinVersion, parseVersion, runCheck } from './check-prereqs.js';
 
 describe('parseVersion', () => {
     it('parses common output formats', () => {
@@ -21,5 +21,20 @@ describe('meetsMinVersion', () => {
         expect(meetsMinVersion([19, 99, 99], [20, 0, 0])).toBe(false);
         expect(meetsMinVersion([9, 1, 0], [9, 0, 0])).toBe(true);
         expect(meetsMinVersion([8, 99, 99], [9, 0, 0])).toBe(false);
+    });
+});
+
+describe('runCheck', () => {
+    it('passes with the first output line', async () => {
+        expect(await runCheck({ name: 'n', cmd: 'node', args: ['-e', '"console.log(42)"'] })).toEqual({ ok: true, line: '[ OK ] n: 42' });
+    });
+
+    // A stopped Docker engine is not a missing install: say what to do.
+    it('fails with the check’s own message when the command exits non-zero', async () => {
+        expect(await runCheck({ name: 'docker engine', cmd: 'node', args: ['-e', '"process.exit(1)"'], fail: 'not running' })).toEqual({
+            ok: false,
+            line: '[FAIL] docker engine: not running',
+        });
+        expect((await runCheck({ name: 'x', cmd: 'node', args: ['-e', '"process.exit(1)"'] })).line).toBe('[FAIL] x: not installed or not on PATH');
     });
 });
