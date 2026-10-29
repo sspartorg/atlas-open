@@ -302,6 +302,50 @@ test('the API recovers by itself after Postgres restarts', async ({ request }) =
     expect((await get<{ status: string }>(request, `/api/tasks/${id}`)).status).toBe('draft');
 });
 
+// The Terminal: a real `claude` PTY session on the repo writes a file, and
+// Stop commits it, pushes and opens the PR.
+test('a Terminal session with the real claude CLI ends in a PR', async ({ request }) => {
+    const file = `hello-${STAMP}.txt`;
+    const session = await post<{ id: string }>(request, '/api/cli/sessions', {
+        project_id: projectId,
+        title: `Terminal ${STAMP}`,
+        model: 'claude-haiku-5-5',
+        initial_prompt: `Create a file named ${file} at the repo root containing exactly: hi. Do nothing else.`,
+    });
+    await expect.poll(async () => (await get<{ status: string }>(request, `/api/cli/sessions/${session.id}`)).status, { timeout: 60_000 }).toBe('active');
+    // Watch the terminal: the new worktree opens on the CLI's
+    // folder-trust dialog, which Atlas answers in its own worktrees.
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/api/cli/sessions/${session.id}/stream`);
+    ws.binaryType = 'arraybuffer';
+    let screen = '';
+    let answered = false;
+    ws.addEventListener('message', (e) => {
+        screen += typeof e.data === 'string' ? e.data : Buffer.from(e.data as ArrayBuffer).toString('utf8');
+        // The CLI moves the cursor between words instead of printing spaces.
+        const text = screen.replace(/\x1b\[[0-9;?<>=]*[ -/]*[@-~]/g, ' ').replace(/\s+/g, ' ');
+        // Atlas answers it in its own worktrees; this only records that it was shown.
+        if (/one you trust\?|trust the files in this folder/i.test(text)) answered = true;
+    });
+    try {
+        await expect
+            .poll(async () => JSON.stringify(await get(request, `/api/cli/sessions/${session.id}/diff`)), { timeout: 5 * 60_000, intervals: [5_000] })
+            .toContain(file);
+    } finally {
+        // What the Owner would have seen, for when it does not get there.
+        writeFileSync(join(LOGS, 'live-terminal-screen.txt'), `answered=${answered}
+${screen.replace(/\[[0-9;?<>=]*[ -/]*[@-~]/g, ' ')}`);
+    }
+
+    ws.close();
+    test.info().annotations.push({ type: 'trust dialog', description: answered ? 'shown and answered' : 'not shown' });
+    const stop = await post<Record<string, unknown>>(request, `/api/cli/sessions/${session.id}/stop`, { files_to_stage: [file], commit_message: `Terminal ${STAMP}` });
+    const prUrl = JSON.stringify(stop).match(new RegExp(`https://github\\.com/${REPO}/pull/\\d+`))?.[0];
+    expect(prUrl, JSON.stringify(stop)).toBeTruthy();
+    prBranches.add(gh('pr', 'view', prUrl!, '--json', 'headRefName', '--jq', '.headRefName'));
+    expect(gh('pr', 'diff', prUrl!)).toContain(file);
+    expect((await get<{ status: string }>(request, `/api/cli/sessions/${session.id}`)).status).toBe('closed');
+});
+
 // The Jira bridge, for real: a throwaway issue (JQL `key = <it>`, so nothing
 // else is touched) imports as a Task for Solo Engineer, runs to a PR, and the
 // next sync comments on the issue. Needs LIVE_JIRA_SITE / _EMAIL / _TOKEN and
