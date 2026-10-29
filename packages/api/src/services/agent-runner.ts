@@ -915,16 +915,15 @@ interface SpawnCliOptions {
  * header. `--mcp-config` is variadic, so the prompt must stay on stdin.
  */
 export function claudeIsolationArgs(itemAttached: boolean): string[] {
+    const atlasOnly = JSON.stringify({ mcpServers: { atlas: { type: 'http', url: ATLAS_MCP_URL } } });
     // Runs without an item (ai-news, market-research, regulations,
     // jira-to-epic scouts) depend on Owner-scoped MCP servers — the Playwright
     // plugin and claude.ai connectors — that a strict Atlas-only config would
-    // strip.
-    if (!itemAttached) return [];
-    return [
-        '--setting-sources', 'project,local',
-        '--strict-mcp-config',
-        '--mcp-config', JSON.stringify({ mcpServers: { atlas: { type: 'http', url: ATLAS_MCP_URL } } }),
-    ];
+    // strip. They still get this instance's `atlas`: a --mcp-config entry
+    // overrides a same-named one in ~/.claude.json, which on a machine that
+    // also runs the commercial Atlas points at that product instead.
+    if (!itemAttached) return ['--mcp-config', atlasOnly];
+    return ['--setting-sources', 'project,local', '--strict-mcp-config', '--mcp-config', atlasOnly];
 }
 
 /**

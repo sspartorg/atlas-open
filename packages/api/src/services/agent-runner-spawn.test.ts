@@ -21,7 +21,16 @@ describe('claudeIsolationArgs', () => {
     });
 
     it('leaves freedom-mode scouts on the Owner config so their Playwright / claude.ai connectors still load', () => {
-        expect(claudeIsolationArgs(false)).toEqual([]);
+        const args = claudeIsolationArgs(false);
+        expect(args).not.toContain('--strict-mcp-config');
+        expect(args).not.toContain('--setting-sources');
+    });
+
+    // ~/.claude.json's `atlas` may be the commercial Atlas on the same machine.
+    it("still points a freedom-mode scout's `atlas` server at this instance", () => {
+        const args = claudeIsolationArgs(false);
+        expect(args[0]).toBe('--mcp-config');
+        expect(JSON.parse(args[1]!)).toEqual({ mcpServers: { atlas: { type: 'http', url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/) } } });
     });
 });
 
