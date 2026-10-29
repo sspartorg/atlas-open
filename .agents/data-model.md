@@ -384,7 +384,8 @@ Encrypted git credential.
 
 Fields: `id, label, host, kind, token_fingerprint, scope, expires_at, last_used_at, created_at, updated_at`
 
-- `kind` ∈ `pat | ssh | app_password` — only `pat` is implemented today
+- `kind` ∈ `pat | github_app` (`credentials_kind_check`)
+- Commit identity: `github_app` → its `<app_slug>[bot]`; `pat` with both `human_*` → that person; otherwise the API host's `git config --global` identity (`buildGitAuth` writes it in, since `GIT_CONFIG_GLOBAL` replaces ~/.gitconfig)
 - Token stored encrypted (AES-256-GCM). `token_fingerprint` is the SHA-256 hash of the plaintext, exposed in the UI for identification.
 - `human_name` / `human_email` (migration 026) are valid on **both** kinds and mean different things by kind. On `github_app` the human is a **co-author**: the bot is the primary author (`[user]` = `<app_slug>[bot]`) and the human is credited via a `Co-Authored-By` trailer written by the `prepare-commit-msg` hook. On `pat` the human is the **author** — a PAT has no identity of its own, so `buildGitAuth` writes these straight into the session's `[user]` block. Both must be set for that block to appear; with neither (or only one) commits fall back to the host machine's `~/.gitconfig`, which is the pre-existing behaviour.
 - `human_gh_login` stays `github_app`-only — it feeds `gh pr create --assignee` and the `Requested-By: @<login>` PR-body prefix, neither of which any PAT flow reaches. The service rejects it on a PAT patch.
