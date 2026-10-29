@@ -361,19 +361,22 @@ wizard.
 
 ## Multi-device access (LAN)
 
-By default, Atlas only trusts browser requests from `localhost:4300` and
-`127.0.0.1:4300` (dev) — `localhost:5300` / `127.0.0.1:5300` on prod. Open the
-UI from a second device on the same Wi-Fi and you can READ data (the page
-renders, SSE arrives) but every WRITE silently fails — the API blocks the
-cross-origin POST/PATCH.
+By default Atlas listens on this machine only: the API, the MCP server and the
+web UI (`localhost:4300` in dev, `localhost:5300` on prod) all bind
+`127.0.0.1`, so no other device on your network can reach them.
 
-To enable LAN access, set this in `.env`:
+Atlas has no login. Turning LAN access on means **anyone on that network can
+use Atlas as you**: read every Task and run, start agents and Terminal sessions
+on this machine. Only do it on a network you trust.
+
+To enable it, set this in `.env`:
 
 ```bash
 ATLAS_LAN_ACCESS=true
 ```
 
-Then restart the API. On boot you'll see something like:
+Then restart `pnpm dev` (or `pnpm start`). The web UI now listens on every
+interface, and on boot the API prints something like:
 
 ```
 [security] ATLAS_LAN_ACCESS=true — trusting LAN origins for CORS + MCP-token gate: http://192.168.1.50:4300, http://10.0.0.5:4300
