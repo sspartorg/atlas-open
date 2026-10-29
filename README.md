@@ -15,6 +15,14 @@ touched). If the agent asks a question, the run parks and waits for you;
 your reply on the Task resumes it. A crashed run gets one automatic retry.
 One agent runs at a time; other Tasks wait in the Queue.
 
+**Why your first PR touches `.gitignore`.** Atlas writes its run files
+(`.atlas/`, `.claude/commands/atlas-*`, `.github/prompts/atlas-*`) into the
+worktree, so the first PR on a repo carries one extra commit,
+`chore(atlas): ignore Atlas scratch paths`, that adds those three patterns to
+`.gitignore`. Once it is merged, later PRs no longer include it. A
+local-only `.git/info/exclude` was tried first and let those files reach a
+PR once one had been tracked. A Task that changes nothing opens no PR.
+
 ## What's in Atlas Open
 
 - **Projects** with one or more repos, **Tasks**, sub-tasks, issues and comments
