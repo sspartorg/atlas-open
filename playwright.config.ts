@@ -106,5 +106,37 @@ export default defineConfig({
             },
             grep: /@ipad/,
         },
+        // iPad landscape — 1194 wide is past the md (900) breakpoint, so the
+        // desktop shell (sidenav + main) renders in a narrow window. Only the
+        // all-routes sweep runs here (`@sweep`); other @ipad specs assert the
+        // portrait BottomNav shell.
+        {
+            name: 'tablet-landscape',
+            use: {
+                ...devices['Desktop Chrome'],
+                viewport: { width: 1194, height: 834 },
+                deviceScaleFactor: 2,
+                hasTouch: true,
+            },
+            grep: /@sweep/,
+        },
+        // The most common small laptop screen.
+        {
+            name: 'laptop-1366',
+            use: { ...devices['Desktop Chrome'], viewport: { width: 1366, height: 768 } },
+            grep: /@sweep/,
+        },
+        // Engine parity for the core routes (`@xbrowser`): Firefox desktop
+        // and Safari's engine on an iPhone.
+        {
+            name: 'firefox',
+            use: { ...devices['Desktop Firefox'], viewport: { width: 1440, height: 900 } },
+            grep: /@xbrowser/,
+        },
+        {
+            name: 'webkit-iphone',
+            use: { ...devices['iPhone 14'] },
+            grep: /@xbrowser/,
+        },
     ],
 });

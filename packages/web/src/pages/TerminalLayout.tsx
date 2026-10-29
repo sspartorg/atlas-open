@@ -29,7 +29,7 @@ import {
     LAYOUT_PANE_COUNT,
     type LayoutKind,
 } from '../components/LayoutPickerMenu.js';
-import { ATLAS_PALETTE } from '../theme/tokens.js';
+import { ATLAS_PALETTE, VISUALLY_HIDDEN } from '../theme/tokens.js';
 
 const STORAGE_KEY = 'atlas.terminal-layout.v1';
 const VALID_KINDS = new Set<LayoutKind>([
@@ -437,6 +437,10 @@ export function TerminalLayout() {
                 overflow: 'hidden',
             }}
         >
+            {/* The workspace has no visible title; screen readers still get one. */}
+            <Typography component="h1" sx={VISUALLY_HIDDEN}>
+                Terminal layout
+            </Typography>
             {/* Toolbar */}
             {!hideChrome && (
                 <Box
