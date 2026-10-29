@@ -24,8 +24,8 @@ Two structural reasons they survived, worth knowing before adding a test:
 - **e2e specs stop at open/close.** `e2e/pages/credentials.spec.ts` (37 lines)
   never saves a credential and never reads one back.
 
-Triage against [`coming-soon.md`](coming-soon.md) first — 6 controls toast or
-sit disabled **on purpose**. A stub is not a bug.
+Triage against [`coming-soon.md`](coming-soon.md) first — any control listed there toasts or
+sits disabled **on purpose** (none today). A stub is not a bug.
 
 ---
 

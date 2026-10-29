@@ -13,7 +13,7 @@ The post-onboarding home. Shows a greeting with fleet figures, the "Awaiting you
 ## UI elements
 **Empty state (`pages/dashboard/DashboardEmptyState.tsx`)**
 - **Add your first project** card with **New Project** button → opens `NewProjectModal`. Copy promises GitHub URLs only — the API accepts `https://github.com/…` only.
-- **Credentials Alert** → "Add a Personal Access Token or GitHub App in **Settings → Credentials**"; click navigates to `/settings/credentials`. (SSH keys are a coming-soon stub, so they are not offered.)
+- **Credentials Alert** → "Add a Personal Access Token or GitHub App in **Settings → Credentials**"; click navigates to `/settings/credentials`. (SSH keys are not a credential kind in this edition.)
 - **Agents Alert** — rendered only when `useAgents()` has loaded and returns zero agents: "No agents yet? Install them from **Agents → Marketplace**"; click navigates to `/agents/marketplace`.
 
 **Populated (`pages/dashboard/DashboardPopulated.tsx`)**

@@ -160,4 +160,4 @@ Procedural-memory editor backed by the `agent_memory` table.
 - **Entities**: `agent`, `agent_checklist_item`, `agent_run`, `cli_model`.
 
 ## Coming soon on this page
-- Save as run, formatting toolbar wiring — see [coming-soon.md](../coming-soon.md).
+None.

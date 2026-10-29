@@ -3,7 +3,7 @@
 **Route:** `/settings/credentials` • **Component:** `packages/web/src/pages/Credentials.tsx` • **Slug:** `proj-creds`
 
 ## Purpose
-Manage encrypted git credentials. Personal Access Tokens (PAT) and GitHub App credentials are both functional; SSH is a placeholder.
+Manage encrypted git credentials. Personal Access Tokens (PAT) and GitHub App credentials are the two kinds offered.
 
 ## States
 - **Loading**: full-height spinner
@@ -39,7 +39,7 @@ Manage encrypted git credentials. Personal Access Tokens (PAT) and GitHub App cr
 
 ## Modals / drawers
 **`CredentialModal`** — 3-view flow
-- **Kind view** (add only): PAT (default) / SSH key (disabled) / **GitHub App** (enabled — "Commits & PRs authored as a bot identity"). *(corrected 2026-09-22 — there is no "App password" option.)*
+- **Kind view** (add only): PAT (default) / **GitHub App** (enabled — "Commits & PRs authored as a bot identity"). *(corrected 2026-09-22 — there is no "App password" option.)*
 - **GitHub App form**: Host (locked to GitHub), Label, **Bot info folder** (a directory holding `app-config.json` + one `.pem`; Atlas reads and encrypts them itself, so no secret is ever typed or pasted), Installation owner, optional Human attribution (name / email / GitHub login), Repo scope. `app_id` and `app_slug` are read from `app-config.json` and the installation id is discovered from the owner — none of the three is a form field.
 - **Form view**: Host (locked to github), Label, Token, **Commit identity** (PAT only — Your name / Your email), Repo scope; **Verify & save** (or **Save changes** in edit mode)
 - **Token eye icon** — in edit mode on a `pat` row it fetches the plaintext from `GET /api/credentials/:id/token` and shows it read-only until clicked again; the field stays read-only while a revealed value is on screen so a stray keystroke can't turn a reveal into a silent rotation. Typing drops the revealed value and reverts to "replace the token" semantics. In add mode (or once the Owner has typed) it is a plain show/hide. Before 2026-09-12 it only flipped the input `type` over a field that is never hydrated — the token is not in any GET response — so "show" showed an empty box.
@@ -65,7 +65,6 @@ Manage encrypted git credentials. Personal Access Tokens (PAT) and GitHub App cr
 - Post-onboarding only.
 
 ## Edge cases / quirks
-- **Verify** and **Check expiries** are stubs (see coming-soon).
 - "Expiring soon" and the Expiring chip share `daysUntilExpiry()` in `CredentialsTable.tsx`: expiry within 0-30 days (`EXPIRY_WARN_DAYS`). `github_app` credentials are skipped — their `expires_at` is the ~1h installation token the API re-mints on its own. Status chip rules: Active (not expiring AND used recently or <30d old); Expiring (0-30d); Unused (no use for ≥30d).
 - In edit mode, blank token keeps the existing token. Revealing does NOT populate the submit payload — `revealedToken` is transient display state, `token` stays empty, so saving after a reveal preserves the stored value.
 - Host is locked to GitHub today even though the schema permits other hosts.
@@ -76,4 +75,4 @@ Manage encrypted git credentials. Personal Access Tokens (PAT) and GitHub App cr
 - **Entities**: `credential` — encrypted token, host, scope, fingerprint; referenced by `project.credential_id`.
 
 ## Coming soon on this page
-- Verify now, Check expiries, SSH credential kind — see [coming-soon.md](../coming-soon.md).
+None.

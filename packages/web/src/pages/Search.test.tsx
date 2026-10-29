@@ -144,43 +144,6 @@ describe('Search page', () => {
         expect(screen.getByRole('heading', { name: /^Search$/i })).toBeInTheDocument();
     });
 
-    it('exercises createType toast by clicking new-item button in results', async () => {
-        server.use(
-            ...defaultHandlers,
-            http.get(`${BASE}/search`, () =>
-                HttpResponse.json([
-                    {
-                        id: 'ATL-1',
-                        type: 'sub_task',
-                        title: 'Sub-task One',
-                        project_id: 'p1',
-                        status: 'ready',
-                        assignee_agent_id: null,
-                        updated_at: '2026-05-16T00:00:00.000Z',
-                        rank: 1,
-                    },
-                ])
-            ),
-            http.get(`${BASE}/labels`, () => HttpResponse.json({ labels: [] }))
-        );
-        renderWithProviders(<Search />, { initialEntries: ['/search'] });
-        await waitFor(() =>
-            expect(screen.getByRole('heading', { name: /^Search$/i })).toBeInTheDocument()
-        );
-        // Find any create-type button
-        const createBtn = screen.queryByRole('button', { name: /create|new.*task/i });
-        if (createBtn) {
-            fireEvent.click(createBtn);
-            // Toast "Create from search is not wired up yet." should appear
-            await waitFor(
-                () => {
-                    expect(screen.queryByText(/not wired up/i) ?? document.body).toBeTruthy();
-                },
-                { timeout: 2000 }
-            );
-        }
-    });
-
     it('renders SearchResults (not empty-state) when server returns hits — covers lines 252-259', async () => {
         server.use(
             ...defaultHandlers,
@@ -246,29 +209,15 @@ describe('Search page', () => {
         expect(queryInput.value).toBe('status = "ready"');
     });
 
-    it('calls createType by clicking "Create a Task" in empty-state — covers createType function', async () => {
+    it('the empty state offers no create button', async () => {
         server.use(
             ...defaultHandlers,
             http.get(`${BASE}/search`, () => HttpResponse.json([])),
             http.get(`${BASE}/labels`, () => HttpResponse.json({ labels: [] }))
         );
         renderWithProviders(<Search />, { initialEntries: ['/search'] });
-        await waitFor(() =>
-            expect(screen.getByRole('heading', { name: /^Search$/i })).toBeInTheDocument()
-        );
-        // SearchEmptyState always renders a "Create a Task" button
-        const createBtn = screen.queryByRole('button', { name: /Create a/i });
-        if (createBtn) {
-            fireEvent.click(createBtn);
-            // Toast "Create from search is not wired up yet." should appear
-            await waitFor(
-                () => {
-                    expect(document.body).toBeTruthy();
-                },
-                { timeout: 1000 }
-            );
-        }
-        expect(document.body).toBeTruthy();
+        expect(await screen.findByText(/No Items Match/)).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^Create a/i })).toBeNull();
     });
 
     it('calls dropStatus in filters mode — click Add Filter, Status, draft, then Drop the Status Filter', async () => {

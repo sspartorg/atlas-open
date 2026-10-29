@@ -3,7 +3,7 @@ import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import { EmptyState } from '../../components/EmptyState.js';
 import { ATLAS_PALETTE } from '../../theme/tokens.js';
-import { TYPE_LABEL, type FilterState, type SearchType } from './searchViewModel.js';
+import type { FilterState } from './searchViewModel.js';
 
 const MONO = '"JetBrains Mono", monospace';
 
@@ -12,19 +12,9 @@ interface Props {
     queryText: string | null;
     onDropStatus: () => void;
     onDropProject: () => void;
-    onCreateType: (type: SearchType) => void;
 }
 
-export function SearchEmptyState({
-    filters,
-    queryText,
-    onDropStatus,
-    onDropProject,
-    onCreateType,
-}: Props) {
-    const createType: SearchType = filters.types[0] ?? 'task';
-    const createLabel = TYPE_LABEL[createType];
-
+export function SearchEmptyState({ filters, queryText, onDropStatus, onDropProject }: Props) {
     return (
         <EmptyState
             icon={
@@ -61,72 +51,50 @@ export function SearchEmptyState({
                 ) : undefined
             }
             actions={
-                <>
-                    {filters.status !== 'any' ? (
-                        <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={onDropStatus}
-                            startIcon={
-                                <Box
-                                    component="span"
-                                    className="material-symbols-rounded"
-                                    aria-hidden="true"
-                                    sx={{ fontSize: 16 }}
-                                >
-                                    filter_alt_off
-                                </Box>
-                            }
-                            sx={{ textTransform: 'none', fontSize: 12.5 }}
-                        >
-                            Drop the Status Filter
-                        </Button>
-                    ) : null}
-                    {filters.projectIds.length > 0 ? (
-                        <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={onDropProject}
-                            startIcon={
-                                <Box
-                                    component="span"
-                                    className="material-symbols-rounded"
-                                    aria-hidden="true"
-                                    sx={{ fontSize: 16 }}
-                                >
-                                    swap_horiz
-                                </Box>
-                            }
-                            sx={{ textTransform: 'none', fontSize: 12.5 }}
-                        >
-                            Try a Different Project
-                        </Button>
-                    ) : null}
-                    <Button
-                        variant="contained"
-                        size="small"
-                        onClick={() => onCreateType(createType)}
-                        startIcon={
-                            <Box
-                                component="span"
-                                className="material-symbols-rounded"
-                                aria-hidden="true"
-                                sx={{ fontSize: 16 }}
+                filters.status !== 'any' || filters.projectIds.length > 0 ? (
+                    <>
+                        {filters.status !== 'any' ? (
+                            <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={onDropStatus}
+                                startIcon={
+                                    <Box
+                                        component="span"
+                                        className="material-symbols-rounded"
+                                        aria-hidden="true"
+                                        sx={{ fontSize: 16 }}
+                                    >
+                                        filter_alt_off
+                                    </Box>
+                                }
+                                sx={{ textTransform: 'none', fontSize: 12.5 }}
                             >
-                                add
-                            </Box>
-                        }
-                        sx={{
-                            textTransform: 'none',
-                            fontSize: 12.5,
-                            background: ATLAS_PALETTE.green,
-                            boxShadow: 'none',
-                            '&:hover': { background: ATLAS_PALETTE.greenDark, boxShadow: 'none' },
-                        }}
-                    >
-                        Create a {createLabel}
-                    </Button>
-                </>
+                                Drop the Status Filter
+                            </Button>
+                        ) : null}
+                        {filters.projectIds.length > 0 ? (
+                            <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={onDropProject}
+                                startIcon={
+                                    <Box
+                                        component="span"
+                                        className="material-symbols-rounded"
+                                        aria-hidden="true"
+                                        sx={{ fontSize: 16 }}
+                                    >
+                                        swap_horiz
+                                    </Box>
+                                }
+                                sx={{ textTransform: 'none', fontSize: 12.5 }}
+                            >
+                                Try a Different Project
+                            </Button>
+                        ) : null}
+                    </>
+                ) : undefined
             }
         />
     );
