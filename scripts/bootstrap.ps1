@@ -228,7 +228,9 @@ function Ensure-ServerContainer {
         [Parameter(Mandatory)][string]$ContainerName
     )
 
-    if (-not ($Config.PSObject.Properties.Name -contains $ContainerName)) {
+    # Not `.PSObject.Properties.Name`: on an object with no properties (a new
+    # mcp-config.json) StrictMode Latest throws on that member enumeration.
+    if ($null -eq $Config.PSObject.Properties[$ContainerName]) {
         $Config | Add-Member -NotePropertyName $ContainerName -NotePropertyValue ([pscustomobject]@{})
     }
 
@@ -297,6 +299,17 @@ function Ensure-McpServerDefinitions {
 # Tool detection
 # -----------------------------------------------------------------------------
 
+# Windows PowerShell 5.1 with $ErrorActionPreference = 'Stop': a native exe's
+# stderr line, once redirected (2>$null, 2>&1, *>), is a terminating error,
+# and many CLIs write notices there (gh auth status, claude mcp get for a
+# missing server, copilot's first-run extraction). Run native commands
+# through this; they report failure by $LASTEXITCODE.
+function Invoke-Native {
+    param([Parameter(Mandatory)][scriptblock]$Script)
+    $ErrorActionPreference = 'Continue'
+    & $Script
+}
+
 function Get-ToolVersion {
     param(
         [Parameter(Mandatory)][string]$Command,
@@ -305,7 +318,7 @@ function Get-ToolVersion {
 
     if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) { return $null }
     try {
-        $out = & $Command @Arguments 2>$null
+        $out = Invoke-Native { & $Command @Arguments 2>$null }
         if ($LASTEXITCODE -ne 0) { return $null }
         if ($null -eq $out) { return $null }
         return ($out | Select-Object -First 1).ToString().Trim()
@@ -316,7 +329,7 @@ function Get-ToolVersion {
 
 function Test-DockerEngineRunning {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { return $false }
-    & docker version --format '{{.Server.Version}}' 2>$null | Out-Null
+    Invoke-Native { & docker version --format '{{.Server.Version}}' 2>$null | Out-Null }
     return ($LASTEXITCODE -eq 0)
 }
 
@@ -343,7 +356,7 @@ function Test-WslConfigured {
     if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) { return $false }
     # `wsl --status` exits 0 when WSL is set up (default version configured).
     # On a fresh install, it exits non-zero with a "WSL is not installed" message.
-    & wsl --status 2>$null | Out-Null
+    Invoke-Native { & wsl --status 2>$null | Out-Null }
     return ($LASTEXITCODE -eq 0)
 }
 
@@ -353,7 +366,7 @@ function Enable-WslPlatform {
     if (Test-WslConfigured) {
         Write-Info 'WSL is already configured.'
         # Make sure default version is 2 (Docker Desktop requires v2).
-        & wsl --set-default-version 2 2>$null | Out-Null
+        Invoke-Native { & wsl --set-default-version 2 2>$null | Out-Null }
         return
     }
 
@@ -366,14 +379,14 @@ function Enable-WslPlatform {
     Write-Warn 'Running `wsl --install --no-distribution --no-launch` (enables features + installs WSL2 kernel; no Linux distro) ...'
     # --no-distribution: skip installing Ubuntu by default
     # --no-launch:       do not launch the distro after install
-    & wsl --install --no-distribution --no-launch 2>&1 | Out-Host
+    Invoke-Native { & wsl --install --no-distribution --no-launch 2>&1 | Out-Host }
     $wslExit = $LASTEXITCODE
     if ($wslExit -ne 0) {
         # Older Win 11 builds may not know --no-distribution; fall back to dism.
         Write-Warn "`wsl --install` exited with code $wslExit. Falling back to dism feature enable ..."
         & dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart | Out-Host
         & dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart | Out-Host
-        & wsl --set-default-version 2 2>$null | Out-Null
+        Invoke-Native { & wsl --set-default-version 2 2>$null | Out-Null }
     }
 
     Write-Warn 'WSL2 platform installed. A REBOOT may be required before Docker Desktop can start its engine.'
@@ -400,11 +413,11 @@ function Enable-LongPaths {
 
     # Mirror for git so cloning deep paths does not fail.
     if (Get-Command git -ErrorAction SilentlyContinue) {
-        $gitLongPaths = (& git config --system --get core.longpaths 2>$null)
+        $gitLongPaths = Invoke-Native { & git config --system --get core.longpaths 2>$null }
         if ($LASTEXITCODE -eq 0 -and $gitLongPaths -eq 'true') {
             Write-Mute 'git core.longpaths already true (system).'
         } else {
-            & git config --system core.longpaths true 2>&1 | Out-Host
+            Invoke-Native { & git config --system core.longpaths true 2>&1 | Out-Host }
             if ($LASTEXITCODE -eq 0) { Write-Info 'git core.longpaths set true (system).' }
             else                     { Write-Warn 'git config --system core.longpaths failed (continuing).' }
         }
@@ -551,7 +564,7 @@ function Prompt-OptionalInstall {
         [string]$ExtraContext = ''
     )
 
-    $msg = "Install $DisplayName? (Y/N)"
+    $msg = "Install ${DisplayName}? (Y/N)"
     if ($ExtraContext) { $msg = "$DisplayName - $ExtraContext`n$msg" }
     return Read-YesNo -Prompt $msg -Default 'Y'
 }
@@ -615,7 +628,7 @@ function Ensure-CopilotCli {
         }
     }
 
-    & npm install -g '@github/copilot@latest' 2>&1 | Out-Host
+    Invoke-Native { & npm install -g '@github/copilot@latest' 2>&1 | Out-Host }
     if ($LASTEXITCODE -ne 0) {
         Write-Warn "npm install -g @github/copilot exited with code $LASTEXITCODE (continuing)."
         return
@@ -787,7 +800,7 @@ function Ensure-BuildTools {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     $hasBuildTools = $false
     if (Test-Path $vswhere) {
-        $found = & $vswhere -products Microsoft.VisualStudio.Product.BuildTools -property installationPath 2>$null
+        $found = Invoke-Native { & $vswhere -products Microsoft.VisualStudio.Product.BuildTools -property installationPath 2>$null }
         if ($LASTEXITCODE -eq 0 -and $found) { $hasBuildTools = $true }
     }
     if ($hasBuildTools) {
@@ -838,12 +851,12 @@ function Ensure-McpClientConfigs {
     #    `mcp add --transport http` instead of `add-json`: 5.1 strips the inner
     #    quotes from a JSON argument to a native exe.
     if (Get-Command claude -ErrorAction SilentlyContinue) {
-        & claude mcp get atlas *> $null
+        Invoke-Native { & claude mcp get atlas *> $null }
         if ($LASTEXITCODE -eq 0) {
             Write-Mute 'atlas already registered with Claude Code CLI; leaving it unchanged (claude mcp get atlas shows its URL).'
         } else {
             Write-Warn 'Registering atlas with Claude Code CLI ...'
-            & claude mcp add --transport http --scope user atlas $desiredAtlasServerHttp.url 2>&1 | Out-Host
+            Invoke-Native { & claude mcp add --transport http --scope user atlas $desiredAtlasServerHttp.url 2>&1 | Out-Host }
             if ($LASTEXITCODE -ne 0) {
                 Write-Warn "claude mcp add exited with code $LASTEXITCODE. Register it yourself: claude mcp add --transport http --scope user atlas $($desiredAtlasServerHttp.url)"
             } else {
@@ -941,7 +954,7 @@ function Invoke-Bootstrap {
     $claudeInstalled = (Get-Command claude -ErrorAction SilentlyContinue) -ne $null
     $ghNeedsAuth     = $false
     if (Get-Command gh -ErrorAction SilentlyContinue) {
-        & gh auth status 2>$null | Out-Null
+        Invoke-Native { & gh auth status 2>$null | Out-Null }
         if ($LASTEXITCODE -ne 0) { $ghNeedsAuth = $true }
     }
 

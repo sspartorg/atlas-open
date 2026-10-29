@@ -23,7 +23,7 @@ const httpsPort = process.env.ATLAS_HTTPS_PORT;
 const viteBin = join(dirname(createRequire(import.meta.url).resolve('vite/package.json')), 'bin', 'vite.js');
 const [cmd, args] = httpsPort
     ? ['caddy', ['run', '--config', join(WEB, 'Caddyfile'), '--adapter', 'caddyfile']]
-    : [process.execPath, [viteBin, 'preview', '--host', ...process.argv.slice(2)]];
+    : [process.execPath, [viteBin, 'preview', ...process.argv.slice(2)]];
 
 const child = spawn(cmd, args, {
     cwd: WEB,

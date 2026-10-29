@@ -50,6 +50,9 @@ export function useSettings() {
         // browser hard-reload.
         refetchOnWindowFocus: true,
         refetchOnReconnect: false,
+        // API unreachable: keep trying, so RouteGuard's "can't reach" screen
+        // clears by itself once the API is back.
+        refetchInterval: (q) => (q.state.status === 'error' ? 5_000 : false),
     });
 }
 

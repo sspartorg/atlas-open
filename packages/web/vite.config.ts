@@ -14,14 +14,18 @@ import { visualizer } from 'rollup-plugin-visualizer';
 // Otherwise reads .env (dev defaults). Mirrors packages/api/src/load-env.ts
 // so vite's WEB_PORT / API_PROXY_TARGET come from the same source of truth
 // as the API's DATABASE_URL / API_PORT.
-const isProd = process.env.ATLAS_ENV?.toLowerCase() === 'prod';
+const isProd = process.env['ATLAS_ENV']?.toLowerCase() === 'prod';
 const envFile = isProd ? '.env.prod' : '.env';
 loadDotenv({ path: path.resolve(__dirname, '..', '..', envFile) });
 
 // Prefer WEB_PORT so dev/prod/E2E never fight over a shared PORT var. Fall
 // back to PORT for tools that only set the generic var.
-const WEB_PORT = Number(process.env.WEB_PORT ?? process.env.PORT) || 4300;
-const API_TARGET = process.env.API_PROXY_TARGET || 'http://127.0.0.1:4301';
+const WEB_PORT = Number(process.env['WEB_PORT'] ?? process.env['PORT']) || 4300;
+const API_TARGET = process.env['API_PROXY_TARGET'] || 'http://127.0.0.1:4301';
+// The web proxies /api to an API with no login, so it listens on this machine
+// only, like the API. ATLAS_LAN_ACCESS=true (the same .env switch the API
+// reads) opens it to the network. Vite's own `--host` would bind 0.0.0.0.
+const HOST = process.env['ATLAS_LAN_ACCESS'] === 'true' ? true : '127.0.0.1';
 
 // Production is served by `vite preview` (`pnpm start`), which gzips on the
 // fly and marks every file `Cache-Control: no-cache`. For hashed assets that
@@ -126,6 +130,7 @@ export default defineConfig(({ mode }) => ({
   },
   server: {
     port: WEB_PORT,
+    host: HOST,
     // Accept LAN mDNS hostnames (e.g. http://mymac.local:4300) so the dev
     // server can be reached from other machines on the network — Vite's
     // default host check only allows localhost. Leading dot = any *.local.
@@ -146,6 +151,7 @@ export default defineConfig(({ mode }) => ({
   // without the browser tripping CORS preflight.
   preview: {
     port: WEB_PORT,
+    host: HOST,
     allowedHosts: ['.local'],
     proxy: {
       '/api': {

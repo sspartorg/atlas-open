@@ -58,6 +58,11 @@ describe('TerminalLayout', () => {
         await waitFor(() => expect(screen.getByText(/0 \/ 1 attached/i)).toBeInTheDocument());
     });
 
+    it('names the page with an h1 for screen readers', async () => {
+        renderWithProviders(<TerminalLayout />, { initialEntries: ['/terminal/layout'] });
+        expect(await screen.findByRole('heading', { level: 1, name: 'Terminal layout' })).toBeInTheDocument();
+    });
+
     it('renders "Empty pane" placeholder when no session is attached', async () => {
         renderWithProviders(<TerminalLayout />, { initialEntries: ['/terminal/layout'] });
         await waitFor(() => expect(screen.getByText(/Empty pane/i)).toBeInTheDocument());

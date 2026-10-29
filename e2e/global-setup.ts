@@ -1,4 +1,4 @@
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'util';
 import { writeFileSync, mkdirSync, existsSync, createWriteStream, rmSync } from 'node:fs';
 import { resolve, join, dirname, delimiter } from 'node:path';
@@ -149,6 +149,34 @@ export interface ApiOptions {
     live?: boolean;
 }
 
+/**
+ * Windows: Node's execFile('gh') finds only gh.exe, never fixtures/fake-gh/gh.cmd,
+ * so the API would reach the real gh. Compile a gh.exe that forwards its raw
+ * command line to `node gh.mjs` with csc.exe (part of .NET Framework 4, on every
+ * Windows 10/11). Returns the folder to put first on PATH, or '' elsewhere.
+ */
+function fakeGhExeDir(): string {
+    if (process.platform !== 'win32') return '';
+    const dir = join(LOG_DIR, 'fake-gh-bin');
+    const exe = join(dir, 'gh.exe');
+    if (existsSync(exe)) return dir;
+    mkdirSync(dir, { recursive: true });
+    const script = join(REPO_ROOT, 'e2e', 'fixtures', 'fake-gh', 'gh.mjs');
+    const src = join(dir, 'gh.cs');
+    // C# verbatim strings (@"…") take the Windows paths as they are.
+    writeFileSync(src, `using System; using System.Diagnostics;
+class G { static int Main() {
+    string cl = Environment.CommandLine.TrimStart();
+    int i = cl.StartsWith("\\"") ? cl.IndexOf('"', 1) + 1 : cl.IndexOf(' ');
+    string rest = i <= 0 || i >= cl.Length ? "" : cl.Substring(i);
+    var p = Process.Start(new ProcessStartInfo(@"${process.execPath}", "\\"" + @"${script}" + "\\"" + rest) { UseShellExecute = false });
+    p.WaitForExit(); return p.ExitCode;
+} }`);
+    const csc = join(process.env['WINDIR'] ?? 'C:/Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe');
+    execFileSync(csc, ['/nologo', `/out:${exe}`, src], { stdio: 'ignore' });
+    return dir;
+}
+
 export function startApi(
     o: ApiOptions = { port: API_PORT, dbName: E2E_DB, aiEnabled: false, dataDir: E2E_DATA_DIR, envFile: E2E_ENV_FILE, logName: 'api.log' },
 ): ChildProcess {
@@ -224,7 +252,7 @@ export function startApi(
                 ...(o.live ? {} : fakeGithubGitEnv()),
                 // ...and a run's "open a PR" step reaches a fake `gh`
                 // (fixtures/fake-gh) instead of api.github.com.
-                PATH: `${o.extraPath ? `${o.extraPath}${delimiter}` : ''}${o.live ? '' : `${join(REPO_ROOT, 'e2e', 'fixtures', 'fake-gh')}${delimiter}`}${process.env['PATH'] ?? ''}`,
+                PATH: `${o.extraPath ? `${o.extraPath}${delimiter}` : ''}${o.live ? '' : `${fakeGhExeDir() ? `${fakeGhExeDir()}${delimiter}` : ''}${join(REPO_ROOT, 'e2e', 'fixtures', 'fake-gh')}${delimiter}`}${process.env['PATH'] ?? ''}`,
             },
             shell: process.platform === 'win32',
             // POSIX: lead a process group so teardown can stop pnpm AND the

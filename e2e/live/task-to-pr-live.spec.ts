@@ -19,6 +19,8 @@ test.skip(process.env['E2E_LIVE_PR'] !== '1', 'live PR spec: set E2E_LIVE_PR=1')
 test.describe.configure({ mode: 'serial', timeout: 20 * 60_000 });
 
 const REPO = process.env['LIVE_GH_REPO'] ?? 'sspartorg/atlas-open-sandbox';
+// Second repo for the multi-repo Task (its own README only).
+const REPO2 = process.env['LIVE_GH_REPO2'] ?? 'sspartorg/atlas-open-sandbox-2';
 const PORT = 7101;
 const API = `http://127.0.0.1:${PORT}`;
 const DB = 'atlas_open_live';
@@ -131,8 +133,10 @@ test.afterAll(async () => {
     }
     // Parked or failed runs push their branch too, and a fresh DB numbers Tasks
     // from LIV-1 again, so leave no atlas/task/LIV-* branch behind.
-    for (const ref of gh('api', `repos/${REPO}/git/matching-refs/heads/atlas/task/LIV-`, '--jq', '.[].ref').split('\n').filter(Boolean)) {
-        gh('api', '-X', 'DELETE', `repos/${REPO}/git/${ref}`);
+    for (const repo of [REPO, REPO2]) {
+        for (const ref of gh('api', `repos/${repo}/git/matching-refs/heads/atlas/task/LIV-`, '--jq', '.[].ref').split('\n').filter(Boolean)) {
+            gh('api', '-X', 'DELETE', `repos/${repo}/git/${ref}`);
+        }
     }
     kill(api);
 });
@@ -172,6 +176,37 @@ test('happy path: a Task becomes a PR with the agent’s change', async ({ reque
     expect(run.pr_url).toContain(`github.com/${REPO}/pull/`);
     expect(gh('pr', 'diff', run.pr_url!)).toContain(line);
     expect((await get<{ status: string }>(request, `/api/tasks/${taskId}`)).status).toBe('in_review');
+});
+
+// README: "one PR per repo it touched". Two repos on the project, a change
+// in only the second: exactly one PR, on that repo.
+test('a multi-repo Task opens a PR only on the repo it changed', async ({ request }) => {
+    const add = await request.post(`${API}/api/projects/${projectId}/repos`, {
+        data: { mode: 'clone', name: 'sandbox2', repo_url: `https://github.com/${REPO2}`, credential_id: credId, default_branch: 'main' },
+    });
+    expect(add.status(), await add.text()).toBe(202);
+    const repo2 = async () =>
+        (await get<Array<{ id: string; name: string; clone_status: string }>>(request, `/api/projects/${projectId}/repos`)).find((r) => r.name === 'sandbox2');
+    await expect.poll(async () => (await repo2())?.clone_status, { timeout: 120_000 }).toBe('ready');
+    try {
+        const line = `Multi-repo line ${STAMP}`;
+        // With two repos the Task names the ones it works on: both.
+        const repoIds = (await get<Array<{ id: string }>>(request, `/api/projects/${projectId}/repos`)).map((r) => r.id);
+        const { id: taskId } = await post<{ id: string }>(request, '/api/tasks', {
+            project_id: projectId,
+            title: `Append to the sandbox2 README ${STAMP}`,
+            description: `This Task has two repos checked out side by side. Append exactly this line to the end of README.md in the sandbox2 repo only, and change nothing in the other repo:\n\n${line}`,
+            assignee_agent_id: 'agent-solo',
+            repo_ids: repoIds,
+        });
+        const run = await waitRun(request, taskId, (r) => r.status === 'completed', ['error', 'cancelled', 'waiting_for_owner']);
+        rememberPrs(run);
+        expect(run.pr_urls).toHaveLength(1);
+        expect(run.pr_urls[0]).toContain(`github.com/${REPO2}/pull/`);
+        expect(gh('pr', 'diff', run.pr_urls[0]!)).toContain(line);
+    } finally {
+        await request.delete(`${API}/api/projects/${projectId}/repos/${(await repo2())!.id}`);
+    }
 });
 
 test('a question parks the run; the Owner’s reply resumes it to a PR', async ({ request }) => {

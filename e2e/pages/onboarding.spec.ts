@@ -13,7 +13,7 @@ import { test, expect } from '@playwright/test';
 // are fully open. The `request` fixture is Node-side; relative URLs
 // work because the e2e API is bound to http://127.0.0.1:7001.
 
-import { API } from '../helpers/api.js';
+import { API, apiGet } from '../helpers/api.js';
 
 test.describe('/onboarding', () => {
     test.afterEach(async ({ request }) => {
@@ -69,4 +69,44 @@ test.describe('/onboarding', () => {
         // which navigates away after a 5 s success view; afterEach will
         // restore the flag cleanly instead.
     });
+
+    test('Finish Setup saves the name and workspace, then lands on the dashboard', async ({
+        page,
+        request,
+    }) => {
+        // Finish writes owner_name, workspace_path and accent_color; put back
+        // exactly what was there so later specs see the seeded settings.
+        const before = await apiGet<Settings>(request, '/api/settings');
+        try {
+            await request.post(`${API}/api/settings/test/clear-onboarding`);
+            await page.goto('/onboarding', { waitUntil: 'load' });
+            await page.getByLabel(/display name/i).fill('E2E Finisher');
+            await page.getByRole('button', { name: /next/i }).click();
+            // The seeded workspace, so Finish creates no new folder.
+            await page.getByLabel('Workspace folder').fill(before.workspace_path);
+            await page.getByRole('button', { name: /finish setup/i }).click();
+
+            await expect(page.getByText("You're all set.")).toBeVisible();
+            await expect(page).toHaveURL(/\/$/, { timeout: 15_000 });
+            const after = await apiGet<Settings>(request, '/api/settings');
+            expect(after.owner_name).toBe('E2E Finisher');
+            expect(after.workspace_path).toBe(before.workspace_path);
+            expect(after.onboarding_complete).toBeTruthy();
+            // Onboarded: /onboarding now redirects home.
+            await page.goto('/onboarding', { waitUntil: 'load' });
+            await expect(page).toHaveURL(/\/$/);
+        } finally {
+            await request.patch(`${API}/api/settings/profile`, { data: { accent_color: before.accent_color } });
+            await request.post(`${API}/api/settings/onboard`, {
+                data: { owner_name: before.owner_name, workspace_path: before.workspace_path },
+            });
+        }
+    });
 });
+
+interface Settings {
+    owner_name: string;
+    workspace_path: string;
+    accent_color: string;
+    onboarding_complete: number | boolean;
+}

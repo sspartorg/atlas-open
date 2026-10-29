@@ -12,6 +12,9 @@
 {
 	local_certs
 	admin off
+	# This machine only, like the API: /api has no login, and the site
+	# addresses above match by Host header, not by interface.
+	default_bind 127.0.0.1 [::1]
 }
 
 https://localhost:{$ATLAS_HTTPS_PORT}, https://127.0.0.1:{$ATLAS_HTTPS_PORT} {
