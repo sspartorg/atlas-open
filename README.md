@@ -43,7 +43,7 @@ Atlas (the commercial edition) adds workflows on top of everything above.
 |---|---|---|
 | Projects, multi-repo, Tasks, sub-tasks, issues, comments | Yes | Yes |
 | Agents, memory, checklists, agent tests | Yes | Yes |
-| Marketplace agents | Solo Engineer + 6 on-demand agents | Plus the 18-agent SDLC pipeline catalog (architect, coder, reviewers, fixers, QA...) |
+| Marketplace agents | Solo Engineer + 6 more agents | Plus the 18-agent SDLC pipeline catalog (architect, coder, reviewers, fixers, QA...) |
 | How a Task runs | One agent does the whole Task | Workflows: a chain of specialised agents, each with a small scoped context window, with pass/fail loops |
 | Jira bridge, guardrails, reminders, notifications, terminal, MCP | Yes | Yes |
 | Analytics | Basics: shipped, PRs merged, cycle time, spend | Plus delivery and workflow analytics |
@@ -81,7 +81,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
 ```
 
 `scripts/bootstrap.ps1` installs (or upgrades) Git, Node.js LTS, pnpm, Docker
-Desktop, GitHub CLI, GitHub Copilot CLI extension, and Claude Code CLI via
+Desktop, GitHub CLI, GitHub Copilot CLI (`npm i -g @github/copilot`), and Claude Code CLI via
 `winget`; enables WSL2 + Windows long paths; copies `.env` / `.env.prod` from
 their examples; generates a random `ATLAS_MCP_TOKEN`; runs `pnpm install`;
 brings Postgres up and applies migrations; registers `atlas` as an MCP server
@@ -125,12 +125,12 @@ bash scripts/bootstrap.sh
 (Homebrew on macOS, NodeSource on apt/dnf), pnpm ≥ 9 (via corepack), Docker
 (Docker Desktop on macOS; Docker Engine + Compose plugin on Linux, adding you
 to the `docker` group), and optionally GitHub CLI, the GitHub Copilot CLI
-extension and Claude Code CLI (`npm install -g @anthropic-ai/claude-code`). On
+(`npm i -g @github/copilot`) and Claude Code CLI (`npm install -g @anthropic-ai/claude-code`). On
 macOS without Homebrew it offers to install Homebrew first. Then it copies
 `.env` / `.env.prod` from their examples, generates a random
 `ATLAS_MCP_TOKEN`, runs `pnpm install`, brings Postgres up and migrates it,
-registers `atlas` with Claude Code CLI (the same `claude mcp add-json` call as
-the Windows script) and Copilot CLI, and finishes with `pnpm doctor`.
+registers `atlas` with Claude Code CLI (`claude mcp add-json`; the Windows
+script uses `claude mcp add --transport http`) and Copilot CLI, and finishes with `pnpm doctor`.
 
 It is idempotent: every step checks first and prints `keep:` when there is
 nothing to do, so re-running on a configured machine changes nothing. If a
@@ -162,7 +162,7 @@ Install these once, then never again:
 Optional (only matters once you start spawning real agent runs):
 
 - **Claude Code CLI** (`claude`) — for live agent runs with `ATLAS_AI_ENABLED=true`
-- **GitHub CLI** (`gh`) — only needed if you use GitHub PAT credentials and want the CLI's helpers
+- **GitHub CLI** (`gh`) — Atlas opens every pull request with `gh pr create`; without it, runs deliver a pushed branch but no PR
 - **Ollama** (`ollama`) — for the free, local `ollama` CLI option (see below)
 
 ---
@@ -207,15 +207,14 @@ Setup:
    ollama pull qwen3.5
    ```
 3. If your Ollama server isn't on the default `http://localhost:11434`, set
-   `ATLAS_OLLAMA_BASE_URL` in `.env` (or edit it under **Settings → Env**).
+   `ATLAS_OLLAMA_BASE_URL` in `.env` (or edit it under **Settings → Environment**).
 4. In Atlas, go to **Settings → Model Registry → Ollama** and make sure the
    models you actually pulled are listed. Three are seeded as a starting point;
    add or remove rows so the list matches `ollama list`.
 5. Pick **Ollama** as the CLI when creating an agent, or in the Terminal's
    Start Session dialog.
 
-Ollama runs record `$0` and are labelled Free in Analytics, so the per-CLI
-breakdown shows exactly what you saved.
+Ollama runs record `$0`, so they add nothing to Spend in Analytics.
 
 ---
 
@@ -226,7 +225,7 @@ git clone https://github.com/sspartorg/atlas-open.git
 cd atlas-open
 cp .env.example .env
 pnpm install
-pnpm doctor    # verifies Node, pnpm, Docker, and Postgres connectivity — run this first if anything later fails
+pnpm doctor    # verifies Node, pnpm, Git, and that the Docker engine is running — run this first if anything later fails
 pnpm dev
 ```
 
@@ -263,7 +262,7 @@ They live in the same repo, share `node_modules`, and never collide:
 | Postgres host port | `5600` | `5610` |
 | Postgres container | `atlas-open-postgres` | `atlas-open-postgres-prod` |
 | Postgres data volume | `atlas-open-pg` | `atlas-open-pg-prod` |
-| Postgres database | `atlas` | `atlas_open_prod` |
+| Postgres database | `atlas_open` | `atlas_open_prod` |
 | Env file | `.env` | `.env.prod` |
 | HMR / watch | ✅ vite HMR + tsx watch | ❌ vite preview + plain tsx |
 
@@ -329,7 +328,7 @@ be a one-liner.
 1. **`pnpm db:up`** — brings up the `atlas-open-postgres` container via
    `docker compose up -d postgres`. The compose file at the repo root pins
    pgvector/pgvector:pg16, host port 5600 → container port 5432, with
-   `atlas`/`atlas`/`atlas` defaults (matching `DATABASE_URL` in
+   `atlas`/`atlas`/`atlas_open` (user/password/database) defaults (matching `DATABASE_URL` in
    `.env.example`).
 2. **`pnpm db:wait`** — polls until Postgres accepts a connection (≤60 s).
 3. **`pnpm db:migrate`** — applies Knex migrations from
@@ -419,7 +418,7 @@ stack — useful for headless / CI runs, but then no client can connect.
 From any directory:
 
 ```powershell
-claude mcp add-json atlas --scope user '{\"url\":\"http://127.0.0.1:4600/mcp\"}'
+claude mcp add --transport http --scope user atlas http://127.0.0.1:4600/mcp
 ```
 
 Verify with `claude mcp list` — you want `atlas ✓ Connected`. The `--scope
@@ -609,7 +608,7 @@ When new commits land on `main`:
 
 1. `git pull`
 2. `pnpm install` — in case dependencies changed.
-3. `pnpm db:migrate` — in case the schema changed. **Required if you use `pnpm start`**; auto-runs at boot if you only use `pnpm dev`.
+3. `pnpm db:migrate` — in case the schema changed. `pnpm start` and `pnpm dev` both run it for you; run it by hand only if you start the API some other way.
 4. Restart the API (`pnpm dev` or `pnpm start`).
 
 If the migration step fails, the API refuses to start: it prints `[boot] migration failed, refusing to start:` with the underlying error and exits with code 1. Read the error and either fix your `.env` / Postgres state, or use the in-app **Report a bug** link (sidenav footer + `Settings → Help & About`). The link opens `ATLAS_FEEDBACK_URL`; point it at the issue tracker you want (for example `https://github.com/sspartorg/atlas-open/issues`), a `mailto:` URL, or leave it blank to hide the link.
