@@ -38,6 +38,7 @@ type Run = {
 
 let api: ChildProcess | null = null;
 let projectId = '';
+let credId = '';
 const prBranches = new Set<string>();
 
 const gh = (...args: string[]) => execFileSync('gh', args, { encoding: 'utf8' }).trim();
@@ -104,11 +105,12 @@ test.beforeAll(async ({ request }) => {
     writeFileSync(ENV_FILE, 'ATLAS_LOG_LEVEL=error\n');
     await dropAndCreateDb(DB);
     await migrate(DB);
-    await seed(DB);
+    await seed(DB, join(DATA, 'fixtures')); // own dir: a `pnpm e2e` beside this one holds the default open
     api = boot();
     await waitForUrl(`${API}/api/health`, 'live api', 120_000);
 
     const cred = await post<{ id: string }>(request, '/api/credentials', { label: `live-${STAMP}`, token: gh('auth', 'token') });
+    credId = cred.id;
     projectId = (await post<{ id: string }>(request, '/api/projects', { name: `Live ${STAMP}`, issue_key_prefix: 'LIV' })).id;
     const clone = await request.post(`${API}/api/projects/${projectId}/repos`, {
         data: { mode: 'clone', name: 'sandbox', repo_url: `https://github.com/${REPO}`, credential_id: cred.id, default_branch: 'main' },
@@ -133,6 +135,31 @@ test.afterAll(async () => {
         gh('api', '-X', 'DELETE', `repos/${REPO}/git/${ref}`);
     }
     kill(api);
+});
+
+// X1: a stored secret never comes back from a list or get.
+test('no stored token appears in a credential or Jira settings response', async ({ request }) => {
+    const token = gh('auth', 'token');
+    for (const path of ['/api/credentials', `/api/credentials/${credId}`, '/api/integrations/jira', '/api/settings']) {
+        const body = await (await request.get(`${API}${path}`)).text();
+        expect(body, path).not.toContain(token);
+        if (process.env['LIVE_JIRA_TOKEN']) expect(body, path).not.toContain(process.env['LIVE_JIRA_TOKEN']);
+    }
+});
+
+// The README's "an MCP server so your AI CLI can drive Atlas": the Owner's own
+// `claude`, given only this instance's MCP, creates a Task.
+test('the Owner’s claude CLI creates a Task through the Atlas MCP', async ({ request }) => {
+    const cfg = join(DATA, 'owner-mcp.json');
+    writeFileSync(cfg, JSON.stringify({ mcpServers: { atlas: { type: 'http', url: 'http://127.0.0.1:7601/mcp' } } }));
+    const title = `MCP owner ${STAMP}`;
+    execFileSync(
+        'claude',
+        ['-p', '--model', 'claude-haiku-5-5', '--strict-mcp-config', '--mcp-config', cfg, '--allowedTools', 'mcp__atlas__create_item'],
+        { shell: process.platform === 'win32', input: `Use the atlas create_item tool once: issue_type "task", payload { "project_id": "${projectId}", "title": "${title}" }. Then reply "done".`, encoding: 'utf8', timeout: 5 * 60_000 },
+    );
+    const tasks = await get<Array<{ title: string; status: string }>>(request, `/api/tasks?project_id=${projectId}`);
+    expect(tasks.find((t) => t.title === title)).toMatchObject({ status: 'draft' });
 });
 
 test('happy path: a Task becomes a PR with the agent’s change', async ({ request }) => {
