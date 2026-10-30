@@ -3,6 +3,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { gitBash } from '../src/services/git-env.js';
 
 // scripts/bootstrap.sh, actually executed.
 //
@@ -20,11 +21,11 @@ import { describe, expect, it } from 'vitest';
 // stubbed.
 
 const SCRIPT = resolve(__dirname, '../../../scripts/bootstrap.sh');
-const BASH = execFileSync('bash', ['-c', 'command -v bash'], { encoding: 'utf8' }).trim();
+const BASH = execFileSync(gitBash(), ['-c', 'command -v bash'], { encoding: 'utf8' }).trim();
 // What Node spawns: under Git Bash, BASH is /usr/bin/bash, which Windows cannot
 // launch, so ask for its Windows path. Shebangs keep BASH.
 const BASH_EXE = process.platform === 'win32'
-    ? execFileSync('bash', ['-c', 'cygpath -w "$(command -v bash)"'], { encoding: 'utf8' }).trim()
+    ? execFileSync(gitBash(), ['-c', 'cygpath -w "$(command -v bash)"'], { encoding: 'utf8' }).trim()
     : BASH;
 const REAL_TOOLS = ['sed', 'tr', 'head', 'grep', 'awk', 'cat', 'dirname', 'id', 'mktemp', 'chmod', 'mv', 'cp', 'mkdir', 'base64', 'openssl'];
 
@@ -46,7 +47,7 @@ function sandbox(stubs: Stubs, opts: { osRelease?: string } = {}) {
     writeFileSync(join(root, '.env.example'), 'POSTGRES_USER=\nATLAS_MCP_TOKEN=\n');
     writeFileSync(join(root, '.env.prod.example'), 'ATLAS_MCP_TOKEN=\n');
     for (const tool of REAL_TOOLS) {
-        const real = spawnSync('bash', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim();
+        const real = spawnSync(gitBash(), ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim();
         // A wrapper, not a symlink: `real` is a bash path (/usr/bin/sed under
         // Git Bash, which Node cannot resolve) and Windows symlinks need admin.
         if (real) writeExecutable(join(bin, tool), `exec ${real} "$@"`);
@@ -240,7 +241,7 @@ describe('scripts/bootstrap.sh', () => {
 
     // shellcheck ships on GitHub's ubuntu runners, so CI lints the script
     // through this test; a dev box without it skips (absence of evidence).
-    const shellcheck = spawnSync('bash', ['-c', 'command -v shellcheck'], { encoding: 'utf8' }).stdout.trim();
+    const shellcheck = spawnSync(gitBash(), ['-c', 'command -v shellcheck'], { encoding: 'utf8' }).stdout.trim();
     it.skipIf(!shellcheck)('is shellcheck-clean', () => {
         const r = spawnSync(shellcheck, [SCRIPT], { encoding: 'utf8' });
         expect(r.status, r.stdout).toBe(0);

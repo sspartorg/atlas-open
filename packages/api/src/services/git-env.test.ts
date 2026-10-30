@@ -10,7 +10,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { explainGitAuth, gitInvokeEnv } from './git-env.js';
+import { explainGitAuth, gitBash, gitInvokeEnv } from './git-env.js';
 
 /** A fresh git-env (it caches the system config) reading `systemConfig` as /etc/gitconfig. */
 async function withSystemConfig(dir: string, systemConfig: string) {
@@ -137,5 +137,20 @@ describe('explainGitAuth', () => {
 
     it('leaves every other failure as it was', () => {
         expect(explainGitAuth('Push failed: non-fast-forward')).toBe('Push failed: non-fast-forward');
+    });
+});
+
+// WSL's System32 bash comes first on PATH wherever WSL is installed; it can't
+// run a script in a Windows temp dir (live gate run, 2026-10-30).
+describe('gitBash', () => {
+    it.runIf(process.platform === 'win32')("is Git for Windows' bash, never WSL's launcher", () => {
+        expect(gitBash()).toMatch(/[\\/]bin[\\/]bash\.exe$/i);
+        expect(gitBash()).not.toMatch(/system32/i);
+        expect(existsSync(gitBash())).toBe(true);
+        expect(execFileSync(gitBash(), ['-c', 'cygpath -w /'], { encoding: 'utf8' })).toMatch(/^[A-Z]:[\\/]/);
+    });
+
+    it.runIf(process.platform !== 'win32')('is bash from PATH elsewhere', () => {
+        expect(gitBash()).toBe('bash');
     });
 });

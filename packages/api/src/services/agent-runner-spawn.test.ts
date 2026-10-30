@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { agentRunEnv, allowedToolsFor, claudeIsolationArgs, cliArgs, copilotDenyToolArgs } from './agent-runner.js';
+import { agentRunEnv, allowedToolsFor, claudeIsolationArgs, cliArgs, copilotDenyToolArgs, copilotTaskCompleteSummary } from './agent-runner.js';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -225,4 +225,30 @@ describe('cliArgs — git commit / push / gh are blocked', () => {
             expect(args).toContain('--allow-all-tools');
         });
     }
+
+    // Autopilot's final report lives only in the session log (live run, 2026-10-30).
+    it('copilotTaskCompleteSummary reads the task_complete summary named by the resume trailer', () => {
+        const home = mkdtempSync(join(tmpdir(), 'copilot-home-'));
+        const id = 'b42c34af-3a5d-40d7-852e-6c0787932581';
+        mkdirSync(join(home, 'session-state', id), { recursive: true });
+        const report = '```atlas-outcome\noutcome: done\n```';
+        writeFileSync(join(home, 'session-state', id, 'events.jsonl'), [
+            JSON.stringify({ type: 'assistant.message', data: { content: '' } }),
+            JSON.stringify({ type: 'session.task_complete', data: { summary: report } }),
+            JSON.stringify({ type: 'session.shutdown', data: {} }),
+        ].join('\n'));
+        try {
+            expect(copilotTaskCompleteSummary(`● Edit\n[stderr] Resume     copilot --resume=${id}\n`, home)).toBe(report);
+            expect(copilotTaskCompleteSummary('no trailer', home)).toBeNull();
+            expect(copilotTaskCompleteSummary('copilot --resume=00000000-0000-0000-0000-000000000000', home)).toBeNull();
+        } finally {
+            rmSync(home, { recursive: true, force: true });
+        }
+    });
+
+    // Copilot exits 1 on `--model auto --effort <x>`; named models keep the knob.
+    it('copilot omits --effort for model auto only', () => {
+        expect(cliArgs({ ...base, cli: 'copilot', model: 'auto', itemAttached: true })).not.toContain('--effort');
+        expect(cliArgs({ ...base, cli: 'copilot', itemAttached: true })).toEqual(expect.arrayContaining(['--effort', 'medium']));
+    });
 });

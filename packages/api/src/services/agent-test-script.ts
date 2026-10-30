@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gitBash } from './git-env.js';
 
 // The Owner's own check for an agent test (ADR 0023 amendment).
 //
@@ -13,8 +14,8 @@ import { join } from 'node:path';
 // Same trust as a project's setup script: the Owner wrote it and it runs on
 // the Owner's machine. It sees only the evidence folder, never the repo.
 //
-// ponytail: bash only. Add a `body_ps1` twin, as guard-rail scripts have, if a
-// Windows host ever runs agent tests.
+// ponytail: bash only (Git Bash on Windows, see `gitBash`). Add a `body_ps1`
+// twin, as guard-rail scripts have, if Windows Owners want PowerShell checks.
 
 const TIMEOUT_MS = 60_000;
 /** What a failure message quotes from the script's output. */
@@ -44,7 +45,7 @@ export async function runTestScript(bodySh: string, evidence: ScriptEvidence): P
 
         return await new Promise<ScriptResult>((resolve) => {
             let out = '';
-            const child = spawn('bash', ['check.sh'], { cwd: dir, windowsHide: true });
+            const child = spawn(gitBash(), ['check.sh'], { cwd: dir, windowsHide: true });
             const timer = setTimeout(() => {
                 child.kill('SIGKILL');
                 resolve({ kind: 'errored', reason: `the script ran past ${TIMEOUT_MS / 1000}s` });

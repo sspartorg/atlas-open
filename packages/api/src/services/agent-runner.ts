@@ -463,12 +463,36 @@ function startedAtOf(row: { started_at?: unknown } | undefined): string | null {
     return typeof v === 'string' ? v : null;
 }
 
+const COPILOT_RESUME_RE = /copilot --resume=([0-9a-f-]{36})/;
+
+/**
+ * Autopilot ends a Copilot run with a `task_complete` tool call. Its summary is
+ * the agent's final report (the `atlas-outcome` block included), and Copilot
+ * writes it only to the session log, never to stdout. The session id comes
+ * from the `Resume copilot --resume=<id>` trailer line.
+ */
+export function copilotTaskCompleteSummary(output: string, home: string = copilotHome()): string | null {
+    const id = COPILOT_RESUME_RE.exec(output)?.[1];
+    if (!id) return null;
+    try {
+        const lines = readFileSync(join(home, 'session-state', id, 'events.jsonl'), 'utf8').split('\n');
+        for (let i = lines.length - 1; i >= 0; i--) {
+            if (!lines[i]!.includes('"session.task_complete"')) continue;
+            const summary = (JSON.parse(lines[i]!) as { data?: { summary?: unknown } }).data?.summary;
+            return typeof summary === 'string' ? summary : null;
+        }
+    } catch {
+        // No session log (relocated, cleaned up): the run parks as before.
+    }
+    return null;
+}
+
 export async function completeRun(
     runId: string,
     agentId: string,
     issueType: IssueType | null,
     issueId: string | null,
-    output: string,
+    cliOutput: string,
 ): Promise<void> {
     const now = new Date().toISOString();
     // Look up the agent's CLI so the cost parser picks the right NDJSON
@@ -476,6 +500,11 @@ export async function completeRun(
     // mid-run) falls back to Claude.
     const agent = await getAgent(agentId);
     const cli: AgentCli = agent?.cli ?? 'claude';
+    let output = cliOutput;
+    if (CLI_DIALECT[cli] === 'copilot' && !parseRunOutcome(output)) {
+        const summary = copilotTaskCompleteSummary(output);
+        if (summary) output = `${output}\n${summary}\n`;
+    }
     const cost = parseCostFromOutput(output, cli);
     // If the Owner clicked Stop mid-flight the row is already `cancelled`.
     // Keep that status; the output + cost were earned regardless.
@@ -1072,13 +1101,14 @@ export function cliArgs(opts: {
 }): string[] {
     const { cli, model, effort, itemAttached, runId, slug, cwd } = opts;
     const dialect = CLI_DIALECT[cli];
-    const copilotTrigger = `Execute the atlas-${slug} agent — read .atlas/constitution.md, .atlas/current-task.md, .atlas/outcome.md, and the relevant template, then complete the work.`;
+    const copilotTrigger = `Execute the atlas-${slug} agent — read .atlas/constitution.md, .atlas/current-task.md, .atlas/outcome.md, and the relevant template, then complete the work. Your final summary (task_complete) must be the \`atlas-outcome\` block from .atlas/outcome.md.`;
 
     // `--effort` is omitted on the Ollama dialect. Ollama's docs scope thinking
     // controls to "compatible models" only, and most local models have no
     // thinking mode at all — a rejected flag fails the whole run, which is a
-    // far worse trade than losing the knob. Claude proper keeps it.
-    const effortArgs = cli === 'ollama' ? [] : ['--effort', effort];
+    // far worse trade than losing the knob. Claude proper keeps it. Copilot's
+    // `auto` (the only model some plans may name) rejects the flag outright.
+    const effortArgs = cli === 'ollama' || (cli === 'copilot' && model === 'auto') ? [] : ['--effort', effort];
 
     const args = dialect === 'claude'
         ? [
