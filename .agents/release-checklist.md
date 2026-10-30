@@ -17,7 +17,7 @@
 - **Copilot CLI** — not installed on this laptop. Copilot itemless runs still read `~/.copilot/mcp-config.json` (see R10).
 - **Multi-repo Task live** — needs a second sandbox repo; creating one was blocked by the permission classifier. Covered by `workflow-engine.integration.test.ts` with real git.
 - **Teams** — no credentials; tested only against a local webhook receiver (hermetic notification specs and `pnpm e2e:live`'s quiet-hours spec).
-- **`prod:https`** — Caddy not installed (optional).
+- **`prod:https`** — PASS 2026-10-30, see T4-HTTPS (optional).
 
 **For the Owner's own machine** (gitignored files / existing containers, not changed by this branch)
 - `.env.prod`: set `DATABASE_URL=postgres://atlas:atlas@127.0.0.1:5610/atlas_open_prod` (R18).
@@ -157,11 +157,13 @@ responsive sweep, the installer run for real from a fresh clone, and failure pro
 | T2-UI | ui | New journeys driven through the UI, asserted after reload: agent lifecycle (7), marketplace install, Run now + log download, Queue cancel, scratch pad autosave, search click-through, terminal history, onboarding Finish, run page Resume/Stop. | PASS |
 | T2-MULTI | live | Two-repo Task with real `claude` + GitHub (`sspartorg/atlas-open-sandbox-2`): one PR, on the repo it changed. | PASS |
 | T4-SEC | security | API and MCP bind 127.0.0.1; browser storage holds UI preferences only. | PASS |
+| T4-HTTPS | 4 | `pnpm prod:https` with Caddy 2.11.7 (winget): pages and `/api` served over HTTP/2; SPA routes fall back to index.html; `/.vite/*` 404; hashed assets `immutable` + Brotli, index `no-cache`; SSE `/api/events` streams; the terminal WebSocket upgrades through Caddy (API answers 4401 without a token). `default_bind` holds: TCP and HTTP/3 UDP listen on 127.0.0.1/::1 only, LAN refused. Optional — `pnpm prod` and `pnpm dev` don't need Caddy. | PASS 2026-10-30 |
+| R31 | cosmetic | The prod API logged `(env: dev)`: the label read `NODE_ENV`, which `pnpm prod` never sets. Now reads `ATLAS_ENV`, the switch load-env uses. | Fixed |
 | T4-PG | security | The Owner's two Postgres containers recreated (`docker rm -f` + `db:up` / `db:up:prod`): both publish on 127.0.0.1 only (5600, 5610). The named volumes kept every database (dev, e2e, live, test, prod). | Done 2026-10-30 |
 
 **Final state:** `pnpm gate` green (shared 260, mcp 134, web 4340, api 3343 + 3 skipped; bundle in budget). `pnpm e2e` across all 7 projects: **867 passed, 0 failed** (374 skipped: Linux-only visual baselines, live specs without their flags).
 
 **Still open**
 - Copilot CLI: installed by the bootstrap run (1.0.105) but not signed in; Copilot agent runs untested (Owner decision: later).
-- `prod:https` (Caddy) still not run here; the `default_bind` line is untested at runtime.
+- `caddy trust` not run (adds a root CA to the Windows store — the Owner's call). Until then browsers warn, and the service worker (`/sw.js`) won't register over HTTPS.
 - CI runs `build` only. The hermetic e2e and unit suites run on this laptop only.
