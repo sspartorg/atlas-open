@@ -8,6 +8,18 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # The API tests need Postgres; tests/_global-setup.ts creates atlas_open_test.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: atlas
+          POSTGRES_PASSWORD: atlas
+          POSTGRES_DB: atlas_open
+        ports: ['5600:5432']
+        options: >-
+          --health-cmd "pg_isready -U atlas -d atlas_open"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
 
@@ -22,4 +34,5 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm -r build
+      # typecheck, lint, knip, unit tests with coverage, build, bundle budget
+      - run: pnpm gate
