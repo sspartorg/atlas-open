@@ -37,6 +37,27 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { dataDir } from './crypto.js';
 
+let bashBin: string | undefined;
+/**
+ * The bash to spawn. On Windows a bare `bash` is often WSL's System32 launcher
+ * (first on PATH wherever WSL is installed, i.e. with Docker Desktop), which
+ * runs in Linux and can't use the Windows paths it is given. Git is required,
+ * so take Git for Windows' own: `<git>/mingw64/libexec/git-core` → `<git>/bin`.
+ */
+export function gitBash(): string {
+    if (bashBin !== undefined) return bashBin;
+    bashBin = 'bash';
+    if (process.platform === 'win32') {
+        try {
+            const exe = join(execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(), '..', '..', '..', 'bin', 'bash.exe');
+            if (existsSync(exe)) bashBin = exe;
+        } catch {
+            // No git: the bare name fails loudly where it's spawned.
+        }
+    }
+    return bashBin;
+}
+
 /**
  * Variables a running Claude Code session exports to its children. When Atlas
  * itself is started from a Claude Code terminal, every claude it spawns would
