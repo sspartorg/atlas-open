@@ -159,11 +159,12 @@ responsive sweep, the installer run for real from a fresh clone, and failure pro
 | T4-SEC | security | API and MCP bind 127.0.0.1; browser storage holds UI preferences only. | PASS |
 | T4-HTTPS | 4 | `pnpm prod:https` with Caddy 2.11.7 (winget): pages and `/api` served over HTTP/2; SPA routes fall back to index.html; `/.vite/*` 404; hashed assets `immutable` + Brotli, index `no-cache`; SSE `/api/events` streams; the terminal WebSocket upgrades through Caddy (API answers 4401 without a token). `default_bind` holds: TCP and HTTP/3 UDP listen on 127.0.0.1/::1 only, LAN refused. Optional — `pnpm prod` and `pnpm dev` don't need Caddy. | PASS 2026-10-30 |
 | R31 | cosmetic | The prod API logged `(env: dev)`: the label read `NODE_ENV`, which `pnpm prod` never sets. Now reads `ATLAS_ENV`, the switch load-env uses. | Fixed |
+| R32 | docs | README said `caddy trust` once; it fails ("requesting CA info … localhost:2019 refused") because the Caddyfile sets `admin off`. Caddy's own first-run install also failed silently (keytool). README now trusts `root.crt` directly per OS. | Fixed |
+| T4-HTTPS-TRUST | 4 | Root added with `certutil -user -addstore Root`; real Chrome and Edge, certificate checks on: 200, secure context, h2, `/sw.js` service worker registered, 0 console errors. | PASS 2026-10-30 |
 | T4-PG | security | The Owner's two Postgres containers recreated (`docker rm -f` + `db:up` / `db:up:prod`): both publish on 127.0.0.1 only (5600, 5610). The named volumes kept every database (dev, e2e, live, test, prod). | Done 2026-10-30 |
 
 **Final state:** `pnpm gate` green (shared 260, mcp 134, web 4340, api 3343 + 3 skipped; bundle in budget). `pnpm e2e` across all 7 projects: **867 passed, 0 failed** (374 skipped: Linux-only visual baselines, live specs without their flags).
 
 **Still open**
 - Copilot CLI: installed by the bootstrap run (1.0.105) but not signed in; Copilot agent runs untested (Owner decision: later).
-- `caddy trust` not run (adds a root CA to the Windows store — the Owner's call). Until then browsers warn, and the service worker (`/sw.js`) won't register over HTTPS.
 - CI runs `build` only. The hermetic e2e and unit suites run on this laptop only.
