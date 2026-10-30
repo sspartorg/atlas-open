@@ -16,7 +16,8 @@ import { apiPort } from './config.js';
 import { envFileService } from './services/env-file.js';
 import { gitInvokeEnv } from './services/git-env.js';
 
-const isDev = process.env['NODE_ENV'] !== 'production';
+// Same switch load-env uses to pick .env.prod; NODE_ENV is never set by `pnpm prod`.
+const isDev = process.env['ATLAS_ENV']?.toLowerCase() !== 'prod';
 
 // Node 15+ terminates the process on an unhandled promise rejection by
 // default. That's a sane production stance, but it means a single bad
