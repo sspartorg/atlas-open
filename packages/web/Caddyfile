@@ -6,8 +6,9 @@
 # and queues the rest; a cold page makes 30–65 requests. HTTP/2 multiplexes
 # them over one connection.
 #
-# The certificate comes from Caddy's own local CA. Trust it once with
-# `caddy trust` (asks for your password); until then the browser warns.
+# The certificate comes from Caddy's own local CA. Trust its root.crt once
+# (README, "Faster prod"); `caddy trust` can't, since admin is off. Until
+# then the browser warns.
 
 {
 	local_certs

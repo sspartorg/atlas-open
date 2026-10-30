@@ -295,15 +295,28 @@ the API. Measured on slow 4G it loads pages 5–25% sooner (ADR 0031).
 
 ```bash
 brew install caddy     # once (Linux: your package manager; Windows: winget install CaddyServer.Caddy)
-caddy trust            # once: trusts Caddy's local CA (asks for your password)
-pnpm prod:https        # https://localhost:5643
+pnpm prod:https        # https://localhost:5643 — the first run creates Caddy's local CA
+```
+
+The browser warns until you trust that CA once. Caddy tries on first run but
+can fail quietly (it runs in the background), and `caddy trust` doesn't work
+here because the Caddyfile turns Caddy's admin API off. Trust the root file
+directly:
+
+```bash
+# Windows (PowerShell; click Yes on the prompt)
+certutil -user -addstore Root "$env:APPDATA\Caddy\pki\authorities\local\root.crt"
+# macOS
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/Library/Application\ Support/Caddy/pki/authorities/local/root.crt
+# Linux (Debian/Ubuntu)
+sudo cp ~/.local/share/caddy/pki/authorities/local/root.crt /usr/local/share/ca-certificates/caddy-local.crt && sudo update-ca-certificates
 ```
 
 It sets `ATLAS_HTTPS_PORT=5643`, which makes the web serve via Caddy
 (`packages/web/Caddyfile`, started by `scripts/serve.mjs`) and makes the API
 trust `https://localhost:5643` as a browser origin. Plain `pnpm prod` is
-unchanged. LAN access over HTTPS isn't covered — LAN devices keep using
-`http://<ip>:5300`.
+unchanged. Caddy listens on this machine only; LAN access over HTTPS isn't
+covered (see the LAN section for `ATLAS_LAN_ACCESS`).
 
 Useful prod-side scripts (all driven by `cross-env ATLAS_ENV=prod`):
 
