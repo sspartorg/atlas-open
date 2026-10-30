@@ -21,7 +21,7 @@
 
 **For the Owner's own machine** (gitignored files / existing containers, not changed by this branch)
 - `.env.prod`: set `DATABASE_URL=postgres://atlas:atlas@127.0.0.1:5610/atlas_open_prod` (R18).
-- The existing Postgres containers still publish on 0.0.0.0; `docker rm -f atlas-open-postgres atlas-open-postgres-prod && pnpm db:up` recreates them on 127.0.0.1 (data stays in the volumes).
+- ~~The existing Postgres containers still publish on 0.0.0.0~~ — recreated on 127.0.0.1 on 2026-10-30 (T4-PG).
 
 ## Context
 The suites are 100% green, but green only covers what they test. Before publishing and marketing,
@@ -157,11 +157,11 @@ responsive sweep, the installer run for real from a fresh clone, and failure pro
 | T2-UI | ui | New journeys driven through the UI, asserted after reload: agent lifecycle (7), marketplace install, Run now + log download, Queue cancel, scratch pad autosave, search click-through, terminal history, onboarding Finish, run page Resume/Stop. | PASS |
 | T2-MULTI | live | Two-repo Task with real `claude` + GitHub (`sspartorg/atlas-open-sandbox-2`): one PR, on the repo it changed. | PASS |
 | T4-SEC | security | API and MCP bind 127.0.0.1; browser storage holds UI preferences only. | PASS |
+| T4-PG | security | The Owner's two Postgres containers recreated (`docker rm -f` + `db:up` / `db:up:prod`): both publish on 127.0.0.1 only (5600, 5610). The named volumes kept every database (dev, e2e, live, test, prod). | Done 2026-10-30 |
 
 **Final state:** `pnpm gate` green (shared 260, mcp 134, web 4340, api 3343 + 3 skipped; bundle in budget). `pnpm e2e` across all 7 projects: **867 passed, 0 failed** (374 skipped: Linux-only visual baselines, live specs without their flags).
 
 **Still open**
-- **Owner:** recreate the two Postgres containers so they publish on 127.0.0.1 (`db:up` reuses existing containers by design; new installs are fine). Data stays in the named volumes: `docker rm -f atlas-open-postgres atlas-open-postgres-prod && pnpm db:up && pnpm db:up:prod`.
 - Copilot CLI: installed by the bootstrap run (1.0.105) but not signed in; Copilot agent runs untested (Owner decision: later).
 - `prod:https` (Caddy) still not run here; the `default_bind` line is untested at runtime.
 - CI runs `build` only. The hermetic e2e and unit suites run on this laptop only.
